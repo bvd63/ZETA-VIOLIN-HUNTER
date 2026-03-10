@@ -5,6 +5,7 @@ Searches globally for Zeta electric violin listings and sends Telegram alerts.
 
 import asyncio
 import logging
+import re
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 from aiohttp import web
@@ -81,6 +82,53 @@ log = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 search_cycle_lock = asyncio.Lock()
+
+
+VIOLIN_TERMS = {
+    "violin", "violins", "violino", "violon", "viola", "fiddle",
+    "geige", "skrzypce", "violonul", "violinul", "violines", "violoniste",
+}
+
+ZETA_MODEL_TERMS = {
+    "strados",
+    "jazz fusion",
+    "jazz modern",
+    "jazz classic",
+    "strados legacy",
+    "acoustic-pro",
+    "acoustic pro",
+    "jv44",
+    "jv45",
+    "sv24",
+    "sv25",
+    "sv43",
+    "ev25",
+    "ev44",
+    "cv44",
+    "jlp",
+    "jean-luc ponty",
+}
+
+
+def _is_strict_zeta_violin(listing: dict) -> bool:
+    """Allow only Zeta violin-family listings, including explicit Zeta model names."""
+    text = " ".join([
+        str(listing.get("title", "")),
+        str(listing.get("description", "")),
+        str(listing.get("platform", "")),
+    ]).lower()
+
+    has_zeta = "zeta" in text or "zetta" in text
+    if not has_zeta:
+        return False
+
+    has_model_term = any(term in text for term in ZETA_MODEL_TERMS)
+    if has_model_term:
+        return True
+
+    tokens = set(re.findall(r"[a-zA-Z\u00C0-\u024F\u0400-\u04FF]+", text))
+    has_violin_term = any(term in tokens for term in VIOLIN_TERMS)
+    return has_violin_term
 
 
 def build_scrapers() -> list:
@@ -171,10 +219,17 @@ async def _run_scraper_with_resilience(scraper, db: Database, semaphore: asyncio
                 log.info(f"   Found {len(listings)} raw listings from {scraper.name}")
 
                 new_listings = []
+                dropped_non_zeta = 0
                 for listing in listings:
+                    if not _is_strict_zeta_violin(listing):
+                        dropped_non_zeta += 1
+                        continue
                     if not db.is_seen(listing["id"]):
                         db.mark_seen(listing["id"], listing)
                         new_listings.append(listing)
+
+                if dropped_non_zeta:
+                    log.info(f"   Filtered out {dropped_non_zeta} non-Zeta-violin listing(s) from {scraper.name}")
 
                 log.info(f"   ✅ {len(new_listings)} NEW listings from {scraper.name}")
                 return scraper.name, new_listings, len(new_listings)
