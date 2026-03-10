@@ -4,3 +4,4 @@ lxml==5.2.2
 apscheduler==3.10.4
 python-dotenv==1.0.1
 scrapy
+aiohttp==3.9.1
