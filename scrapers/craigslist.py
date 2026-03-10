@@ -54,6 +54,7 @@ class CraigslistScraper(BaseScraper):
                 craigslist_cities = craigslist_cities[:Config.CRAIGSLIST_MAX_US_CITIES]
 
             sem = asyncio.Semaphore(sem_size)
+            batch_size = max(50, sem_size * 8)
 
             async def fetch_city_keyword(city: str, kw: str, category: str) -> list:
                 city_results = []
@@ -107,15 +108,23 @@ class CraigslistScraper(BaseScraper):
                     log.warning(f"Craigslist {city} '{kw}' error: {e}")
                 return city_results
 
-            tasks = [
-                fetch_city_keyword(city, kw, cat)
+            work_items = [
+                (city, kw, cat)
                 for city in craigslist_cities
                 for kw in KEYWORDS
                 for cat in SEARCH_CATEGORIES
             ]
-            batches = await asyncio.gather(*tasks)
-            for batch in batches:
-                results.extend(batch)
+
+            # Process in bounded chunks to avoid huge coroutine/memory spikes on Railway.
+            for i in range(0, len(work_items), batch_size):
+                chunk = work_items[i:i + batch_size]
+                tasks = [
+                    asyncio.create_task(fetch_city_keyword(city, kw, cat))
+                    for city, kw, cat in chunk
+                ]
+                chunk_results = await asyncio.gather(*tasks)
+                for batch in chunk_results:
+                    results.extend(batch)
 
         if not results:
             results = await self._fallback_search(seen_ids)

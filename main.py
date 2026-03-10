@@ -209,24 +209,35 @@ async def run_search_cycle():
 
         all_new_listings = []
         platform_stats = {}
+        sent_any = False
 
         semaphore = asyncio.Semaphore(max(1, Config.SCRAPER_CONCURRENCY))
         tasks = [
-            _run_scraper_with_resilience(scraper, db, semaphore)
+            asyncio.create_task(_run_scraper_with_resilience(scraper, db, semaphore))
             for scraper in build_scrapers()
         ]
-        results = await asyncio.gather(*tasks)
 
-        for platform_name, new_listings, status in results:
+        for task in asyncio.as_completed(tasks):
+            platform_name, new_listings, status = await task
             all_new_listings.extend(new_listings)
             platform_stats[platform_name] = status
 
-        if all_new_listings:
-            log.info(f"\n📬 Sending {len(all_new_listings)} new listings to Telegram...")
-            await notifier.send_listings(all_new_listings)
-        else:
+            # Send immediately per-platform so results are not lost on container restarts.
+            if new_listings:
+                try:
+                    log.info(f"📬 Sending {len(new_listings)} new listing(s) from {platform_name} to Telegram...")
+                    await notifier.send_listings(new_listings)
+                    sent_any = True
+                except Exception as e:
+                    log.error(f"Telegram send error for {platform_name}: {e}")
+
+        if not all_new_listings:
             log.info("\n✅ No new listings found this cycle.")
             await notifier.send_no_changes()
+        elif not sent_any:
+            # Fallback: if incremental sends were skipped for any reason, send all once.
+            log.info(f"\n📬 Sending {len(all_new_listings)} new listings to Telegram...")
+            await notifier.send_listings(all_new_listings)
 
         db.close()
         log.info("=" * 80)
