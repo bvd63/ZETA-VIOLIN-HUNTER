@@ -62,6 +62,11 @@ class Config:
     MAX_YEAR = int(os.getenv("MAX_YEAR", "2014"))
 
     # --- Runtime hardening ---
-    SCRAPER_TIMEOUT_SEC = int(os.getenv("SCRAPER_TIMEOUT_SEC", "120"))
+    SCRAPER_TIMEOUT_SEC = int(os.getenv("SCRAPER_TIMEOUT_SEC", "900"))
     SCRAPER_RETRIES = int(os.getenv("SCRAPER_RETRIES", "1"))
     SCRAPER_CONCURRENCY = int(os.getenv("SCRAPER_CONCURRENCY", "4"))
+
+    # --- Craigslist coverage tuning ---
+    CRAIGSLIST_CONCURRENCY = int(os.getenv("CRAIGSLIST_CONCURRENCY", "24"))
+    # 0 means "use all discovered US Craigslist cities"
+    CRAIGSLIST_MAX_US_CITIES = int(os.getenv("CRAIGSLIST_MAX_US_CITIES", "0"))

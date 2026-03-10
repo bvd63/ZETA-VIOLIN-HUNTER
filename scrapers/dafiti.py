@@ -4,6 +4,7 @@ Dafiti scraper — Latin America fashion/music marketplace.
 
 import httpx
 import logging
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper
 from config import Config
@@ -15,11 +16,10 @@ class DafitiScraper(BaseScraper):
     name = "Dafiti"
 
     DAFITI_COUNTRIES = [
-        ("Brazil", "br"),
-        ("Argentina", "ar"),
-        ("Chile", "cl"),
-        ("Colombia", "co"),
-        ("Mexico", "mx"),
+        ("Brazil", "https://www.dafiti.com.br"),
+        ("Argentina", "https://www.dafiti.com.ar"),
+        ("Chile", "https://www.dafiti.cl"),
+        ("Colombia", "https://www.dafiti.com.co"),
     ]
 
     async def search(self) -> list:
@@ -31,14 +31,13 @@ class DafitiScraper(BaseScraper):
             "electric violin", "MIDI violin",
         ]
 
-        async with httpx.AsyncClient(timeout=15) as client:
-            for country, country_code in self.DAFITI_COUNTRIES:
+        network_failures = 0
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            for country, base_url in self.DAFITI_COUNTRIES:
                 for kw in keywords:
                     try:
-                        url = f"https://www.dafiti.com.{country_code}/search"
-                        params = {
-                            "q": kw,
-                        }
+                        url = f"{base_url}/catalog/"
+                        params = {"q": kw}
                         resp = await client.get(url, params=params, headers={
                             "User-Agent": "Mozilla/5.0 (compatible; ZetaHunter/1.0)"
                         })
@@ -46,22 +45,19 @@ class DafitiScraper(BaseScraper):
                             continue
 
                         soup = BeautifulSoup(resp.text, "html.parser")
-                        listings = soup.select("div.product")
+                        listings = soup.select("a[href*='/p/']")
 
-                        for item in listings:
-                            link_el = item.select_one("a")
-                            if not link_el:
-                                continue
-                            
+                        for link_el in listings:
                             item_url = link_el.get("href", "")
+                            if item_url.startswith("/"):
+                                item_url = f"{base_url}{item_url}"
                             unique_id = self._make_id("dafiti", item_url)
                             if unique_id in seen_ids:
                                 continue
                             seen_ids.add(unique_id)
 
-                            title = link_el.text.strip()
-                            price_el = item.select_one(".price")
-                            price = price_el.text.strip() if price_el else "N/A"
+                            title = link_el.get_text(" ", strip=True)
+                            price = "N/A"
 
                             if self._is_excluded(title):
                                 continue
@@ -71,7 +67,7 @@ class DafitiScraper(BaseScraper):
                                 continue
 
                             score = self._relevance_score(title)
-                            if score < 3:
+                            if score < 1:
                                 continue
 
                             results.append({
@@ -85,7 +81,12 @@ class DafitiScraper(BaseScraper):
                                 "relevance_score": score,
                             })
 
+                    except httpx.RequestError:
+                        network_failures += 1
                     except Exception as e:
-                        log.warning(f"Dafiti {country} '{kw}' error: {e}")
+                        log.warning(f"Dafiti {country} '{kw}' parse error: {e}")
+
+        if network_failures:
+            log.warning(f"Dafiti network failures: {network_failures}")
 
         return results

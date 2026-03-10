@@ -23,7 +23,8 @@ class TokopediaScraper(BaseScraper):
             "electric violin", "MIDI violin",
         ]
 
-        async with httpx.AsyncClient(timeout=15) as client:
+        network_failures = 0
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             for kw in keywords:
                 try:
                     url = "https://www.tokopedia.com/search"
@@ -76,7 +77,12 @@ class TokopediaScraper(BaseScraper):
                             "relevance_score": score,
                         })
 
+                except httpx.RequestError:
+                    network_failures += 1
                 except Exception as e:
-                    log.warning(f"Tokopedia '{kw}' error: {e}")
+                    log.warning(f"Tokopedia '{kw}' parse error: {e}")
+
+        if network_failures:
+            log.warning(f"Tokopedia network failures: {network_failures}")
 
         return results

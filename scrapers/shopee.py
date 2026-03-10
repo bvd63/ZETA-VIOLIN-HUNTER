@@ -15,12 +15,12 @@ class ShopeeScraper(BaseScraper):
     name = "Shopee"
 
     SHOPEE_COUNTRIES = [
-        ("Singapore", "sg"),
-        ("Malaysia", "my"),
-        ("Philippines", "ph"),
-        ("Thailand", "th"),
-        ("Vietnam", "vn"),
-        ("Indonesia", "id"),
+        ("Singapore", "https://shopee.sg"),
+        ("Malaysia", "https://shopee.com.my"),
+        ("Philippines", "https://shopee.ph"),
+        ("Thailand", "https://shopee.co.th"),
+        ("Vietnam", "https://shopee.vn"),
+        ("Indonesia", "https://shopee.co.id"),
     ]
 
     async def search(self) -> list:
@@ -32,11 +32,12 @@ class ShopeeScraper(BaseScraper):
             "electric violin", "MIDI violin",
         ]
 
-        async with httpx.AsyncClient(timeout=15) as client:
-            for country, country_code in self.SHOPEE_COUNTRIES:
+        network_failures = 0
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            for country, base_url in self.SHOPEE_COUNTRIES:
                 for kw in keywords:
                     try:
-                        url = f"https://shopee.{country_code}/search"
+                        url = f"{base_url}/search"
                         params = {
                             "keyword": kw,
                         }
@@ -86,7 +87,12 @@ class ShopeeScraper(BaseScraper):
                                 "relevance_score": score,
                             })
 
+                    except httpx.RequestError:
+                        network_failures += 1
                     except Exception as e:
-                        log.warning(f"Shopee {country} '{kw}' error: {e}")
+                        log.warning(f"Shopee {country} '{kw}' parse error: {e}")
+
+        if network_failures:
+            log.warning(f"Shopee network failures: {network_failures}")
 
         return results

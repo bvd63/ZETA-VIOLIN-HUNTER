@@ -70,8 +70,17 @@ class GoogleScraper(BaseScraper):
         ]
 
         async with httpx.AsyncClient(timeout=20) as client:
+            # Prioritize groups that include blocked/hard-to-scrape platforms.
+            prioritized_groups = [
+                SITE_GROUPS[1],  # facebook/craigslist/mercari
+                SITE_GROUPS[4],  # kleinanzeigen/leboncoin/subito/wallapop/marktplaats
+                SITE_GROUPS[5],  # willhaben/ricardo/blocket/finn/tori/allegro
+                SITE_GROUPS[0],
+                SITE_GROUPS[2],
+            ]
+
             for kw in primary_keywords:
-                for site_group in SITE_GROUPS[:5]:  # Limit to stay within free quota
+                for site_group in prioritized_groups:
                     try:
                         query = f"{kw} {site_group}"
                         params = {
