@@ -8,6 +8,7 @@ import logging
 import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
+from aiohttp import web
 
 from database import Database
 from notifier import TelegramNotifier
@@ -72,6 +73,30 @@ async def run_search_cycle():
     log.info("=" * 60)
     log.info("Search cycle complete.")
     log.info("=" * 60)
+    
+    return len(all_new_listings)
+
+
+async def handle_search(request):
+    """HTTP endpoint to trigger manual search."""
+    try:
+        count = await run_search_cycle()
+        return web.json_response({
+            "status": "success",
+            "message": f"Search completed. Found {count} new listings.",
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        log.error(f"Manual search error: {e}")
+        return web.json_response({
+            "status": "error",
+            "message": str(e)
+        }, status=500)
+
+
+async def handle_health(request):
+    """Health check endpoint."""
+    return web.json_response({"status": "healthy"})
 
 
 async def main():
@@ -92,6 +117,19 @@ async def main():
     scheduler.start()
     log.info(f"⏰ Scheduled to run daily at {Config.SEARCH_HOUR}:00 UTC")
 
+    # Start HTTP server
+    app = web.Application()
+    app.router.add_post('/search', handle_search)
+    app.router.add_get('/health', handle_health)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    log.info("🌐 HTTP server started on port 8080")
+    log.info("   POST /search - Trigger manual search")
+    log.info("   GET /health - Health check")
+
     # Keep running
     try:
         while True:
@@ -99,6 +137,7 @@ async def main():
     except (KeyboardInterrupt, SystemExit):
         log.info("Agent stopped.")
         scheduler.shutdown()
+        await runner.cleanup()
 
 
 if __name__ == "__main__":
