@@ -4,6 +4,8 @@ Telegram notifier — sends formatted alerts for new Zeta listings.
 
 import logging
 import httpx
+import html
+from urllib.parse import urlsplit, urlunsplit
 from config import Config
 
 log = logging.getLogger(__name__)
@@ -51,27 +53,52 @@ class TelegramNotifier:
         pass
 
     def _format_listing(self, idx: int, listing: dict) -> str:
-        price = listing.get("price", "N/A")
-        location = listing.get("location", "Unknown")
-        platform = listing.get("platform", "Unknown")
-        title = listing.get("title", "No title")
+        price = str(listing.get("price", "N/A"))
+        location = str(listing.get("location", "Unknown"))
+        platform = str(listing.get("platform", "Unknown"))
+        title = str(listing.get("title", "No title"))
         url = listing.get("url", "")
-        description = listing.get("description", "")
-        date_posted = listing.get("date_posted", "")
-        relevance = listing.get("relevance_score", "?")
+        description = str(listing.get("description", ""))
+        date_posted = str(listing.get("date_posted", ""))
+        relevance = str(listing.get("relevance_score", "?"))
+
+        safe_url = self._normalize_url(url)
+        safe_title = html.escape(title)
+        safe_price = html.escape(price)
+        safe_location = html.escape(location)
+        safe_platform = html.escape(platform)
+        safe_description = html.escape(description[:200])
 
         lines = [
-            f"🎻 <b>#{idx} — {title}</b>",
-            f"💰 <b>Price:</b> {price}",
-            f"📍 <b>Location:</b> {location}",
-            f"🛒 <b>Platform:</b> {platform}",
+            f"🎻 <b>#{idx} — {safe_title}</b>",
+            f"💰 <b>Price:</b> {safe_price}",
+            f"📍 <b>Location:</b> {safe_location}",
+            f"🛒 <b>Platform:</b> {safe_platform}",
         ]
         if date_posted:
-            lines.append(f"📅 <b>Posted:</b> {date_posted}")
+            lines.append(f"📅 <b>Posted:</b> {html.escape(date_posted)}")
         if description:
-            lines.append(f"📝 {description[:200]}...")
-        lines.append(f"⭐ <b>Relevance:</b> {relevance}/10")
-        if url:
-            lines.append(f"🔗 <a href='{url}'>View Listing</a>")
+            lines.append(f"📝 {safe_description}...")
+        lines.append(f"⭐ <b>Relevance:</b> {html.escape(relevance)}/10")
+        if safe_url:
+            lines.append(f"🔗 <a href=\"{html.escape(safe_url, quote=True)}\">View Listing</a>")
+            # Plain URL fallback: if Telegram refuses HTML link rendering, user still sees a clickable URL.
+            lines.append(safe_url)
 
         return "\n".join(lines)
+
+    def _normalize_url(self, raw_url: str) -> str:
+        if not raw_url:
+            return ""
+
+        url = str(raw_url).strip()
+        if url.startswith("//"):
+            url = "https:" + url
+
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https"):
+            return ""
+        if not parts.netloc:
+            return ""
+
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, parts.fragment))
