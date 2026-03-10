@@ -60,3 +60,8 @@ class Config:
     # --- Year filter ---
     MIN_YEAR = int(os.getenv("MIN_YEAR", "1980"))
     MAX_YEAR = int(os.getenv("MAX_YEAR", "2014"))
+
+    # --- Runtime hardening ---
+    SCRAPER_TIMEOUT_SEC = int(os.getenv("SCRAPER_TIMEOUT_SEC", "120"))
+    SCRAPER_RETRIES = int(os.getenv("SCRAPER_RETRIES", "1"))
+    SCRAPER_CONCURRENCY = int(os.getenv("SCRAPER_CONCURRENCY", "4"))
