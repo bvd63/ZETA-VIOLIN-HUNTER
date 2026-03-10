@@ -1,5 +1,5 @@
 """
-Craigslist scraper — searches major US and international cities.
+Craigslist scraper — searches major cities worldwide.
 """
 
 import httpx
@@ -10,11 +10,45 @@ from config import Config
 
 log = logging.getLogger(__name__)
 
-# Major Craigslist cities worldwide
+# Craigslist cities worldwide - North America, South America, Europe, Asia
 CRAIGSLIST_CITIES = [
+    # North America - USA
     "newyork", "losangeles", "chicago", "sfbay", "seattle", "boston",
     "miami", "austin", "denver", "portland", "atlanta", "dallas",
-    "london", "toronto", "vancouver", "sydney", "berlin", "paris",
+    "phoenix", "philadelphia", "houston", "minneapolis", "detroit",
+    "washingtondc", "lasvegas", "sandiego", "sacramento",
+    
+    # North America - Canada
+    "toronto", "vancouver", "montreal", "calgary", "ottawa", "winnipeg",
+    
+    # North America - Mexico
+    "mexico", "monterrey", "guadalajara",
+    
+    # South America
+    "buenos_aires", "saopaulo", "santiago", "bogota", "lima", "caracas",
+    
+    # Europe - Western
+    "london", "paris", "berlin", "amsterdam", "barcelona", "madrid",
+    "rome", "vienna", "zurich", "brussels", "lisbon", "dublin",
+    
+    # Europe - Central/Eastern
+    "prague", "budapest", "warsaw", "krakow", "bucharest", "athens",
+    "istanbul", "sofia", "belgrade",
+    
+    # Europe - Nordic
+    "stockholm", "copenhagen", "oslo", "helsinki",
+    
+    # Asia - East
+    "tokyo", "seoul", "beijing", "shanghai", "hongkong", "taipei",
+    
+    # Asia - Southeast
+    "bangkok", "singapore", "manila", "jakarta", "hanoi", "hochiminh",
+    
+    # Asia - South
+    "delhi", "mumbai", "bangalore", "kolkata",
+    
+    # Asia - Middle East
+    "dubai", "beirut", "telaviv",
 ]
 
 KEYWORDS = [
