@@ -6,6 +6,7 @@ import logging
 import httpx
 import html
 from urllib.parse import urlsplit, urlunsplit
+from datetime import datetime
 from config import Config
 
 log = logging.getLogger(__name__)
@@ -49,8 +50,13 @@ class TelegramNotifier:
             await self.send(msg)
 
     async def send_no_changes(self):
-        # Silent — don't spam if nothing found
-        pass
+        message = (
+            "🎻 <b>ZETA VIOLIN HUNTER</b>\n"
+            "✅ Căutarea s-a terminat cu succes.\n"
+            "📭 Nu au fost găsite anunțuri noi în acest ciclu.\n"
+            f"🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+        )
+        await self.send(message)
 
     def _format_listing(self, idx: int, listing: dict) -> str:
         price = str(listing.get("price", "N/A"))

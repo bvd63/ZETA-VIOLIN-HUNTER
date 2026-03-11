@@ -65,7 +65,6 @@ from scrapers.telegram import TelegramScraper
 from scrapers.avito import AvitoScraper
 from scrapers.yandex_market import YandexMarketScraper
 from scrapers.mercadolibre import MercadolibreScraper
-from scrapers.dafiti import DafitiScraper
 from scrapers.tokopedia import TokopediaScraper
 from scrapers.shopee import ShopeeScraper
 from scrapers.lazada import LazadaScraper
@@ -109,6 +108,30 @@ ZETA_MODEL_TERMS = {
     "jean-luc ponty",
 }
 
+NOISE_TERMS = {
+    "arcteryx", "arc'teryx", "jacket", "jackets", "shell", "hardshell",
+    "coat", "hoodie", "pants", "backpack", "ski", "snowboard",
+}
+
+EXCLUDE_LISTING_TERMS = {
+    "wanted", "wtb", "looking for", "part only", "parts only", "for parts",
+    "repair", "broken", "defect", "not working", "case only", "bow only",
+    "bridge only", "pickup only case", "cover only", "gig bag only",
+}
+
+MIN_SCORE_BY_PLATFORM = {
+    "reverb": 2,
+    "ebay": 2,
+    "facebook marketplace": 3,
+    "subito": 3,
+    "kleinanzeigen": 3,
+    "leboncoin": 3,
+    "mercatinomusicale": 2,
+    "audiofanzine": 2,
+    "maestronet": 2,
+    "yahoo auctions japan": 2,
+}
+
 
 def _is_strict_zeta_violin(listing: dict) -> bool:
     """Allow only Zeta violin-family listings, including explicit Zeta model names."""
@@ -129,6 +152,52 @@ def _is_strict_zeta_violin(listing: dict) -> bool:
     tokens = set(re.findall(r"[a-zA-Z\u00C0-\u024F\u0400-\u04FF]+", text))
     has_violin_term = any(term in tokens for term in VIOLIN_TERMS)
     return has_violin_term
+
+
+def _has_noise_terms(listing: dict) -> bool:
+    text = " ".join([
+        str(listing.get("title", "")),
+        str(listing.get("description", "")),
+    ]).lower()
+    return any(term in text for term in NOISE_TERMS)
+
+
+def _is_excluded_listing_intent(listing: dict) -> bool:
+    text = " ".join([
+        str(listing.get("title", "")),
+        str(listing.get("description", "")),
+    ]).lower()
+    return any(term in text for term in EXCLUDE_LISTING_TERMS)
+
+
+def _is_valid_listing_url(url: str) -> bool:
+    if not url:
+        return False
+    raw = str(url).strip().lower()
+    if raw.startswith("//"):
+        raw = "https:" + raw
+    if not (raw.startswith("http://") or raw.startswith("https://")):
+        return False
+
+    # Drop obvious non-listing pages.
+    bad_fragments = ["/search", "?q=", "/category", "/categories", "/forum", "/help", "/about"]
+    if any(fragment in raw for fragment in bad_fragments):
+        return False
+
+    return True
+
+
+def _passes_platform_score(listing: dict) -> bool:
+    platform = str(listing.get("platform", "")).lower()
+    score = int(listing.get("relevance_score", 0) or 0)
+
+    threshold = 2
+    for key, value in MIN_SCORE_BY_PLATFORM.items():
+        if key in platform:
+            threshold = value
+            break
+
+    return score >= threshold
 
 
 def build_scrapers() -> list:
@@ -197,7 +266,6 @@ def build_scrapers() -> list:
         AvitoScraper(),
         YandexMarketScraper(),
         MercadolibreScraper(),
-        DafitiScraper(),
         TokopediaScraper(),
         ShopeeScraper(),
         LazadaScraper(),
@@ -220,9 +288,25 @@ async def _run_scraper_with_resilience(scraper, db: Database, semaphore: asyncio
 
                 new_listings = []
                 dropped_non_zeta = 0
+                dropped_noise = 0
+                dropped_intent = 0
+                dropped_url = 0
+                dropped_score = 0
                 for listing in listings:
                     if not _is_strict_zeta_violin(listing):
                         dropped_non_zeta += 1
+                        continue
+                    if _has_noise_terms(listing):
+                        dropped_noise += 1
+                        continue
+                    if _is_excluded_listing_intent(listing):
+                        dropped_intent += 1
+                        continue
+                    if not _is_valid_listing_url(str(listing.get("url", ""))):
+                        dropped_url += 1
+                        continue
+                    if not _passes_platform_score(listing):
+                        dropped_score += 1
                         continue
                     if not db.is_seen(listing["id"]):
                         db.mark_seen(listing["id"], listing)
@@ -230,6 +314,14 @@ async def _run_scraper_with_resilience(scraper, db: Database, semaphore: asyncio
 
                 if dropped_non_zeta:
                     log.info(f"   Filtered out {dropped_non_zeta} non-Zeta-violin listing(s) from {scraper.name}")
+                if dropped_noise:
+                    log.info(f"   Filtered out {dropped_noise} noise listing(s) from {scraper.name}")
+                if dropped_intent:
+                    log.info(f"   Filtered out {dropped_intent} non-sale listing(s) from {scraper.name}")
+                if dropped_url:
+                    log.info(f"   Filtered out {dropped_url} invalid-url listing(s) from {scraper.name}")
+                if dropped_score:
+                    log.info(f"   Filtered out {dropped_score} low-score listing(s) from {scraper.name}")
 
                 log.info(f"   ✅ {len(new_listings)} NEW listings from {scraper.name}")
                 return scraper.name, new_listings, len(new_listings)
