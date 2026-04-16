@@ -23,7 +23,11 @@ from scrapers.wallapop import WallapopScraper
 from scrapers.leboncoin import LeboncoinScraper
 from scrapers.mercari_jp import MercariJPScraper
 from scrapers.reddit_scraper import RedditScraper
+from scrapers.maestronet import MaestronetScraper
+from scrapers.violinist_com import ViolinistComScraper
+from scrapers.audiofanzine import AudiofanzineScraper
 
+from ai_verifier import verify_listings_batch
 from config import Config
 
 logging.basicConfig(
@@ -166,6 +170,9 @@ def build_scrapers() -> list:
         LeboncoinScraper(),
         MercariJPScraper(),
         RedditScraper(),
+        MaestronetScraper(),
+        ViolinistComScraper(),
+        AudiofanzineScraper(),
     ]
 
 
@@ -266,9 +273,16 @@ async def run_search_cycle():
             # Send immediately per-platform so results are not lost on container restarts.
             if new_listings:
                 try:
-                    log.info(f"📬 Sending {len(new_listings)} new listing(s) from {platform_name} to Telegram...")
-                    await notifier.send_listings(new_listings)
-                    sent_any = True
+                    # AI re-verification — filter out false positives
+                    verified = await verify_listings_batch(new_listings)
+                    ai_rejected = len(new_listings) - len(verified)
+                    if ai_rejected > 0:
+                        log.info(f"🤖 AI rejected {ai_rejected} listing(s) from {platform_name}")
+                    if verified:
+                        log.info(f"📬 Sending {len(verified)} verified listing(s) from {platform_name} to Telegram...")
+                        await notifier.send_listings(verified)
+                        sent_any = True
+                        all_new_listings = [l for l in all_new_listings if l in verified or l not in new_listings]
                 except Exception as e:
                     log.error(f"Telegram send error for {platform_name}: {e}")
 

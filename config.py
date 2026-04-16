@@ -76,6 +76,9 @@ class Config:
     REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
     REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "ZetaViolinHunter/1.0")
 
+    # --- OpenAI API (GPT-4o-mini for AI re-verification) ---
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
     # --- Craigslist coverage tuning ---
     CRAIGSLIST_CONCURRENCY = int(os.getenv("CRAIGSLIST_CONCURRENCY", "24"))
     # 0 means "use all discovered US Craigslist cities"

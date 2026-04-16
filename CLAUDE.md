@@ -48,6 +48,10 @@ violas, cellos, basses, mandolins — violins only).
 - `scrapers/leboncoin.py` — httpx + __NEXT_DATA__ JSON, French marketplace (Prompt 5).
 - `scrapers/mercari_jp.py` — mercapi async wrapper, Japan's #1 C2C marketplace (Prompt 6).
 - `scrapers/reddit_scraper.py` — praw official Reddit API, searches violin subreddits (Prompt 6). Requires REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET; skips gracefully if not set.
+- `scrapers/maestronet.py` — Maestronet forum classifieds, httpx + BeautifulSoup (Prompt 7).
+- `scrapers/violinist_com.py` — Violinist.com forum, httpx + BeautifulSoup (Prompt 7).
+- `scrapers/audiofanzine.py` — Audiofanzine classifieds, httpx + BeautifulSoup (Prompt 7).
+- `ai_verifier.py` — GPT-4o-mini re-verification layer. Every listing passing keyword filters is checked by AI before Telegram send. Requires OPENAI_API_KEY; passes all through if not set (Prompt 7).
 
 ### What is broken
 
@@ -85,6 +89,10 @@ File layout (top level):
   - leboncoin.py — Leboncoin.fr (httpx + __NEXT_DATA__)
   - mercari_jp.py — Mercari Japan (mercapi async wrapper)
   - reddit_scraper.py — Reddit (praw, asyncio.to_thread)
+  - maestronet.py — Maestronet forum (httpx + BeautifulSoup)
+  - violinist_com.py — Violinist.com forum (httpx + BeautifulSoup)
+  - audiofanzine.py — Audiofanzine classifieds (httpx + BeautifulSoup)
+- ai_verifier.py — GPT-4o-mini re-verification (httpx direct, no openai package)
 - requirements.txt
 - railway.toml — Railway build + deploy config
 - env.example — Template for env vars
@@ -374,6 +382,7 @@ Optional tuning:
 - Prompt 4 — MERGED into Prompt 3
 - Prompt 5 — European marketplaces + Dockerfile ✅ COMPLETED (2026-04-16)
 - Prompt 6 — eBay dedup + Mercari JP + Reddit ✅ COMPLETED (2026-04-16)
+- Prompt 7 — Music forums (Maestronet, Violinist.com, Audiofanzine) + AI re-verification (GPT-4o-mini) ✅ COMPLETED (2026-04-16)
 
 ---
 
@@ -381,6 +390,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Added Maestronet, Violinist.com, Audiofanzine forum scrapers + GPT-4o-mini AI re-verification layer | Prompt 7. Forums catch niche listings missed by marketplaces. AI rejects false positives (jackets, accessories, wrong brand) before Telegram send. Fail-open: OPENAI_API_KEY absent or API error → listing passes through. Used httpx directly, no openai pip package. |
 | 2026-04-16 | Fixed eBay duplicates (dedup on itemId not URL), added Mercari JP (mercapi), Reddit (praw) | Prompt 6. eBay same item had different URLs per marketplace. Mercari uses async API wrapper. Reddit uses praw in asyncio.to_thread. |
 | 2026-04-16 | Fixed Kleinanzeigen (BS4 fallback selectors), Wallapop (Origin/Referer headers + web fallback), Leboncoin (switched to Playwright) | Prompt 5-fix. All 3 had anti-bot issues on first deploy. |
 | 2026-04-16 | Added Kleinanzeigen (Playwright), Wallapop (API), Leboncoin (__NEXT_DATA__). Switched to Dockerfile with Playwright base image. Skipped Facebook Marketplace Playwright (requires login, ban risk) — covered by Google CSE. | Prompt 5 |
