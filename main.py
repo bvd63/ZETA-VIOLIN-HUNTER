@@ -21,6 +21,8 @@ from scrapers.subito import SubitoScraper
 from scrapers.kleinanzeigen import KleinanzeigenScraper
 from scrapers.wallapop import WallapopScraper
 from scrapers.leboncoin import LeboncoinScraper
+from scrapers.mercari_jp import MercariJPScraper
+from scrapers.reddit_scraper import RedditScraper
 
 from config import Config
 
@@ -162,6 +164,8 @@ def build_scrapers() -> list:
         KleinanzeigenScraper(),
         WallapopScraper(),
         LeboncoinScraper(),
+        MercariJPScraper(),
+        RedditScraper(),
     ]
 
 

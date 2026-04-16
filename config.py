@@ -71,6 +71,11 @@ class Config:
     SCRAPER_RETRIES = int(os.getenv("SCRAPER_RETRIES", "1"))
     SCRAPER_CONCURRENCY = int(os.getenv("SCRAPER_CONCURRENCY", "4"))
 
+    # --- Reddit API (praw) ---
+    REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
+    REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
+    REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "ZetaViolinHunter/1.0")
+
     # --- Craigslist coverage tuning ---
     CRAIGSLIST_CONCURRENCY = int(os.getenv("CRAIGSLIST_CONCURRENCY", "24"))
     # 0 means "use all discovered US Craigslist cities"

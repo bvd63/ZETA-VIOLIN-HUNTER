@@ -155,11 +155,14 @@ class EbayScraper(BaseScraper):
                         items = data.get("itemSummaries", [])
 
                         for item in items:
+                            ebay_item_id = item.get("itemId", "")
                             url = item.get("itemWebUrl", "")
-                            if not url:
+                            if not url or not ebay_item_id:
                                 continue
 
-                            unique_id = self._make_id("ebay", url)
+                            # Dedup on eBay's internal itemId, not URL — same item has
+                            # different URLs on ebay.com vs ebay.co.uk vs ebay.de
+                            unique_id = self._make_id("ebay", ebay_item_id)
                             if unique_id in seen_ids:
                                 continue
                             seen_ids.add(unique_id)

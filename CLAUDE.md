@@ -46,6 +46,8 @@ violas, cellos, basses, mandolins — violins only).
   musical instruments category (Prompt 5).
 - `scrapers/wallapop.py` — public API, Spanish marketplace (Prompt 5).
 - `scrapers/leboncoin.py` — httpx + __NEXT_DATA__ JSON, French marketplace (Prompt 5).
+- `scrapers/mercari_jp.py` — mercapi async wrapper, Japan's #1 C2C marketplace (Prompt 6).
+- `scrapers/reddit_scraper.py` — praw official Reddit API, searches violin subreddits (Prompt 6). Requires REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET; skips gracefully if not set.
 
 ### What is broken
 
@@ -81,6 +83,8 @@ File layout (top level):
   - kleinanzeigen.py — Kleinanzeigen.de (Playwright headless Chromium)
   - wallapop.py — Wallapop (Spain, public API)
   - leboncoin.py — Leboncoin.fr (httpx + __NEXT_DATA__)
+  - mercari_jp.py — Mercari Japan (mercapi async wrapper)
+  - reddit_scraper.py — Reddit (praw, asyncio.to_thread)
 - requirements.txt
 - railway.toml — Railway build + deploy config
 - env.example — Template for env vars
@@ -369,6 +373,7 @@ Optional tuning:
 - Prompt 3 — Subito strict + Reverb tune + location fix + Google quota ✅ COMPLETED (2026-04-16)
 - Prompt 4 — MERGED into Prompt 3
 - Prompt 5 — European marketplaces + Dockerfile ✅ COMPLETED (2026-04-16)
+- Prompt 6 — eBay dedup + Mercari JP + Reddit ✅ COMPLETED (2026-04-16)
 
 ---
 
@@ -376,6 +381,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Fixed eBay duplicates (dedup on itemId not URL), added Mercari JP (mercapi), Reddit (praw) | Prompt 6. eBay same item had different URLs per marketplace. Mercari uses async API wrapper. Reddit uses praw in asyncio.to_thread. |
 | 2026-04-16 | Fixed Kleinanzeigen (BS4 fallback selectors), Wallapop (Origin/Referer headers + web fallback), Leboncoin (switched to Playwright) | Prompt 5-fix. All 3 had anti-bot issues on first deploy. |
 | 2026-04-16 | Added Kleinanzeigen (Playwright), Wallapop (API), Leboncoin (__NEXT_DATA__). Switched to Dockerfile with Playwright base image. Skipped Facebook Marketplace Playwright (requires login, ban risk) — covered by Google CSE. | Prompt 5 |
 | 2026-04-16 | Fixed Subito noise, Reverb over-querying, location "ro" bug, Google quota waste | Prompt 3. Subito requires zeta_signals in ad text. Reverb reduced to 8kw×2pg. Location uses word-boundary match. Google guards with 20h cooldown in SQLite. |
@@ -400,6 +406,7 @@ Optional tuning:
 |---|---|---|
 | __pycache__ and .pyc files accidentally tracked in git | Low | Fixed in Prompt 1b (.gitignore created, files untracked via git rm --cached) |
 | eBay Finding API returns 0 (decommissioned) | High | Fixed in Prompt 2 — migrated to Browse API |
+| eBay sends same listing 2-3 times (different marketplace URLs) | Medium | Fixed in Prompt 6 (dedup on itemId) |
 | Facebook Marketplace scraper is a stub with 402 log-spam lines | Medium | Fixed (deleted) in Prompt 1a |
 | 40+ scrapers have broken CSS selectors / anti-bot blocks | Medium | Fixed (deleted) in Prompt 1a |
 | "ro" in "Rome" substring match excludes legit Italian/Canadian listings | Medium | Fixed in Prompt 3 |
