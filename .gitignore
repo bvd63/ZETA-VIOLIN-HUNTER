@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Playwright
+.playwright/
+playwright-report/
+test-results/
+
+# Project-specific
+# NOTE: zeta_listings.db IS committed on purpose (SQLite dedup state).
+# See CLAUDE.md section 2 "Database state" for history.
+# If a future task moves the DB to a Railway volume, add it here.
+
+# Logs
+*.log
+logs/

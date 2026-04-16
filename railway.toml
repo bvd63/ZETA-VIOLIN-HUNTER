@@ -1,5 +1,5 @@
 [build]
-builder = "railpack"
+builder = "nixpacks"
 
 [deploy]
 startCommand = "python main.py"

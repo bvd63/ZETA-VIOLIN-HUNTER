@@ -304,6 +304,20 @@ because dedup is rebuilt naturally from Telegram history + short memory.
 
 ## 9. ENVIRONMENT VARIABLES
 
+### Build-time (set automatically by nixpacks.toml — do NOT configure in Railway Variables)
+
+- `PLAYWRIGHT_BROWSERS_PATH` — Playwright sets this during `playwright install`;
+  browser binaries land in the virtualenv. No manual action needed.
+
+### New in Prompt 1b (no new required vars — these are SDK keys used starting Prompt 2 and Prompt 9)
+
+- EBAY_CLIENT_ID (optional until Prompt 2)
+- EBAY_CLIENT_SECRET (optional until Prompt 2)
+- ANTHROPIC_API_KEY (optional until Prompt 9)
+- REDDIT_CLIENT_ID (optional until Prompt 8)
+- REDDIT_CLIENT_SECRET (optional until Prompt 8)
+- REDDIT_USER_AGENT (optional until Prompt 8)
+
 Names only — values live in Railway Variables tab, never committed.
 
 Required:
@@ -352,7 +366,7 @@ Optional tuning:
 
 - Prompt 0 — Create CLAUDE.md foundation (COMPLETED 2026-04-16)
 - Prompt 1a — Prune dead code: remove 52 stub scrapers, Procfile, scrapy dep, duplicate 58com.py ✅ COMPLETED (2026-04-16)
-- Prompt 1b — Add Playwright + praw + mercari deps + Railway Chromium install (NEXT)
+- Prompt 1b — Add Playwright + praw + mercari deps + Railway Chromium install ✅ COMPLETED (2026-04-16)
 - Prompt 2 — Rewrite scrapers/ebay.py using eBay Browse API with OAuth2 
   client credentials
 - Prompt 3 — Rewrite scrapers/subito.py with strict Zeta filter (no 
@@ -368,6 +382,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Added 5 new Python deps + Chromium via nixpacks.toml + .gitignore | Prompt 1b. Playwright for anti-bot sites; praw/mercari for official API access; tenacity for retries; anthropic for AI re-verification in Prompt 9. Build time increases 5-10 min for Chromium download. |
 | 2026-04-16 | Deleted 52 dead scrapers, Procfile, and scrapy dep; active scraper count 55 → 5 | Completed as Prompt 1a. Future marketplace coverage will be rebuilt in Prompts 5-8 using Playwright + official libraries (praw, mercari, ebay-oauth-python-client). |
 | 2026-04-16 | Drop ~50 non-working scrapers rather than fix each | Net savings: fewer false positives, simpler maintenance, rely on Google Custom Search for platforms we can't scrape directly |
 | 2026-04-16 | Migrate eBay to Browse API (OAuth2) | Finding API decommissioned 2025-02-05, no alternative |
@@ -375,6 +390,9 @@ Optional tuning:
 | 2026-04-16 | Exclude Romania from search | Owner preference (Vlad is in Romania, not buying local) |
 | 2026-04-16 | Include signature artists (JLP, Boyd Tinsley, Eileen Ivers, Vanessa-Mae) | High-signal indicators of genuine Zeta violins on second-hand market |
 | 2026-04-16 | Scope = violins only (no viola, cello, bass, mandolin) | Owner preference, keeps filter tight |
+| 2026-04-16 | Switched Railway builder from railpack → nixpacks; added nixpacks.toml | Required to run `playwright install --with-deps chromium` at build time; railpack has no hook for post-install browser download |
+| 2026-04-16 | Install only Chromium, not Firefox/WebKit | Saves ~400MB of build disk and download time; all targeted JS-heavy sites work in Chromium |
+| 2026-04-16 | Pin playwright==1.47.0 explicitly | Each Playwright Python release bundles specific browser versions; pinning prevents surprise breakage on Railway rebuild |
 
 ---
 
@@ -382,6 +400,7 @@ Optional tuning:
 
 | Bug | Severity | Status |
 |---|---|---|
+| __pycache__ and .pyc files accidentally tracked in git | Low | Fixed in Prompt 1b (.gitignore created, files untracked via git rm --cached) |
 | eBay Finding API returns 0 (decommissioned) | High | To fix in Prompt 2 |
 | Facebook Marketplace scraper is a stub with 402 log-spam lines | Medium | Fixed (deleted) in Prompt 1a |
 | 40+ scrapers have broken CSS selectors / anti-bot blocks | Medium | Fixed (deleted) in Prompt 1a |
@@ -409,3 +428,53 @@ At the start of every coding session:
    - Update "Current State" section if architecture changed
 
 Every prompt ends with: "Update CLAUDE.md with what was built."
+
+---
+
+## 15. TECHNICAL STACK (updated 2026-04-16)
+
+### Runtime
+
+- Python 3.11
+- Railway Hobby plan ($5/month, 8GB RAM)
+- nixpacks builder (via nixpacks.toml)
+
+### Core libraries (all used)
+
+- httpx 0.27 — async HTTP client (all scrapers)
+- beautifulsoup4 4.12 — HTML parsing
+- lxml 5.2 — fast XML/HTML parser backend
+- apscheduler 3.10 — async daily scheduler
+- aiohttp 3.9 — async web server for /search, /health
+- python-dotenv 1.0 — .env file loading (dev only)
+
+### Marketplace libraries (added in Prompt 1b, used starting Prompt 5+)
+
+- playwright 1.47 + Chromium — headless browser for FB Marketplace,
+  Kleinanzeigen, Leboncoin, Wallapop
+- praw 7.7 — official Reddit API
+- mercari 2.2 — Mercari JP + Rakuma API wrapper
+- tenacity 8.5 — retry with exponential backoff
+- anthropic 0.39 — Claude Haiku SDK (Prompt 9: AI re-verification)
+
+### Infrastructure files
+
+- requirements.txt — pip dependencies
+- nixpacks.toml — Railway build phases (install + Chromium download)
+- railway.toml — Railway deploy config (builder, start command,
+  restart policy)
+- .gitignore — standard Python + project-specific ignores
+- CLAUDE.md — this file, single source of truth
+
+### Why these choices
+
+- playwright over selenium: Playwright is faster, better async
+  support, modern API, better stealth out-of-the-box.
+- praw over aiohttp+manual OAuth: official, maintained, handles
+  rate limits natively.
+- mercari over custom scraping: the package simulates Mercari JP's
+  signed API requests — much more robust than HTML scraping.
+- tenacity over manual retry: de-facto Python retry library; clean
+  decorator syntax, exponential backoff built-in.
+- anthropic over openai: we're using Claude (Haiku) for re-verif;
+  using Anthropic's own SDK avoids reverse engineering.
