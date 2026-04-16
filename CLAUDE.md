@@ -38,25 +38,6 @@ violas, cellos, basses, mandolins — violins only).
 ### What is broken
 - `scrapers/ebay.py` — uses eBay Finding API, DECOMMISSIONED 2025-02-05. 
   Returns 0 from all 18 country sites. Needs migration to Browse API (OAuth2).
-- `scrapers/facebook_marketplace.py` — STUB. Logs 402 "Searching..." lines 
-  per run but does nothing. Returns [].
-- `scrapers/instagram.py`, `tiktok.py`, `discord.py`, `telegram.py`, 
-  `youtube.py` — all stubs. Return [] with a warning log.
-- `scrapers/58com.py` + `scrapers/com_58.py` — DUPLICATE files for the same 
-  site (58.com). `main.py` only imports Com58Scraper from com_58.py. 58com.py 
-  is dead code.
-- `scrapers/kleinanzeigen.py`, `leboncoin.py`, `wallapop.py`, `marktplaats.py`, 
-  `willhaben.py`, `ricardo.py`, `blocket.py`, `finn.py`, `tori.py`, 
-  `allegro.py`, `gumtree.py`, `kijiji.py`, `mercari.py`, 
-  `yahoo_auctions_japan.py`, `rakuten.py`, `carousell.py`, `douban.py`, 
-  `tarisio.py`, `maestronet.py`, `audiofanzine.py`, `zikinf.py`, 
-  `mercatinomusicale.py`, `sweetwater.py`, `guitar_center.py`, `thomann.py`, 
-  `gear4music.py`, `chicago_music_exchange.py`, `vintage_king.py`, 
-  `musicians_friend.py`, `catawiki.py`, `invaluable.py`, `hibid.py`, 
-  `bonhams.py`, `sothebys.py`, `christies.py`, `reddit.py`, `avito.py`, 
-  `yandex_market.py`, `mercadolibre.py`, `tokopedia.py`, `shopee.py`, 
-  `lazada.py`, `dafiti.py`, `zeta_music_official.py` — all return 0 raw 
-  listings. Outdated CSS selectors, anti-bot blocks, or non-existent endpoints.
 - `scrapers/subito.py` — returns some listings but crawls entire __NEXT_DATA__ 
   tree including unrelated ads. Needs strict filter (require "zeta" in the 
   ad's own title/body, not in recommendations).
@@ -68,11 +49,6 @@ violas, cellos, basses, mandolins — violins only).
 - `config.py` EXCLUDED_LOCATIONS = ["Romania", "ro"] uses substring match. 
   "ro" matches "Rome", "Toronto", "Brooklyn", "Provo", etc. Must match only 
   full country codes or full words.
-- `Procfile` declares `worker: python main.py` but `main.py` binds an HTTP 
-  server on port 8080. Railway worker processes do not get a public URL — 
-  conflicts with the HTTP server pattern.
-- `requirements.txt` includes `scrapy` which is NOT imported anywhere in the 
-  code. Adds Twisted + cryptography + many transitive deps. Slows builds.
 - `scrapers/reverb.py` passes `state=all` to Reverb API. The correct Reverb 
   param values are `new`, `used`, `b-stock`. `all` is likely ignored.
 - `scrapers/reverb.py` runs 30+ keywords × 5 pages = 150+ API calls per cycle. 
@@ -100,15 +76,14 @@ File layout (top level):
 - database.py — SQLite dedup (zeta_listings.db)
 - notifier.py — Telegram sendMessage wrapper
 - scrapers/ — Per-platform scraper modules
+  - __init__.py
   - base.py — Base class: filters, relevance scoring
   - reverb.py — Reverb.com public API
-  - ebay.py — eBay (currently broken, Finding API dead)
+  - ebay.py — eBay (currently broken, Finding API dead; to rewrite in Prompt 2)
   - google.py — Google Custom Search (site: operator)
   - craigslist.py — Craigslist RSS across US cities
-  - subito.py — Subito.it (Italian classifieds)
-  - [many others] — Mostly dead, see "What is broken" above
+  - subito.py — Subito.it (Italian classifieds; strict filter needed, Prompt 3)
 - requirements.txt
-- Procfile — Railway process declaration
 - railway.toml — Railway build + deploy config
 - env.example — Template for env vars
 - zeta_listings.db — SQLite dedup (currently committed to repo, should be 
@@ -375,9 +350,9 @@ Optional tuning:
 
 ## 11. PHASES PLAN
 
-- Prompt 0 — Create CLAUDE.md foundation (IN PROGRESS)
-- Prompt 1 — Prune dead code: remove stub scrapers, fix Procfile, clean 
-  requirements.txt, remove duplicate 58com.py
+- Prompt 0 — Create CLAUDE.md foundation (COMPLETED 2026-04-16)
+- Prompt 1a — Prune dead code: remove 52 stub scrapers, Procfile, scrapy dep, duplicate 58com.py ✅ COMPLETED (2026-04-16)
+- Prompt 1b — Add Playwright + praw + mercari deps + Railway Chromium install (NEXT)
 - Prompt 2 — Rewrite scrapers/ebay.py using eBay Browse API with OAuth2 
   client credentials
 - Prompt 3 — Rewrite scrapers/subito.py with strict Zeta filter (no 
@@ -393,6 +368,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Deleted 52 dead scrapers, Procfile, and scrapy dep; active scraper count 55 → 5 | Completed as Prompt 1a. Future marketplace coverage will be rebuilt in Prompts 5-8 using Playwright + official libraries (praw, mercari, ebay-oauth-python-client). |
 | 2026-04-16 | Drop ~50 non-working scrapers rather than fix each | Net savings: fewer false positives, simpler maintenance, rely on Google Custom Search for platforms we can't scrape directly |
 | 2026-04-16 | Migrate eBay to Browse API (OAuth2) | Finding API decommissioned 2025-02-05, no alternative |
 | 2026-04-16 | Leave 15 junk DB entries in place | They simply dedupe by URL hash — harmless, no re-alert risk |
@@ -407,14 +383,14 @@ Optional tuning:
 | Bug | Severity | Status |
 |---|---|---|
 | eBay Finding API returns 0 (decommissioned) | High | To fix in Prompt 2 |
-| Facebook Marketplace scraper is a stub with 402 log-spam lines | Medium | To delete in Prompt 1 |
-| 40+ scrapers have broken CSS selectors / anti-bot blocks | Medium | To delete in Prompt 1 |
+| Facebook Marketplace scraper is a stub with 402 log-spam lines | Medium | Fixed (deleted) in Prompt 1a |
+| 40+ scrapers have broken CSS selectors / anti-bot blocks | Medium | Fixed (deleted) in Prompt 1a |
 | "ro" in "Rome" substring match excludes legit Italian/Canadian listings | Medium | To fix in Prompt 4 |
-| Procfile says "worker" but main.py serves HTTP on 8080 | Low | To fix in Prompt 1 |
-| scrapy in requirements.txt but not imported | Low | To fix in Prompt 1 |
+| Procfile says "worker" but main.py serves HTTP on 8080 | Low | Fixed (deleted Procfile) in Prompt 1a |
+| scrapy in requirements.txt but not imported | Low | Fixed in Prompt 1a |
 | Reverb 30 keywords × 5 pages = 150+ API calls per cycle | Low | To tune in Prompt 4 |
 | Google CSE quota (100/day) consumed per run, wasted on restarts | Low | To add daily guard in Prompt 4 |
-| Duplicate file scrapers/58com.py and scrapers/com_58.py | Low | To fix in Prompt 1 |
+| Duplicate file scrapers/58com.py and scrapers/com_58.py | Low | Fixed (both deleted) in Prompt 1a |
 
 ---
 

@@ -13,62 +13,11 @@ from aiohttp import web
 from database import Database
 from notifier import TelegramNotifier
 
-# Import ALL scrapers
 from scrapers.reverb import ReverbScraper
 from scrapers.ebay import EbayScraper
 from scrapers.google import GoogleScraper
 from scrapers.craigslist import CraigslistScraper
-from scrapers.facebook_marketplace import FacebookMarketplaceScraper
-from scrapers.leboncoin import LeboncoinScraper
-from scrapers.kleinanzeigen import KleinanzeigenScraper
-from scrapers.wallapop import WallapopScraper
-from scrapers.marktplaats import MarktplaatsScraper
 from scrapers.subito import SubitoScraper
-from scrapers.willhaben import WillhabenScraper
-from scrapers.ricardo import RicardoScraper
-from scrapers.blocket import BlocketScraper
-from scrapers.finn import FinnScraper
-from scrapers.tori import ToriScraper
-from scrapers.allegro import AllegroPLScraper
-from scrapers.gumtree import GumtreeScraper
-from scrapers.kijiji import KijijiScraper
-from scrapers.mercari import MercariScraper
-from scrapers.yahoo_auctions_japan import YahooAuctionsJapanScraper
-from scrapers.rakuten import RakutenScraper
-from scrapers.carousell import CarousellScraper
-from scrapers.com_58 import Com58Scraper
-from scrapers.douban import DoubanScraper
-from scrapers.tarisio import TarisioScraper
-from scrapers.maestronet import MaestronetScraper
-from scrapers.audiofanzine import AudiofanzineScraper
-from scrapers.zikinf import ZikinfScraper
-from scrapers.mercatinomusicale import MercatinomusicaleScraper
-from scrapers.sweetwater import SweetwaterScraper
-from scrapers.guitar_center import GuitarCenterScraper
-from scrapers.thomann import ThomannScraper
-from scrapers.gear4music import Gear4musicScraper
-from scrapers.chicago_music_exchange import ChicagoMusicExchangeScraper
-from scrapers.vintage_king import VintageKingScraper
-from scrapers.musicians_friend import MusiciansFriendScraper
-from scrapers.catawiki import CatawikiScraper
-from scrapers.invaluable import InvaluableScraper
-from scrapers.hibid import HibidScraper
-from scrapers.bonhams import BonhamsScraper
-from scrapers.sothebys import SothebysScaper
-from scrapers.christies import ChristiesScraper
-from scrapers.reddit import RedditScraper
-from scrapers.instagram import InstagramScraper
-from scrapers.tiktok import TikTokScraper
-from scrapers.youtube import YouTubeScraper
-from scrapers.discord import DiscordScraper
-from scrapers.telegram import TelegramScraper
-from scrapers.avito import AvitoScraper
-from scrapers.yandex_market import YandexMarketScraper
-from scrapers.mercadolibre import MercadolibreScraper
-from scrapers.tokopedia import TokopediaScraper
-from scrapers.shopee import ShopeeScraper
-from scrapers.lazada import LazadaScraper
-from scrapers.zeta_music_official import ZetaMusicOfficialScraper
 
 from config import Config
 
@@ -202,76 +151,11 @@ def _passes_platform_score(listing: dict) -> bool:
 
 def build_scrapers() -> list:
     return [
-        # Core platforms
         ReverbScraper(),
         EbayScraper(Config.EBAY_APP_ID),
         GoogleScraper(Config.GOOGLE_API_KEY, Config.GOOGLE_CSE_ID),
         CraigslistScraper(),
-        FacebookMarketplaceScraper(),
-
-        # European classifieds
-        LeboncoinScraper(),
-        KleinanzeigenScraper(),
-        WallapopScraper(),
-        MarktplaatsScraper(),
         SubitoScraper(),
-        WillhabenScraper(),
-        RicardoScraper(),
-        BlocketScraper(),
-        FinnScraper(),
-        ToriScraper(),
-        AllegroPLScraper(),
-        GumtreeScraper(),
-        KijijiScraper(),
-
-        # Asia
-        MercariScraper(),
-        YahooAuctionsJapanScraper(),
-        RakutenScraper(),
-        CarousellScraper(),
-        Com58Scraper(),
-        DoubanScraper(),
-
-        # Music-specific
-        TarisioScraper(),
-        MaestronetScraper(),
-        AudiofanzineScraper(),
-        ZikinfScraper(),
-        MercatinomusicaleScraper(),
-        SweetwaterScraper(),
-        GuitarCenterScraper(),
-        ThomannScraper(),
-        Gear4musicScraper(),
-        ChicagoMusicExchangeScraper(),
-        VintageKingScraper(),
-        MusiciansFriendScraper(),
-
-        # Auctions
-        CatawikiScraper(),
-        InvaluableScraper(),
-        HibidScraper(),
-        BonhamsScraper(),
-        SothebysScaper(),
-        ChristiesScraper(),
-
-        # Communities
-        RedditScraper(),
-        InstagramScraper(),
-        TikTokScraper(),
-        YouTubeScraper(),
-        DiscordScraper(),
-        TelegramScraper(),
-
-        # Regional
-        AvitoScraper(),
-        YandexMarketScraper(),
-        MercadolibreScraper(),
-        TokopediaScraper(),
-        ShopeeScraper(),
-        LazadaScraper(),
-
-        # Official
-        ZetaMusicOfficialScraper(),
     ]
 
 
