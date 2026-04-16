@@ -2,6 +2,7 @@
 Telegram notifier — sends formatted alerts for new Zeta listings.
 """
 
+import asyncio
 import logging
 import httpx
 import html
@@ -32,7 +33,22 @@ class TelegramNotifier:
                 "parse_mode": "HTML",
                 "disable_web_page_preview": False,
             })
-            if resp.status_code != 200:
+            if resp.status_code == 429:
+                try:
+                    retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
+                except Exception:
+                    retry_after = 30
+                log.warning(f"Telegram rate limited — waiting {retry_after}s")
+                await asyncio.sleep(retry_after + 1)
+                resp = await client.post(self.api_url, json={
+                    "chat_id": self.chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": False,
+                })
+                if resp.status_code != 200:
+                    log.error(f"Telegram retry failed: {resp.text}")
+            elif resp.status_code != 200:
                 log.error(f"Telegram error: {resp.text}")
 
     async def send_listings(self, listings: list):
@@ -48,6 +64,8 @@ class TelegramNotifier:
         for i, listing in enumerate(listings, 1):
             msg = self._format_listing(i, listing)
             await self.send(msg)
+            if i < len(listings):
+                await asyncio.sleep(1.5)
 
     async def send_no_changes(self):
         message = (
