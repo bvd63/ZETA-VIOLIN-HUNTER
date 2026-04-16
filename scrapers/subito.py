@@ -26,8 +26,11 @@ class SubitoScraper(BaseScraper):
         seen_ids = set()
 
         keywords = [
-            "Zeta violino", "violino elettrico Zeta",
-            "violino elettrico", "violino MIDI",
+            "Zeta violino",
+            "Zeta violin",
+            "Zeta Strados",
+            "Zeta Jazz Fusion",
+            "violino elettrico Zeta",
         ]
 
         headers = {
@@ -57,6 +60,16 @@ class SubitoScraper(BaseScraper):
                                     if not item_url or not title:
                                         continue
 
+                                    # Strict Zeta check — ad's own text must mention Zeta
+                                    ad_text = (title + " " + body).lower()
+                                    zeta_signals = [
+                                        "zeta", "zetta", "strados", "jv44", "jv45",
+                                        "sv24", "sv25", "sv43", "cv44", "ev25", "ev44",
+                                        "jean-luc ponty", "jlp", "jazz fusion",
+                                    ]
+                                    if not any(sig in ad_text for sig in zeta_signals):
+                                        continue
+
                                     unique_id = self._make_id("subito", item_url)
                                     if unique_id in seen_ids:
                                         continue
@@ -73,7 +86,7 @@ class SubitoScraper(BaseScraper):
                                         continue
 
                                     score = self._relevance_score(title, body)
-                                    if score < 1:
+                                    if score < 2:
                                         continue
 
                                     results.append({
@@ -131,8 +144,8 @@ class SubitoScraper(BaseScraper):
         }
         queries = [
             "site:subito.it zeta violino",
-            "site:subito.it violino elettrico zeta",
-            "site:subito.it violino midi",
+            "site:subito.it zeta violin",
+            "site:subito.it zeta strados",
         ]
 
         async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers=headers) as client:
@@ -158,7 +171,7 @@ class SubitoScraper(BaseScraper):
                             continue
 
                         score = self._relevance_score(title)
-                        if score < 1:
+                        if score < 2:
                             continue
 
                         results.append({

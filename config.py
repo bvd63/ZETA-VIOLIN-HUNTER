@@ -59,7 +59,8 @@ class Config:
     EXCLUDE_KEYWORDS = ["SOLD", "ENDED", "EXPIRED", "OUT OF STOCK", "sold out"]
 
     # Excluded countries/regions
-    EXCLUDED_LOCATIONS = ["Romania", "ro"]
+    EXCLUDED_LOCATIONS = ["Romania"]
+    EXCLUDED_COUNTRY_CODES = ["RO"]
 
     # --- Year filter ---
     MIN_YEAR = int(os.getenv("MIN_YEAR", "1980"))

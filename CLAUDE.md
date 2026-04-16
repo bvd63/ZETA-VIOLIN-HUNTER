@@ -28,32 +28,22 @@ violas, cellos, basses, mandolins — violins only).
 - HTTP server: port 8080, endpoints `/search` and `/health` reachable
 
 ### What works
-- `scrapers/reverb.py` — returns listings from Reverb API (public, no key needed)
+- `scrapers/reverb.py` — returns listings from Reverb API. FIXED in Prompt 3: reduced to 8 keywords × 2 pages (was 30+ × 5).
 - `scrapers/craigslist.py` — returns listings from RSS feeds (scans ~400 US cities)
 - `scrapers/ebay.py` — REWRITTEN in Prompt 2. Now uses eBay Browse API
   with OAuth2 client_credentials grant. Searches 13 marketplaces with 8
   keywords. Requires EBAY_CLIENT_ID + EBAY_CLIENT_SECRET.
+- `scrapers/subito.py` — FIXED in Prompt 3. Strict Zeta filter — requires
+  "zeta" or model code in ad's own text. 5 focused keywords.
+- `scrapers/google.py` — FIXED in Prompt 3. 20h quota guard via SQLite prevents
+  double-run on container restart.
 - `main.py` core orchestration: scheduler, concurrency, dedup, Telegram send
 - `database.py` — SQLite dedup with hash(platform:url)
 - `notifier.py` — Telegram formatted alerts
-- `config.py` — env-based configuration
+- `config.py` — env-based configuration. FIXED in Prompt 3: location exclusion
+  uses word-boundary matching (EXCLUDED_COUNTRY_CODES = ["RO"]).
 
 ### What is broken
-- `scrapers/subito.py` — returns some listings but crawls entire __NEXT_DATA__ 
-  tree including unrelated ads. Needs strict filter (require "zeta" in the 
-  ad's own title/body, not in recommendations).
-- `scrapers/google.py` — works when quota available but consumes 65 queries 
-  per run (13 keywords × 5 site groups) out of 100/day free tier. A single 
-  restart wastes the day's budget.
-
-### Configuration bugs
-- `config.py` EXCLUDED_LOCATIONS = ["Romania", "ro"] uses substring match. 
-  "ro" matches "Rome", "Toronto", "Brooklyn", "Provo", etc. Must match only 
-  full country codes or full words.
-- `scrapers/reverb.py` passes `state=all` to Reverb API. The correct Reverb 
-  param values are `new`, `used`, `b-stock`. `all` is likely ignored.
-- `scrapers/reverb.py` runs 30+ keywords × 5 pages = 150+ API calls per cycle. 
-  Unnecessarily aggressive. Target: ~8 keywords × 2 pages.
 
 ### Database state (zeta_listings.db)
 - 18 total entries, of which 3 are real Zeta violins:
@@ -369,10 +359,8 @@ Optional tuning:
 - Prompt 1a — Prune dead code: remove 52 stub scrapers, Procfile, scrapy dep, duplicate 58com.py ✅ COMPLETED (2026-04-16)
 - Prompt 1b — Add Playwright + praw + mercari deps + Railway Chromium install ✅ COMPLETED (2026-04-16)
 - Prompt 2 — eBay Browse API migration ✅ COMPLETED (2026-04-16)
-- Prompt 3 — Rewrite scrapers/subito.py with strict Zeta filter (no 
-  __NEXT_DATA__ tree walking)
-- Prompt 4 — Fix config.py location filter bug (substring "ro" match) + 
-  tune Reverb pagination + add daily quota guard for Google
+- Prompt 3 — Subito strict + Reverb tune + location fix + Google quota ✅ COMPLETED (2026-04-16)
+- Prompt 4 — MERGED into Prompt 3
 - Prompt 5 — Extend /status endpoint to report per-scraper stats (raw, 
   filtered, sent, errors, last_run) for operator visibility
 
@@ -382,6 +370,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Fixed Subito noise, Reverb over-querying, location "ro" bug, Google quota waste | Prompt 3. Subito requires zeta_signals in ad text. Reverb reduced to 8kw×2pg. Location uses word-boundary match. Google guards with 20h cooldown in SQLite. |
 | 2026-04-16 | Rewrote eBay scraper: Finding API → Browse API with OAuth2 | Prompt 2. 13 marketplaces, 8 keywords, client_credentials grant, 50 results per query, token cached with 30min early refresh |
 | 2026-04-16 | Added 5 new Python deps + Chromium via nixpacks.toml + .gitignore | Prompt 1b. Playwright for anti-bot sites; praw/mercari for official API access; tenacity for retries; anthropic for AI re-verification in Prompt 9. Build time increases 5-10 min for Chromium download. |
 | 2026-04-16 | Deleted 52 dead scrapers, Procfile, and scrapy dep; active scraper count 55 → 5 | Completed as Prompt 1a. Future marketplace coverage will be rebuilt in Prompts 5-8 using Playwright + official libraries (praw, mercari, ebay-oauth-python-client). |
@@ -405,11 +394,11 @@ Optional tuning:
 | eBay Finding API returns 0 (decommissioned) | High | Fixed in Prompt 2 — migrated to Browse API |
 | Facebook Marketplace scraper is a stub with 402 log-spam lines | Medium | Fixed (deleted) in Prompt 1a |
 | 40+ scrapers have broken CSS selectors / anti-bot blocks | Medium | Fixed (deleted) in Prompt 1a |
-| "ro" in "Rome" substring match excludes legit Italian/Canadian listings | Medium | To fix in Prompt 4 |
+| "ro" in "Rome" substring match excludes legit Italian/Canadian listings | Medium | Fixed in Prompt 3 |
 | Procfile says "worker" but main.py serves HTTP on 8080 | Low | Fixed (deleted Procfile) in Prompt 1a |
 | scrapy in requirements.txt but not imported | Low | Fixed in Prompt 1a |
-| Reverb 30 keywords × 5 pages = 150+ API calls per cycle | Low | To tune in Prompt 4 |
-| Google CSE quota (100/day) consumed per run, wasted on restarts | Low | To add daily guard in Prompt 4 |
+| Reverb 30 keywords × 5 pages = 150+ API calls per cycle | Low | Fixed in Prompt 3 (8×2) |
+| Google CSE quota (100/day) consumed per run, wasted on restarts | Low | Fixed in Prompt 3 (20h guard) |
 | Duplicate file scrapers/58com.py and scrapers/com_58.py | Low | Fixed (both deleted) in Prompt 1a |
 
 ---

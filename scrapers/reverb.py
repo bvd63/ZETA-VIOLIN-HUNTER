@@ -22,14 +22,17 @@ class ReverbScraper(BaseScraper):
 
     async def search(self) -> list:
         results = []
-        keywords = list(dict.fromkeys([
-            "Zeta violin", "Zeta electric violin", "Zeta Strados",
-            "Zeta Jazz Fusion", "Zeta JV44", "Zeta SV24", "Zeta SV25",
-            "Zeta EV25", "Zeta EV44", "Zeta JLP", "Zeta CV44",
-            "Zetta violin", "violino elettrico Zeta", "violon Zeta",
-            *Config.KEYWORDS,
-        ]))
-        max_pages = 5
+        keywords = [
+            "Zeta violin",
+            "Zeta electric violin",
+            "Zeta Strados",
+            "Zeta Jazz Fusion",
+            "Zeta JV44",
+            "Zeta SV24",
+            "Zeta JLP",
+            "Zetta violin",
+        ]
+        max_pages = 2
 
         seen_ids = set()
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:

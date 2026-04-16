@@ -9,6 +9,8 @@ Setup: https://programmablesearchengine.google.com (free: 100 queries/day)
 
 import httpx
 import logging
+import sqlite3
+from datetime import datetime, timedelta
 from scrapers.base import BaseScraper
 from config import Config
 
@@ -44,7 +46,53 @@ class GoogleScraper(BaseScraper):
         self.api_key = api_key
         self.cse_id = cse_id
 
+    def _should_run(self) -> bool:
+        """Check if enough time has passed since last Google run."""
+        try:
+            conn = sqlite3.connect("zeta_listings.db")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scraper_runs (
+                    scraper TEXT PRIMARY KEY,
+                    last_run TEXT
+                )
+            """)
+            cur = conn.execute(
+                "SELECT last_run FROM scraper_runs WHERE scraper = 'google'"
+            )
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                last_run = datetime.fromisoformat(row[0])
+                if datetime.utcnow() - last_run < timedelta(hours=20):
+                    log.info("Google CSE: skipping — last run was less than 20h ago")
+                    return False
+        except Exception as e:
+            log.warning(f"Google quota guard check failed: {e}")
+        return True
+
+    def _mark_run(self) -> None:
+        """Record that Google search ran successfully."""
+        try:
+            conn = sqlite3.connect("zeta_listings.db")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scraper_runs (
+                    scraper TEXT PRIMARY KEY,
+                    last_run TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT OR REPLACE INTO scraper_runs (scraper, last_run) VALUES (?, ?)",
+                ("google", datetime.utcnow().isoformat()),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            log.warning(f"Google quota guard mark failed: {e}")
+
     async def search(self) -> list:
+        if not self._should_run():
+            return []
+
         if not self.api_key or not self.cse_id:
             log.warning("Google API key or CSE ID not set — skipping Google search.")
             return []
@@ -145,6 +193,7 @@ class GoogleScraper(BaseScraper):
                     except Exception as e:
                         log.warning(f"Google search '{kw}' error: {e}")
 
+        self._mark_run()
         return results
 
     def _extract_price(self, text: str) -> str:

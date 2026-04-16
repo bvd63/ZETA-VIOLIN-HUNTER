@@ -19,8 +19,18 @@ class BaseScraper:
         return False
 
     def _is_excluded_location(self, location: str) -> bool:
+        """Check if location should be excluded. Uses word-boundary
+        matching to avoid 'ro' matching 'Rome' or 'Toronto'."""
+        import re
+        location_lower = location.lower()
         for loc in Config.EXCLUDED_LOCATIONS:
-            if loc.lower() in location.lower():
+            if loc.lower() in location_lower:
+                return True
+        for code in getattr(Config, 'EXCLUDED_COUNTRY_CODES', []):
+            # Match ISO code as a whole word (surrounded by word
+            # boundaries, commas, spaces, or string edges)
+            pattern = r'(?:^|[\s,])' + re.escape(code) + r'(?:$|[\s,])'
+            if re.search(pattern, location, re.IGNORECASE):
                 return True
         return False
 
