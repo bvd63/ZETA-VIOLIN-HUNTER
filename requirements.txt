@@ -8,6 +8,6 @@ aiohttp==3.9.1
 # Added in Prompt 1b — foundation for marketplace rebuilds
 playwright==1.47.0
 praw==7.7.1
-mercari==2.2.1
+mercapi>=0.3.0
 tenacity==8.5.0
 anthropic==0.39.0

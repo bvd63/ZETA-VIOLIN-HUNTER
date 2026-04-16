@@ -453,7 +453,7 @@ Every prompt ends with: "Update CLAUDE.md with what was built."
 - playwright 1.47 + Chromium — headless browser for FB Marketplace,
   Kleinanzeigen, Leboncoin, Wallapop
 - praw 7.7 — official Reddit API
-- mercari 2.2 — Mercari JP + Rakuma API wrapper
+- mercapi 0.3+ — Mercari JP async API wrapper (replaces archived mercari package)
 - tenacity 8.5 — retry with exponential backoff
 - anthropic 0.39 — Claude Haiku SDK (Prompt 9: AI re-verification)
 
