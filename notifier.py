@@ -85,6 +85,8 @@ class TelegramNotifier:
         description = str(listing.get("description", ""))
         date_posted = str(listing.get("date_posted", ""))
         relevance = str(listing.get("relevance_score", "?"))
+        ai_status = listing.get("ai_verified", "")
+        price_context = listing.get("price_context", {})
 
         safe_url = self._normalize_url(url)
         safe_title = html.escape(title)
@@ -96,14 +98,36 @@ class TelegramNotifier:
         lines = [
             f"🎻 <b>#{idx} — {safe_title}</b>",
             f"💰 <b>Price:</b> {safe_price}",
+        ]
+
+        # Price context (if available)
+        if price_context and price_context.get("avg_price"):
+            avg = price_context["avg_price"]
+            deal_pct = price_context.get("deal_pct", 0)
+            total = price_context.get("total_seen", 0)
+            if price_context.get("is_deal"):
+                lines.append(f"🔥 <b>DEAL!</b> {abs(deal_pct):.0f}% below avg (${avg:.0f}, {total} seen)")
+            else:
+                lines.append(f"📊 Avg: ${avg:.0f} ({total} seen)")
+
+        lines.extend([
             f"📍 <b>Location:</b> {safe_location}",
             f"🛒 <b>Platform:</b> {safe_platform}",
-        ]
+        ])
+
         if date_posted:
             lines.append(f"📅 <b>Posted:</b> {html.escape(date_posted)}")
         if description:
             lines.append(f"📝 {safe_description}...")
+
         lines.append(f"⭐ <b>Relevance:</b> {html.escape(relevance)}/10")
+
+        # AI verification badge
+        if ai_status == "YES":
+            lines.append("🤖 <b>AI: ✅ Confirmed Zeta</b>")
+        elif "MAYBE" in str(ai_status):
+            lines.append("🤖 <b>AI: ⚠️ Possible Zeta</b>")
+
         if safe_url:
             lines.append(f"🔗 <a href=\"{html.escape(safe_url, quote=True)}\">View Listing</a>")
             # Plain URL fallback: if Telegram refuses HTML link rendering, user still sees a clickable URL.

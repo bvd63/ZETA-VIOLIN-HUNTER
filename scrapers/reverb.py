@@ -70,6 +70,16 @@ class ReverbScraper(BaseScraper):
                             location = item.get("shop", {}).get("address", {}).get("country_code", "")
                             description = item.get("description", "")[:300]
 
+                            # Extract primary image URL
+                            photos = item.get("photos", [])
+                            image_url = ""
+                            if photos and isinstance(photos, list):
+                                first_photo = photos[0] if photos else {}
+                                if isinstance(first_photo, dict):
+                                    image_url = first_photo.get("_links", {}).get("large_crop", {}).get("href", "")
+                                    if not image_url:
+                                        image_url = first_photo.get("_links", {}).get("thumbnail", {}).get("href", "")
+
                             if self._is_excluded(title + " " + condition):
                                 continue
                             if self._is_excluded_location(location):
@@ -93,6 +103,7 @@ class ReverbScraper(BaseScraper):
                                 "description": description,
                                 "condition": condition,
                                 "relevance_score": score,
+                                "image_url": image_url,
                             })
                     except Exception as e:
                         log.warning(f"Reverb keyword '{kw}' page {page} error: {e}")

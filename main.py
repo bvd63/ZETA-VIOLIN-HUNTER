@@ -28,6 +28,7 @@ from scrapers.violinist_com import ViolinistComScraper
 from scrapers.audiofanzine import AudiofanzineScraper
 
 from ai_verifier import verify_listings_batch
+from price_tracker import PriceTracker
 from config import Config
 
 logging.basicConfig(
@@ -254,6 +255,7 @@ async def run_search_cycle():
 
         db = Database()
         notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)
+        price_tracker = PriceTracker()
 
         all_new_listings = []
         platform_stats = {}
@@ -279,6 +281,9 @@ async def run_search_cycle():
                     if ai_rejected > 0:
                         log.info(f"🤖 AI rejected {ai_rejected} listing(s) from {platform_name}")
                     if verified:
+                        # Enrich with price context
+                        for v in verified:
+                            v["price_context"] = price_tracker.record_listing(v)
                         log.info(f"📬 Sending {len(verified)} verified listing(s) from {platform_name} to Telegram...")
                         await notifier.send_listings(verified)
                         sent_any = True
@@ -294,6 +299,7 @@ async def run_search_cycle():
             log.info(f"\n📬 Sending {len(all_new_listings)} new listings to Telegram...")
             await notifier.send_listings(all_new_listings)
 
+        price_tracker.close()
         db.close()
         log.info("=" * 80)
         log.info("SEARCH CYCLE COMPLETE")

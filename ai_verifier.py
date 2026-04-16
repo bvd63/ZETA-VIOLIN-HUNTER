@@ -102,9 +102,85 @@ async def verify_listing(listing: dict) -> str:
         return "MAYBE"
 
 
+async def verify_listing_image(listing: dict) -> str:
+    """Verify a listing using its image via GPT-4o-mini vision.
+    Only called for listings that got MAYBE from text verification.
+    Returns: 'YES', 'NO', or 'MAYBE'."""
+
+    if not Config.OPENAI_API_KEY:
+        return "MAYBE"
+
+    image_url = listing.get("image_url", "")
+    if not image_url:
+        return "MAYBE"
+
+    title = listing.get("title", "")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                OPENAI_URL,
+                headers={
+                    "Authorization": f"Bearer {Config.OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are verifying if an image shows a Zeta brand "
+                                "electric violin. Zeta violins have a distinctive "
+                                "modern design: solid or semi-hollow body, double "
+                                "cutaway upper bout, no traditional scroll (uses "
+                                "tuning pegs or Imbus pegs), usually 4 or 5 strings. "
+                                "They look very different from traditional violins. "
+                                "Reply YES if this looks like a Zeta, NO if not, "
+                                "MAYBE if unclear."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Listing title: {title}. Is this a Zeta violin?",
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": image_url, "detail": "low"},
+                                },
+                            ],
+                        },
+                    ],
+                    "max_tokens": 10,
+                    "temperature": 0,
+                },
+            )
+
+            if resp.status_code != 200:
+                log.warning(f"AI image verify error: HTTP {resp.status_code}")
+                return "MAYBE"
+
+            data = resp.json()
+            answer = data["choices"][0]["message"]["content"].strip().upper()
+
+            if "YES" in answer:
+                return "YES"
+            if "NO" in answer:
+                return "NO"
+            return "MAYBE"
+
+    except Exception as e:
+        log.warning(f"AI image verify error: {e}")
+        return "MAYBE"
+
+
 async def verify_listings_batch(listings: list) -> list:
-    """Verify a batch of listings. Returns only those that pass
-    (YES or MAYBE). NO listings are filtered out."""
+    """Verify a batch of listings with text AI. For MAYBE results
+    that have images, do a visual check too. Returns listings that
+    pass (YES or MAYBE-without-image)."""
 
     if not Config.OPENAI_API_KEY:
         log.info("OPENAI_API_KEY not set — skipping AI verification, "
@@ -119,13 +195,26 @@ async def verify_listings_batch(listings: list) -> list:
 
     for listing in listings:
         verdict = await verify_listing(listing)
+
         if verdict == "NO":
             rejected += 1
             log.info(f"AI rejected: [{listing.get('platform', '')}] "
                      f"{listing.get('title', '')[:60]} — NOT a Zeta violin")
+            continue
+
+        if verdict == "MAYBE" and listing.get("image_url"):
+            # Double-check with image
+            img_verdict = await verify_listing_image(listing)
+            if img_verdict == "NO":
+                rejected += 1
+                log.info(f"AI image rejected: [{listing.get('platform', '')}] "
+                         f"{listing.get('title', '')[:60]} — image not a Zeta")
+                continue
+            listing["ai_verified"] = f"MAYBE+IMG:{img_verdict}"
         else:
             listing["ai_verified"] = verdict
-            verified.append(listing)
+
+        verified.append(listing)
 
     if rejected > 0:
         log.info(f"AI verification: {len(verified)} passed, {rejected} rejected")

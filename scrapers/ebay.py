@@ -182,6 +182,15 @@ class EbayScraper(BaseScraper):
                             if not description:
                                 description = item.get("subtitle", "")
 
+                            # Extract primary image URL
+                            image_url = ""
+                            image_obj = item.get("image", {})
+                            if isinstance(image_obj, dict):
+                                image_url = image_obj.get("imageUrl", "")
+                            thumbnails = item.get("thumbnailImages", [])
+                            if not image_url and thumbnails:
+                                image_url = thumbnails[0].get("imageUrl", "")
+
                             # Apply standard filters
                             full_text = f"{title} {description} {condition}"
                             if self._is_excluded(full_text):
@@ -207,6 +216,7 @@ class EbayScraper(BaseScraper):
                                 "description": description[:300],
                                 "condition": condition,
                                 "relevance_score": score,
+                                "image_url": image_url,
                             })
 
                     except Exception as e:

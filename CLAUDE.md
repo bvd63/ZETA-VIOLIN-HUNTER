@@ -51,7 +51,8 @@ violas, cellos, basses, mandolins — violins only).
 - `scrapers/maestronet.py` — Maestronet forum classifieds, httpx + BeautifulSoup (Prompt 7).
 - `scrapers/violinist_com.py` — Violinist.com forum, httpx + BeautifulSoup (Prompt 7).
 - `scrapers/audiofanzine.py` — Audiofanzine classifieds, httpx + BeautifulSoup (Prompt 7).
-- `ai_verifier.py` — GPT-4o-mini re-verification layer. Every listing passing keyword filters is checked by AI before Telegram send. Requires OPENAI_API_KEY; passes all through if not set (Prompt 7).
+- `ai_verifier.py` — GPT-4o-mini re-verification layer. Every listing passing keyword filters is checked by AI before Telegram send. Requires OPENAI_API_KEY; passes all through if not set (Prompt 7). Enhanced with image verification for MAYBE listings via GPT-4o-mini vision (Prompt 8).
+- `price_tracker.py` — SQLite price history, deal detection (30%+ below average). Currency conversion for 10 currencies. Integrated into main.py pipeline (Prompt 8).
 
 ### What is broken
 
@@ -383,6 +384,7 @@ Optional tuning:
 - Prompt 5 — European marketplaces + Dockerfile ✅ COMPLETED (2026-04-16)
 - Prompt 6 — eBay dedup + Mercari JP + Reddit ✅ COMPLETED (2026-04-16)
 - Prompt 7 — Music forums (Maestronet, Violinist.com, Audiofanzine) + AI re-verification (GPT-4o-mini) ✅ COMPLETED (2026-04-16)
+- Prompt 8 — Price history + image verification + deal detection ✅ COMPLETED (2026-04-16)
 
 ---
 
@@ -390,6 +392,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Added price history (SQLite), deal detection (30% below avg), image verification (GPT-4o-mini vision), enhanced Telegram alerts | Prompt 8. Cost ~$0.001/listing text + ~$0.003/listing image. |
 | 2026-04-16 | Added Maestronet, Violinist.com, Audiofanzine forum scrapers + GPT-4o-mini AI re-verification layer | Prompt 7. Forums catch niche listings missed by marketplaces. AI rejects false positives (jackets, accessories, wrong brand) before Telegram send. Fail-open: OPENAI_API_KEY absent or API error → listing passes through. Used httpx directly, no openai pip package. |
 | 2026-04-16 | Fixed eBay duplicates (dedup on itemId not URL), added Mercari JP (mercapi), Reddit (praw) | Prompt 6. eBay same item had different URLs per marketplace. Mercari uses async API wrapper. Reddit uses praw in asyncio.to_thread. |
 | 2026-04-16 | Fixed Kleinanzeigen (BS4 fallback selectors), Wallapop (Origin/Referer headers + web fallback), Leboncoin (switched to Playwright) | Prompt 5-fix. All 3 had anti-bot issues on first deploy. |
@@ -471,6 +474,10 @@ Every prompt ends with: "Update CLAUDE.md with what was built."
 - mercapi 0.3+ — Mercari JP async API wrapper (replaces archived mercari package)
 - tenacity 8.5 — retry with exponential backoff
 - anthropic 0.39 — Claude Haiku SDK (Prompt 9: AI re-verification)
+
+### Data & verification (added Prompt 8)
+
+- price_tracker.py — SQLite price_history table, currency conversion (10 currencies), deal detection (30%+ below average)
 
 ### Infrastructure files
 
