@@ -31,6 +31,9 @@ class ReverbScraper(BaseScraper):
             "Zeta SV24",
             "Zeta JLP",
             "Zetta violin",
+            "Strados violin",
+            "electric violin 5 string MIDI",
+            "electric violin Jean-Luc Ponty",
         ]
         max_pages = 2
 

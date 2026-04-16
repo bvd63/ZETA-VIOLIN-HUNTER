@@ -23,20 +23,20 @@ violas, cellos, basses, mandolins — violins only).
 
 ### Infrastructure
 - Deployment status: Active
-- Last run: daily at 09:00 UTC (scheduler working)
+- Last run: 2x daily at 09:00 + 21:00 UTC (scheduler working)
 - Cost: ~$0.38/month actual, ~$1.96/month estimated (well under $5 free tier)
 - HTTP server: port 8080, endpoints `/search`, `/health`, `/status` reachable
 
 ### What works
-- `scrapers/reverb.py` — returns listings from Reverb API. FIXED in Prompt 3: reduced to 8 keywords × 2 pages (was 30+ × 5).
+- `scrapers/reverb.py` — returns listings from Reverb API. FIXED in Prompt 3: reduced to 8 keywords × 2 pages (was 30+ × 5). Expanded to 11 keywords in Prompt 10 (+Strados violin, 5-string MIDI, Jean-Luc Ponty).
 - `scrapers/craigslist.py` — returns listings from RSS feeds (scans ~400 US cities)
 - `scrapers/ebay.py` — REWRITTEN in Prompt 2. Now uses eBay Browse API
   with OAuth2 client_credentials grant. Searches 13 marketplaces with 8
   keywords. Requires EBAY_CLIENT_ID + EBAY_CLIENT_SECRET.
 - `scrapers/subito.py` — FIXED in Prompt 3. Strict Zeta filter — requires
   "zeta" or model code in ad's own text. 5 focused keywords.
-- `scrapers/google.py` — FIXED in Prompt 3. 20h quota guard via SQLite prevents
-  double-run on container restart.
+- `scrapers/google.py` — FIXED in Prompt 3. Quota guard via SQLite prevents
+  double-run on container restart. Guard reduced to 10h in Prompt 10 for 2x/day schedule.
 - `main.py` core orchestration: scheduler, concurrency, dedup, Telegram send
 - `database.py` — SQLite dedup with hash(platform:url)
 - `notifier.py` — Telegram formatted alerts
@@ -400,6 +400,8 @@ Optional tuning:
 - Prompt 8 — Price history + image verification + deal detection ✅ COMPLETED (2026-04-16)
 - Prompt 9 (FINAL) — Dashboard /status + disable blocked scrapers + per-scraper stats ✅ COMPLETED (2026-04-16)
 
+- Prompt 10 — Reverb +3 keywords, 2x/day schedule (09:00+21:00 UTC), Google 10h guard ✅ COMPLETED (2026-04-16)
+
 ALL PROMPTS COMPLETED. Bot is fully operational.
 
 ---
@@ -425,6 +427,7 @@ ALL PROMPTS COMPLETED. Bot is fully operational.
 | 2026-04-16 | Scope = violins only (no viola, cello, bass, mandolin) | Owner preference, keeps filter tight |
 | 2026-04-16 | Switched Railway builder from railpack → nixpacks; added nixpacks.toml | Required to run `playwright install --with-deps chromium` at build time; railpack has no hook for post-install browser download |
 | 2026-04-16 | Install only Chromium, not Firefox/WebKit | Saves ~400MB of build disk and download time; all targeted JS-heavy sites work in Chromium |
+| 2026-04-16 | Reverb +3 keywords (Strados violin, 5-string MIDI, Jean-Luc Ponty), schedule 2x/day (09:00+21:00 UTC), Google guard 20h→10h | Prompt 10. Broader Reverb coverage catches listings without "Zeta" in title. Evening run doubles detection frequency. |
 | 2026-04-16 | Disabled 6 anti-bot-blocked scrapers, added /status dashboard with per-scraper stats and price history | Prompt 9 (FINAL). Disabled scrapers remain in codebase for future re-activation. Active scraper count: 7. |
 | 2026-04-16 | Pin playwright==1.47.0 explicitly | Each Playwright Python release bundles specific browser versions; pinning prevents surprise breakage on Railway rebuild |
 

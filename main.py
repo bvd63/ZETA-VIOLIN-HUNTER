@@ -383,12 +383,12 @@ async def main():
     scheduler.add_job(
         run_search_cycle,
         "cron",
-        hour=Config.SEARCH_HOUR,
+        hour="9,21",
         minute=0,
         timezone="UTC"
     )
     scheduler.start()
-    log.info(f"⏰ Scheduled to run daily at {Config.SEARCH_HOUR}:00 UTC")
+    log.info("⏰ Scheduled to run 2x daily at 09:00 + 21:00 UTC")
 
     # Keep running
     try:

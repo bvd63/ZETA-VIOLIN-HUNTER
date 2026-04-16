@@ -63,8 +63,8 @@ class GoogleScraper(BaseScraper):
             conn.close()
             if row:
                 last_run = datetime.fromisoformat(row[0])
-                if datetime.utcnow() - last_run < timedelta(hours=20):
-                    log.info("Google CSE: skipping — last run was less than 20h ago")
+                if datetime.utcnow() - last_run < timedelta(hours=10):
+                    log.info("Google CSE: skipping — last run was less than 10h ago")
                     return False
         except Exception as e:
             log.warning(f"Google quota guard check failed: {e}")
