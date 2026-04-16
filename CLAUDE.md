@@ -12,7 +12,7 @@ A Python bot that:
 - Scrapes global online marketplaces once per day at 09:00 UTC (12:00 Romania)
 - Detects NEW Zeta electric violin listings (dedup via SQLite)
 - Sends Telegram alerts to a single user (Vlad, owner)
-- Also exposes HTTP endpoints: `POST /search` (manual trigger) and `GET /health`
+- Also exposes HTTP endpoints: `POST /search` (manual trigger), `GET /health`, `GET /status` (dashboard)
 
 Non-goals: web UI, multi-user, real-time, mobile app, other instruments (no 
 violas, cellos, basses, mandolins — violins only).
@@ -25,7 +25,7 @@ violas, cellos, basses, mandolins — violins only).
 - Deployment status: Active
 - Last run: daily at 09:00 UTC (scheduler working)
 - Cost: ~$0.38/month actual, ~$1.96/month estimated (well under $5 free tier)
-- HTTP server: port 8080, endpoints `/search` and `/health` reachable
+- HTTP server: port 8080, endpoints `/search`, `/health`, `/status` reachable
 
 ### What works
 - `scrapers/reverb.py` — returns listings from Reverb API. FIXED in Prompt 3: reduced to 8 keywords × 2 pages (was 30+ × 5).
@@ -53,6 +53,17 @@ violas, cellos, basses, mandolins — violins only).
 - `scrapers/audiofanzine.py` — Audiofanzine classifieds, httpx + BeautifulSoup (Prompt 7).
 - `ai_verifier.py` — GPT-4o-mini re-verification layer. Every listing passing keyword filters is checked by AI before Telegram send. Requires OPENAI_API_KEY; passes all through if not set (Prompt 7). Enhanced with image verification for MAYBE listings via GPT-4o-mini vision (Prompt 8).
 - `price_tracker.py` — SQLite price history, deal detection (30%+ below average). Currency conversion for 10 currencies. Integrated into main.py pipeline (Prompt 8).
+- `status_tracker.py` — SQLite per-scraper stats + /status JSON dashboard (Prompt 9).
+- `GET /status` endpoint — comprehensive bot health info: last cycle, per-scraper stats, all-time totals, price history (Prompt 9).
+
+### Disabled scrapers (anti-bot blocked, files retained for future re-activation)
+
+- `scrapers/kleinanzeigen.py` — disabled (Cloudflare anti-bot). Covered by Google CSE.
+- `scrapers/wallapop.py` — disabled (Datadome anti-bot). Covered by Google CSE.
+- `scrapers/leboncoin.py` — disabled (anti-bot). Covered by Google CSE.
+- `scrapers/maestronet.py` — disabled (404 / search errors). Covered by Google CSE.
+- `scrapers/violinist_com.py` — disabled (404 / search errors). Covered by Google CSE.
+- `scrapers/audiofanzine.py` — disabled (404 / search errors). Covered by Google CSE.
 
 ### What is broken
 
@@ -94,6 +105,8 @@ File layout (top level):
   - violinist_com.py — Violinist.com forum (httpx + BeautifulSoup)
   - audiofanzine.py — Audiofanzine classifieds (httpx + BeautifulSoup)
 - ai_verifier.py — GPT-4o-mini re-verification (httpx direct, no openai package)
+- status_tracker.py — Per-scraper stats + /status dashboard (SQLite)
+- price_tracker.py — Price history + deal detection (SQLite)
 - requirements.txt
 - railway.toml — Railway build + deploy config
 - env.example — Template for env vars
@@ -385,6 +398,9 @@ Optional tuning:
 - Prompt 6 — eBay dedup + Mercari JP + Reddit ✅ COMPLETED (2026-04-16)
 - Prompt 7 — Music forums (Maestronet, Violinist.com, Audiofanzine) + AI re-verification (GPT-4o-mini) ✅ COMPLETED (2026-04-16)
 - Prompt 8 — Price history + image verification + deal detection ✅ COMPLETED (2026-04-16)
+- Prompt 9 (FINAL) — Dashboard /status + disable blocked scrapers + per-scraper stats ✅ COMPLETED (2026-04-16)
+
+ALL PROMPTS COMPLETED. Bot is fully operational.
 
 ---
 
@@ -409,6 +425,7 @@ Optional tuning:
 | 2026-04-16 | Scope = violins only (no viola, cello, bass, mandolin) | Owner preference, keeps filter tight |
 | 2026-04-16 | Switched Railway builder from railpack → nixpacks; added nixpacks.toml | Required to run `playwright install --with-deps chromium` at build time; railpack has no hook for post-install browser download |
 | 2026-04-16 | Install only Chromium, not Firefox/WebKit | Saves ~400MB of build disk and download time; all targeted JS-heavy sites work in Chromium |
+| 2026-04-16 | Disabled 6 anti-bot-blocked scrapers, added /status dashboard with per-scraper stats and price history | Prompt 9 (FINAL). Disabled scrapers remain in codebase for future re-activation. Active scraper count: 7. |
 | 2026-04-16 | Pin playwright==1.47.0 explicitly | Each Playwright Python release bundles specific browser versions; pinning prevents surprise breakage on Railway rebuild |
 
 ---
@@ -428,6 +445,8 @@ Optional tuning:
 | Reverb 30 keywords × 5 pages = 150+ API calls per cycle | Low | Fixed in Prompt 3 (8×2) |
 | Google CSE quota (100/day) consumed per run, wasted on restarts | Low | Fixed in Prompt 3 (20h guard) |
 | Duplicate file scrapers/58com.py and scrapers/com_58.py | Low | Fixed (both deleted) in Prompt 1a |
+| Kleinanzeigen/Wallapop/Leboncoin permanently blocked by anti-bot | Medium | Disabled in Prompt 9, covered by Google CSE |
+| Maestronet/Violinist.com/Audiofanzine 404 on search URLs | Low | Disabled in Prompt 9, covered by Google CSE |
 
 ---
 

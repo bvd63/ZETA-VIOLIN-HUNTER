@@ -29,6 +29,7 @@ from scrapers.audiofanzine import AudiofanzineScraper
 
 from ai_verifier import verify_listings_batch
 from price_tracker import PriceTracker
+from status_tracker import StatusTracker
 from config import Config
 
 logging.basicConfig(
@@ -40,6 +41,7 @@ log = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 search_cycle_lock = asyncio.Lock()
+status_tracker = StatusTracker()
 
 
 VIOLIN_TERMS = {
@@ -166,14 +168,8 @@ def build_scrapers() -> list:
         GoogleScraper(Config.GOOGLE_API_KEY, Config.GOOGLE_CSE_ID),
         CraigslistScraper(),
         SubitoScraper(),
-        KleinanzeigenScraper(),
-        WallapopScraper(),
-        LeboncoinScraper(),
         MercariJPScraper(),
         RedditScraper(),
-        MaestronetScraper(),
-        ViolinistComScraper(),
-        AudiofanzineScraper(),
     ]
 
 
@@ -251,6 +247,7 @@ async def run_search_cycle():
     async with search_cycle_lock:
         log.info("=" * 80)
         log.info(f"🎻 STARTING ZETA VIOLIN HUNT at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        status_tracker.start_cycle()
         log.info("=" * 80)
 
         db = Database()
@@ -272,6 +269,15 @@ async def run_search_cycle():
             all_new_listings.extend(new_listings)
             platform_stats[platform_name] = status
 
+            # Record scraper stats
+            raw_count = len(new_listings) if isinstance(status, int) else 0
+            status_tracker.record_scraper(
+                platform_name,
+                raw=raw_count if status != "ERROR" else 0,
+                new=len(new_listings),
+                error=str(status) if status == "ERROR" else "",
+            )
+
             # Send immediately per-platform so results are not lost on container restarts.
             if new_listings:
                 try:
@@ -280,6 +286,7 @@ async def run_search_cycle():
                     ai_rejected = len(new_listings) - len(verified)
                     if ai_rejected > 0:
                         log.info(f"🤖 AI rejected {ai_rejected} listing(s) from {platform_name}")
+                        status_tracker.record_ai_rejection(platform_name, ai_rejected)
                     if verified:
                         # Enrich with price context
                         for v in verified:
@@ -308,6 +315,14 @@ async def run_search_cycle():
             log.info(f"  {platform}: {count}")
         log.info("=" * 80)
 
+        status_tracker.end_cycle(
+            total_sent=len(all_new_listings),
+            total_ai_rejected=sum(
+                1 for s in platform_stats.values()
+                if s == "ERROR"
+            ),
+        )
+
         return len(all_new_listings)
 
 
@@ -333,6 +348,15 @@ async def handle_health(request):
     return web.json_response({"status": "healthy"})
 
 
+async def handle_status(request):
+    """Detailed status dashboard endpoint."""
+    try:
+        status = status_tracker.get_status()
+        return web.json_response(status)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
 async def main():
     log.info("🎻 Zeta Violin Hunter starting up...")
 
@@ -340,6 +364,7 @@ async def main():
     app = web.Application()
     app.router.add_post('/search', handle_search)
     app.router.add_get('/health', handle_health)
+    app.router.add_get('/status', handle_status)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -348,6 +373,7 @@ async def main():
     log.info("🌐 HTTP server started on port 8080")
     log.info("   POST /search - Trigger manual search")
     log.info("   GET /health - Health check")
+    log.info("   GET /status - Detailed status dashboard")
 
     # Run first search in background so health endpoint is available immediately.
     asyncio.create_task(run_search_cycle())
