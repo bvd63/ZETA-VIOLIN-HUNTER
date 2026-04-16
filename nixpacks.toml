@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ['python311', 'gcc']
+nixPkgs = ['python311', 'gcc', 'libffi', 'pkg-config']
 
 [phases.install]
 cmds = [
