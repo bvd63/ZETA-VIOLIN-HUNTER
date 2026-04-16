@@ -152,7 +152,7 @@ def _passes_platform_score(listing: dict) -> bool:
 def build_scrapers() -> list:
     return [
         ReverbScraper(),
-        EbayScraper(Config.EBAY_APP_ID),
+        EbayScraper(Config.EBAY_CLIENT_ID, Config.EBAY_CLIENT_SECRET),
         GoogleScraper(Config.GOOGLE_API_KEY, Config.GOOGLE_CSE_ID),
         CraigslistScraper(),
         SubitoScraper(),

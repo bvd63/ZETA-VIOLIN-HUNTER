@@ -1,117 +1,213 @@
 """
-eBay scraper — uses eBay Finding API (free, covers all eBay country sites).
-Register at: https://developer.ebay.com (free)
+eBay Browse API scraper — OAuth2 client credentials + search endpoint.
+Replaces the dead Finding API (decommissioned 2025-02-05).
+
+Setup: EBAY_CLIENT_ID + EBAY_CLIENT_SECRET in env vars.
+Docs: https://developer.ebay.com/api-docs/buy/browse/resources/item_summary/methods/search
 """
 
 import httpx
 import logging
-import xml.etree.ElementTree as ET
+import base64
+import time
 from scrapers.base import BaseScraper
 from config import Config
 
 log = logging.getLogger(__name__)
 
-EBAY_API_URL = "https://svcs.ebay.com/services/search/FindingService/v1"
+OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+BROWSE_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+OAUTH_SCOPE = "https://api.ebay.com/oauth/api_scope"
 
-GLOBAL_IDS = [
-    "EBAY-US", "EBAY-GB", "EBAY-DE", "EBAY-AU", "EBAY-AT",
-    "EBAY-BE-FR", "EBAY-BE-NL", "EBAY-CA", "EBAY-FR", "EBAY-HK",
-    "EBAY-IT", "EBAY-MOTOR", "EBAY-NL", "EBAY-PL", "EBAY-SG",
-    "EBAY-ES", "EBAY-CH", "EBAY-IE",
+# Major eBay marketplaces — covers US, Europe, UK, Australia, Japan
+MARKETPLACES = [
+    "EBAY_US",
+    "EBAY_GB",
+    "EBAY_DE",
+    "EBAY_FR",
+    "EBAY_IT",
+    "EBAY_ES",
+    "EBAY_AU",
+    "EBAY_CA",
+    "EBAY_AT",
+    "EBAY_CH",
+    "EBAY_NL",
+    "EBAY_PL",
+    "EBAY_IE",
 ]
 
-NS = "http://www.ebay.com/marketplace/search/v1/services"
+# Focused keywords — specific enough to find Zeta violins, few enough
+# to stay within Browse API rate limits (5000 calls/day free tier).
+KEYWORDS = [
+    "Zeta violin",
+    "Zeta electric violin",
+    "Zeta Strados",
+    "Zeta Jazz Fusion",
+    "Zeta JV44",
+    "Zeta SV24",
+    "Zeta JLP",
+    "Zetta violin",
+]
 
 
 class EbayScraper(BaseScraper):
     name = "eBay"
 
-    def __init__(self, app_id: str):
-        self.app_id = app_id
+    def __init__(self, client_id: str, client_secret: str):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self._token: str = ""
+        self._token_expires: float = 0.0
+
+    async def _get_token(self, client: httpx.AsyncClient) -> str:
+        """Get or refresh OAuth2 application token."""
+        now = time.time()
+        if self._token and now < self._token_expires:
+            return self._token
+
+        if not self.client_id or not self.client_secret:
+            log.warning("eBay CLIENT_ID or CLIENT_SECRET not set — skipping.")
+            return ""
+
+        credentials = base64.b64encode(
+            f"{self.client_id}:{self.client_secret}".encode()
+        ).decode()
+
+        try:
+            resp = await client.post(
+                OAUTH_URL,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Authorization": f"Basic {credentials}",
+                },
+                data={
+                    "grant_type": "client_credentials",
+                    "scope": OAUTH_SCOPE,
+                },
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                log.error(f"eBay OAuth failed: {resp.status_code} — {resp.text[:300]}")
+                return ""
+
+            data = resp.json()
+            self._token = data.get("access_token", "")
+            expires_in = int(data.get("expires_in", 7200))
+            # Refresh 30 minutes early to avoid mid-search expiry
+            self._token_expires = now + expires_in - 1800
+            log.info(f"eBay OAuth token acquired, expires in {expires_in}s")
+            return self._token
+
+        except Exception as e:
+            log.error(f"eBay OAuth error: {e}")
+            return ""
 
     async def search(self) -> list:
-        if not self.app_id:
-            log.warning("eBay APP_ID not set — skipping eBay search.")
+        if not self.client_id or not self.client_secret:
+            log.warning("eBay CLIENT_ID or CLIENT_SECRET not set — skipping eBay.")
             return []
 
         results = []
         seen_ids = set()
 
-        keywords = [
-            "Zeta violin", "Zeta electric violin", "Zeta Strados",
-            "Zeta Jazz Fusion", "Zeta JV44", "Zeta SV24", "Zeta EV44",
-            "Zetta violin", "Zeta Geige", "violino elettrico Zeta",
-        ]
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            token = await self._get_token(client)
+            if not token:
+                return []
 
-        async with httpx.AsyncClient(timeout=20) as client:
-            for global_id in GLOBAL_IDS:
-                for kw in keywords:
+            for marketplace in MARKETPLACES:
+                for kw in KEYWORDS:
                     try:
-                        params = {
-                            "OPERATION-NAME": "findItemsByKeywords",
-                            "SERVICE-VERSION": "1.0.0",
-                            "SECURITY-APPNAME": self.app_id,
-                            "RESPONSE-DATA-FORMAT": "XML",
-                            "REST-PAYLOAD": "",
-                            "keywords": kw,
-                            "paginationInput.entriesPerPage": "50",
-                            "itemFilter(0).name": "ListingStatus",
-                            "itemFilter(0).value": "Active",
-                            "GLOBAL-ID": global_id,
-                        }
-                        resp = await client.get(EBAY_API_URL, params=params)
-                        if resp.status_code != 200:
+                        resp = await client.get(
+                            BROWSE_URL,
+                            headers={
+                                "Authorization": f"Bearer {token}",
+                                "X-EBAY-C-MARKETPLACE-ID": marketplace,
+                                "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=<ePNCampaignId>,affiliateReferenceId=<referenceId>",
+                            },
+                            params={
+                                "q": kw,
+                                "limit": 50,
+                                "filter": "buyingOptions:{FIXED_PRICE|AUCTION}",
+                            },
+                        )
+
+                        if resp.status_code == 401:
+                            # Token expired mid-search — refresh once
+                            self._token = ""
+                            token = await self._get_token(client)
+                            if not token:
+                                break
                             continue
 
-                        root = ET.fromstring(resp.text)
-                        items = root.findall(f".//{{{NS}}}item")
+                        if resp.status_code == 429:
+                            log.warning(f"eBay rate limit hit on {marketplace}")
+                            break
+
+                        if resp.status_code != 200:
+                            log.warning(
+                                f"eBay {marketplace} '{kw}': "
+                                f"HTTP {resp.status_code} — {resp.text[:200]}"
+                            )
+                            continue
+
+                        data = resp.json()
+                        items = data.get("itemSummaries", [])
 
                         for item in items:
-                            def g(tag):
-                                el = item.find(f".//{{{NS}}}{tag}")
-                                return el.text if el is not None else ""
+                            url = item.get("itemWebUrl", "")
+                            if not url:
+                                continue
 
-                            item_id = g("itemId")
-                            url = g("viewItemURL")
-                            unique_id = self._make_id("ebay", url or item_id)
-
+                            unique_id = self._make_id("ebay", url)
                             if unique_id in seen_ids:
                                 continue
                             seen_ids.add(unique_id)
 
-                            title = g("title")
-                            price = f"{g('currentPrice')} {g('currencyId')}"
-                            location = g("location")
-                            country = g("country")
-                            end_time = g("endTime")
-                            condition = g("conditionDisplayName")
+                            title = item.get("title", "")
+                            price_obj = item.get("price", {})
+                            price = f"{price_obj.get('value', '?')} {price_obj.get('currency', '')}"
+                            condition = item.get("condition", "")
+                            location_obj = item.get("itemLocation", {})
+                            country = location_obj.get("country", "")
+                            postal = location_obj.get("postalCode", "")
+                            location = f"{postal}, {country}".strip(", ")
 
-                            if self._is_excluded(title):
+                            # Get description snippet from short description
+                            # or subtitle if available
+                            description = item.get("shortDescription", "")
+                            if not description:
+                                description = item.get("subtitle", "")
+
+                            # Apply standard filters
+                            full_text = f"{title} {description} {condition}"
+                            if self._is_excluded(full_text):
                                 continue
                             if self._is_excluded_location(location + " " + country):
                                 continue
                             if not self._price_in_range(price):
                                 continue
-                            if not self._year_in_range(title):
+                            if not self._year_in_range(full_text):
                                 continue
 
-                            score = self._relevance_score(title)
+                            score = self._relevance_score(title, description)
                             if score < 2:
                                 continue
 
                             results.append({
                                 "id": unique_id,
-                                "platform": f"eBay ({global_id})",
+                                "platform": f"eBay ({marketplace})",
                                 "title": title,
                                 "price": price,
-                                "location": f"{location}, {country}",
+                                "location": location,
                                 "url": url,
-                                "description": f"Condition: {condition}",
-                                "date_posted": end_time[:10] if end_time else "",
+                                "description": description[:300],
+                                "condition": condition,
                                 "relevance_score": score,
                             })
 
                     except Exception as e:
-                        log.warning(f"eBay {global_id} '{kw}' error: {e}")
+                        log.warning(f"eBay {marketplace} '{kw}' error: {e}")
 
+        log.info(f"eBay Browse API: {len(results)} listings found across {len(MARKETPLACES)} marketplaces")
         return results

@@ -14,6 +14,10 @@ class Config:
     # --- eBay ---
     EBAY_APP_ID = os.getenv("EBAY_APP_ID", "")
 
+    # --- eBay Browse API (OAuth2) ---
+    EBAY_CLIENT_ID = os.getenv("EBAY_CLIENT_ID", os.getenv("EBAY_APP_ID", ""))
+    EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "")
+
     # --- Google Custom Search ---
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
     GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")

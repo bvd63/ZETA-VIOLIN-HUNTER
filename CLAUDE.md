@@ -30,14 +30,15 @@ violas, cellos, basses, mandolins — violins only).
 ### What works
 - `scrapers/reverb.py` — returns listings from Reverb API (public, no key needed)
 - `scrapers/craigslist.py` — returns listings from RSS feeds (scans ~400 US cities)
+- `scrapers/ebay.py` — REWRITTEN in Prompt 2. Now uses eBay Browse API
+  with OAuth2 client_credentials grant. Searches 13 marketplaces with 8
+  keywords. Requires EBAY_CLIENT_ID + EBAY_CLIENT_SECRET.
 - `main.py` core orchestration: scheduler, concurrency, dedup, Telegram send
 - `database.py` — SQLite dedup with hash(platform:url)
 - `notifier.py` — Telegram formatted alerts
 - `config.py` — env-based configuration
 
 ### What is broken
-- `scrapers/ebay.py` — uses eBay Finding API, DECOMMISSIONED 2025-02-05. 
-  Returns 0 from all 18 country sites. Needs migration to Browse API (OAuth2).
 - `scrapers/subito.py` — returns some listings but crawls entire __NEXT_DATA__ 
   tree including unrelated ads. Needs strict filter (require "zeta" in the 
   ad's own title/body, not in recommendations).
@@ -326,7 +327,7 @@ Required:
 - GOOGLE_API_KEY — Google Cloud Console
 - GOOGLE_CSE_ID — programmablesearchengine.google.com
 
-Required after eBay migration (Prompt 2):
+Required after eBay migration (REQUIRED — configured):
 - EBAY_CLIENT_ID — developer.ebay.com (formerly EBAY_APP_ID)
 - EBAY_CLIENT_SECRET — developer.ebay.com Cert ID
 
@@ -367,8 +368,7 @@ Optional tuning:
 - Prompt 0 — Create CLAUDE.md foundation (COMPLETED 2026-04-16)
 - Prompt 1a — Prune dead code: remove 52 stub scrapers, Procfile, scrapy dep, duplicate 58com.py ✅ COMPLETED (2026-04-16)
 - Prompt 1b — Add Playwright + praw + mercari deps + Railway Chromium install ✅ COMPLETED (2026-04-16)
-- Prompt 2 — Rewrite scrapers/ebay.py using eBay Browse API with OAuth2 
-  client credentials
+- Prompt 2 — eBay Browse API migration ✅ COMPLETED (2026-04-16)
 - Prompt 3 — Rewrite scrapers/subito.py with strict Zeta filter (no 
   __NEXT_DATA__ tree walking)
 - Prompt 4 — Fix config.py location filter bug (substring "ro" match) + 
@@ -382,6 +382,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Rewrote eBay scraper: Finding API → Browse API with OAuth2 | Prompt 2. 13 marketplaces, 8 keywords, client_credentials grant, 50 results per query, token cached with 30min early refresh |
 | 2026-04-16 | Added 5 new Python deps + Chromium via nixpacks.toml + .gitignore | Prompt 1b. Playwright for anti-bot sites; praw/mercari for official API access; tenacity for retries; anthropic for AI re-verification in Prompt 9. Build time increases 5-10 min for Chromium download. |
 | 2026-04-16 | Deleted 52 dead scrapers, Procfile, and scrapy dep; active scraper count 55 → 5 | Completed as Prompt 1a. Future marketplace coverage will be rebuilt in Prompts 5-8 using Playwright + official libraries (praw, mercari, ebay-oauth-python-client). |
 | 2026-04-16 | Drop ~50 non-working scrapers rather than fix each | Net savings: fewer false positives, simpler maintenance, rely on Google Custom Search for platforms we can't scrape directly |
@@ -401,7 +402,7 @@ Optional tuning:
 | Bug | Severity | Status |
 |---|---|---|
 | __pycache__ and .pyc files accidentally tracked in git | Low | Fixed in Prompt 1b (.gitignore created, files untracked via git rm --cached) |
-| eBay Finding API returns 0 (decommissioned) | High | To fix in Prompt 2 |
+| eBay Finding API returns 0 (decommissioned) | High | Fixed in Prompt 2 — migrated to Browse API |
 | Facebook Marketplace scraper is a stub with 402 log-spam lines | Medium | Fixed (deleted) in Prompt 1a |
 | 40+ scrapers have broken CSS selectors / anti-bot blocks | Medium | Fixed (deleted) in Prompt 1a |
 | "ro" in "Rome" substring match excludes legit Italian/Canadian listings | Medium | To fix in Prompt 4 |
