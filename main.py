@@ -18,6 +18,9 @@ from scrapers.ebay import EbayScraper
 from scrapers.google import GoogleScraper
 from scrapers.craigslist import CraigslistScraper
 from scrapers.subito import SubitoScraper
+from scrapers.kleinanzeigen import KleinanzeigenScraper
+from scrapers.wallapop import WallapopScraper
+from scrapers.leboncoin import LeboncoinScraper
 
 from config import Config
 
@@ -156,6 +159,9 @@ def build_scrapers() -> list:
         GoogleScraper(Config.GOOGLE_API_KEY, Config.GOOGLE_CSE_ID),
         CraigslistScraper(),
         SubitoScraper(),
+        KleinanzeigenScraper(),
+        WallapopScraper(),
+        LeboncoinScraper(),
     ]
 
 

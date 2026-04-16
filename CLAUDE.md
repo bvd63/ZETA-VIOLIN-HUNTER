@@ -42,6 +42,10 @@ violas, cellos, basses, mandolins — violins only).
 - `notifier.py` — Telegram formatted alerts
 - `config.py` — env-based configuration. FIXED in Prompt 3: location exclusion
   uses word-boundary matching (EXCLUDED_COUNTRY_CODES = ["RO"]).
+- `scrapers/kleinanzeigen.py` — Playwright headless Chromium, searches German
+  musical instruments category (Prompt 5).
+- `scrapers/wallapop.py` — public API, Spanish marketplace (Prompt 5).
+- `scrapers/leboncoin.py` — httpx + __NEXT_DATA__ JSON, French marketplace (Prompt 5).
 
 ### What is broken
 
@@ -70,10 +74,13 @@ File layout (top level):
   - __init__.py
   - base.py — Base class: filters, relevance scoring
   - reverb.py — Reverb.com public API
-  - ebay.py — eBay (currently broken, Finding API dead; to rewrite in Prompt 2)
+  - ebay.py — eBay Browse API (OAuth2, 13 marketplaces)
   - google.py — Google Custom Search (site: operator)
   - craigslist.py — Craigslist RSS across US cities
-  - subito.py — Subito.it (Italian classifieds; strict filter needed, Prompt 3)
+  - subito.py — Subito.it (Italian classifieds; strict Zeta filter)
+  - kleinanzeigen.py — Kleinanzeigen.de (Playwright headless Chromium)
+  - wallapop.py — Wallapop (Spain, public API)
+  - leboncoin.py — Leboncoin.fr (httpx + __NEXT_DATA__)
 - requirements.txt
 - railway.toml — Railway build + deploy config
 - env.example — Template for env vars
@@ -361,8 +368,7 @@ Optional tuning:
 - Prompt 2 — eBay Browse API migration ✅ COMPLETED (2026-04-16)
 - Prompt 3 — Subito strict + Reverb tune + location fix + Google quota ✅ COMPLETED (2026-04-16)
 - Prompt 4 — MERGED into Prompt 3
-- Prompt 5 — Extend /status endpoint to report per-scraper stats (raw, 
-  filtered, sent, errors, last_run) for operator visibility
+- Prompt 5 — European marketplaces + Dockerfile ✅ COMPLETED (2026-04-16)
 
 ---
 
@@ -370,6 +376,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Added Kleinanzeigen (Playwright), Wallapop (API), Leboncoin (__NEXT_DATA__). Switched to Dockerfile with Playwright base image. Skipped Facebook Marketplace Playwright (requires login, ban risk) — covered by Google CSE. | Prompt 5 |
 | 2026-04-16 | Fixed Subito noise, Reverb over-querying, location "ro" bug, Google quota waste | Prompt 3. Subito requires zeta_signals in ad text. Reverb reduced to 8kw×2pg. Location uses word-boundary match. Google guards with 20h cooldown in SQLite. |
 | 2026-04-16 | Rewrote eBay scraper: Finding API → Browse API with OAuth2 | Prompt 2. 13 marketplaces, 8 keywords, client_credentials grant, 50 results per query, token cached with 30min early refresh |
 | 2026-04-16 | Added 5 new Python deps + Chromium via nixpacks.toml + .gitignore | Prompt 1b. Playwright for anti-bot sites; praw/mercari for official API access; tenacity for retries; anthropic for AI re-verification in Prompt 9. Build time increases 5-10 min for Chromium download. |
@@ -450,9 +457,9 @@ Every prompt ends with: "Update CLAUDE.md with what was built."
 ### Infrastructure files
 
 - requirements.txt — pip dependencies
-- nixpacks.toml — Railway build phases (install + Chromium download)
-- railway.toml — Railway deploy config (builder, start command,
-  restart policy)
+- Dockerfile — based on mcr.microsoft.com/playwright/python:v1.47.0-noble
+  (Chromium pre-installed, replaces nixpacks.toml — deleted in Prompt 5)
+- railway.toml — Railway deploy config (start command, restart policy)
 - .gitignore — standard Python + project-specific ignores
 - CLAUDE.md — this file, single source of truth
 
