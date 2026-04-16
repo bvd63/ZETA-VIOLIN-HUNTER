@@ -1,25 +1,23 @@
 """
-Kleinanzeigen.de scraper — uses Playwright headless Chromium.
-Germany's largest classifieds site. Public search, no login required.
+Kleinanzeigen.de scraper — Playwright headless Chromium.
+Germany's largest classifieds. No login required.
 """
 
 import asyncio
 import logging
 from scrapers.base import BaseScraper
-from config import Config
 
 log = logging.getLogger(__name__)
 
 KEYWORDS = [
     "Zeta Violine",
     "Zeta Geige",
-    "Zeta electric violin",
     "Zeta Strados",
+    "Zeta electric violin",
     "Zeta Jazz Fusion",
-    "elektrische Geige Zeta",
 ]
 
-BASE_URL = "https://www.kleinanzeigen.de/s-musikinstrumente/{keyword}/k0c74"
+SEARCH_URL = "https://www.kleinanzeigen.de/s-{keyword}/k0"
 
 
 class KleinanzeigenScraper(BaseScraper):
@@ -39,77 +37,96 @@ class KleinanzeigenScraper(BaseScraper):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
                     headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+                    args=["--no-sandbox", "--disable-dev-shm-usage",
+                          "--disable-blink-features=AutomationControlled"],
                 )
                 context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/131.0.0.0 Safari/537.36",
                     locale="de-DE",
+                    viewport={"width": 1920, "height": 1080},
                 )
                 page = await context.new_page()
 
                 for kw in KEYWORDS:
                     try:
-                        url = BASE_URL.format(keyword=kw.replace(" ", "-"))
-                        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        url = SEARCH_URL.format(keyword=kw.replace(" ", "-"))
+                        await page.goto(url, wait_until="networkidle", timeout=30000)
+                        await asyncio.sleep(2)
 
-                        # Accept cookie banner if present
-                        try:
-                            accept_btn = page.locator("#gdpr-banner-accept, [data-testid='gdpr-banner-accept']")
-                            if await accept_btn.count() > 0:
-                                await accept_btn.first.click()
-                                await asyncio.sleep(1)
-                        except Exception:
-                            pass
+                        # Dismiss GDPR / cookie banner
+                        for selector in [
+                            "#gdpr-banner-accept",
+                            "button#didomi-notice-agree-button",
+                            "[data-testid='gdpr-banner-accept']",
+                            "button:has-text('Alle akzeptieren')",
+                            "button:has-text('Accept All')",
+                        ]:
+                            try:
+                                btn = page.locator(selector)
+                                if await btn.count() > 0:
+                                    await btn.first.click()
+                                    await asyncio.sleep(1)
+                                    break
+                            except Exception:
+                                continue
 
-                        # Wait for listings to load
-                        await page.wait_for_selector(
-                            "article.aditem, li.ad-listitem, [data-testid='aditem']",
-                            timeout=10000,
+                        # Get page content and parse with BS4
+                        content = await page.content()
+
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(content, "html.parser")
+
+                        # Try multiple selector patterns
+                        listing_links = soup.select(
+                            'a[href*="/s-anzeige/"]'
                         )
 
-                        # Extract listing data
-                        listings = await page.evaluate("""() => {
-                            const items = document.querySelectorAll(
-                                'article.aditem, li.ad-listitem, [data-testid="aditem"]'
-                            );
-                            return Array.from(items).map(item => {
-                                const linkEl = item.querySelector('a[href*="/s-anzeige/"]');
-                                const titleEl = item.querySelector(
-                                    'a[href*="/s-anzeige/"] h2, a[href*="/s-anzeige/"] .text-module-begin, .aditem-main--middle--title'
-                                );
-                                const priceEl = item.querySelector(
-                                    '.aditem-main--middle--price-shipping--price, [data-testid="price"]'
-                                );
-                                const locationEl = item.querySelector(
-                                    '.aditem-main--top--left, [data-testid="cardlocation"]'
-                                );
-                                const descEl = item.querySelector(
-                                    '.aditem-main--middle--description, [data-testid="carddescription"]'
-                                );
-                                return {
-                                    url: linkEl ? linkEl.href : '',
-                                    title: titleEl ? titleEl.innerText.trim() : '',
-                                    price: priceEl ? priceEl.innerText.trim() : 'N/A',
-                                    location: locationEl ? locationEl.innerText.trim() : '',
-                                    description: descEl ? descEl.innerText.trim() : '',
-                                };
-                            }).filter(item => item.url && item.title);
-                        }""")
+                        for link in listing_links:
+                            href = link.get("href", "")
+                            if not href or "/s-anzeige/" not in href:
+                                continue
 
-                        for item in listings:
-                            url = item.get("url", "")
-                            if not url.startswith("http"):
-                                url = "https://www.kleinanzeigen.de" + url
+                            if not href.startswith("http"):
+                                href = "https://www.kleinanzeigen.de" + href
 
-                            unique_id = self._make_id("kleinanzeigen", url)
+                            unique_id = self._make_id("kleinanzeigen", href)
                             if unique_id in seen_ids:
                                 continue
                             seen_ids.add(unique_id)
 
-                            title = item.get("title", "")
-                            description = item.get("description", "")
-                            price = item.get("price", "N/A")
-                            location = item.get("location", "")
+                            # Extract title from the link text
+                            title = link.get_text(strip=True)
+                            if not title:
+                                continue
+
+                            # Try to find price in parent/sibling elements
+                            parent = link.find_parent("article") or link.find_parent("li") or link.find_parent("div")
+                            price = "N/A"
+                            location = ""
+                            description = ""
+
+                            if parent:
+                                price_el = parent.select_one(
+                                    "[class*='price'], [class*='Price'], "
+                                    "[data-testid='price']"
+                                )
+                                if price_el:
+                                    price = price_el.get_text(strip=True)
+
+                                loc_el = parent.select_one(
+                                    "[class*='location'], [class*='Location'], "
+                                    "[data-testid*='location']"
+                                )
+                                if loc_el:
+                                    location = loc_el.get_text(strip=True)
+
+                                desc_el = parent.select_one(
+                                    "[class*='description'], [class*='Description']"
+                                )
+                                if desc_el:
+                                    description = desc_el.get_text(strip=True)
 
                             full_text = f"{title} {description}"
                             if self._is_excluded(full_text):
@@ -131,7 +148,7 @@ class KleinanzeigenScraper(BaseScraper):
                                 "title": title,
                                 "price": price,
                                 "location": location,
-                                "url": url,
+                                "url": href,
                                 "description": description[:300],
                                 "relevance_score": score,
                             })

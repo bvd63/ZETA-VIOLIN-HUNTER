@@ -376,6 +376,7 @@ Optional tuning:
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-04-16 | Fixed Kleinanzeigen (BS4 fallback selectors), Wallapop (Origin/Referer headers + web fallback), Leboncoin (switched to Playwright) | Prompt 5-fix. All 3 had anti-bot issues on first deploy. |
 | 2026-04-16 | Added Kleinanzeigen (Playwright), Wallapop (API), Leboncoin (__NEXT_DATA__). Switched to Dockerfile with Playwright base image. Skipped Facebook Marketplace Playwright (requires login, ban risk) — covered by Google CSE. | Prompt 5 |
 | 2026-04-16 | Fixed Subito noise, Reverb over-querying, location "ro" bug, Google quota waste | Prompt 3. Subito requires zeta_signals in ad text. Reverb reduced to 8kw×2pg. Location uses word-boundary match. Google guards with 20h cooldown in SQLite. |
 | 2026-04-16 | Rewrote eBay scraper: Finding API → Browse API with OAuth2 | Prompt 2. 13 marketplaces, 8 keywords, client_credentials grant, 50 results per query, token cached with 30min early refresh |

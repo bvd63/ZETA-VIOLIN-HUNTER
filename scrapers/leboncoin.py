@@ -1,26 +1,19 @@
 """
-Leboncoin.fr scraper — France's largest classifieds marketplace.
-Uses httpx + __NEXT_DATA__ JSON extraction (same pattern as Subito).
-No authentication required for search results.
+Leboncoin.fr scraper — France's largest classifieds.
+Uses Playwright to bypass anti-bot, then extracts __NEXT_DATA__ JSON.
 """
 
-import httpx
+import asyncio
 import json
 import logging
-from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper
-from config import Config
 
 log = logging.getLogger(__name__)
-
-SEARCH_URL = "https://www.leboncoin.fr/recherche"
 
 KEYWORDS = [
     "Zeta violon",
     "Zeta violin",
     "Zeta Strados",
-    "Zeta Jazz Fusion",
-    "violon électrique Zeta",
     "violon electrique Zeta",
 ]
 
@@ -30,6 +23,8 @@ ZETA_SIGNALS = [
     "jean-luc ponty", "jlp", "jazz fusion",
 ]
 
+SEARCH_URL = "https://www.leboncoin.fr/recherche?text={keyword}&category=26"
+
 
 class LeboncoinScraper(BaseScraper):
     name = "Leboncoin"
@@ -38,149 +33,224 @@ class LeboncoinScraper(BaseScraper):
         results = []
         seen_ids = set()
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-        }
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            log.warning("Playwright not available — skipping Leboncoin")
+            return []
 
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers=headers) as client:
-            for kw in KEYWORDS:
-                try:
-                    resp = await client.get(SEARCH_URL, params={"text": kw})
-                    if resp.status_code != 200:
-                        log.warning(f"Leboncoin '{kw}': HTTP {resp.status_code}")
-                        continue
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage",
+                          "--disable-blink-features=AutomationControlled"],
+                )
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/131.0.0.0 Safari/537.36",
+                    locale="fr-FR",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = await context.new_page()
 
-                    soup = BeautifulSoup(resp.text, "html.parser")
-                    next_data = soup.find("script", id="__NEXT_DATA__")
-                    if not next_data or not next_data.string:
-                        log.info(f"Leboncoin '{kw}': no __NEXT_DATA__ found")
-                        continue
-
+                for kw in KEYWORDS:
                     try:
-                        data = json.loads(next_data.string)
-                    except json.JSONDecodeError:
-                        log.warning(f"Leboncoin '{kw}': invalid JSON in __NEXT_DATA__")
-                        continue
+                        url = SEARCH_URL.format(keyword=kw.replace(" ", "+"))
+                        await page.goto(url, wait_until="networkidle", timeout=30000)
+                        await asyncio.sleep(2)
 
-                    # Navigate to the ads list in Leboncoin's JSON structure
-                    ads = self._extract_ads(data)
+                        # Dismiss cookie/GDPR banner
+                        for selector in [
+                            "button#didomi-notice-agree-button",
+                            "button:has-text('Tout accepter')",
+                            "button:has-text('Accept')",
+                            "[aria-label='Tout accepter']",
+                        ]:
+                            try:
+                                btn = page.locator(selector)
+                                if await btn.count() > 0:
+                                    await btn.first.click()
+                                    await asyncio.sleep(1)
+                                    break
+                            except Exception:
+                                continue
 
-                    for ad in ads:
-                        title = (ad.get("subject") or ad.get("title") or "").strip()
-                        body = (ad.get("body") or ad.get("description") or "").strip()
-                        ad_url = ad.get("url") or ""
-                        if not ad_url and ad.get("list_id"):
-                            ad_url = f"https://www.leboncoin.fr/ad/{ad.get('category_name', 'autre')}/{ad['list_id']}.htm"
+                        # Extract __NEXT_DATA__ JSON
+                        next_data = await page.evaluate("""() => {
+                            const el = document.getElementById('__NEXT_DATA__');
+                            return el ? el.textContent : null;
+                        }""")
 
-                        if not ad_url or not title:
+                        if not next_data:
+                            # Fallback: parse visible listing links
+                            content = await page.content()
+                            results.extend(
+                                self._parse_html_fallback(content, seen_ids)
+                            )
                             continue
 
-                        # Strict Zeta check on the ad's own text
-                        ad_text = (title + " " + body).lower()
-                        if not any(sig in ad_text for sig in ZETA_SIGNALS):
+                        try:
+                            data = json.loads(next_data)
+                        except json.JSONDecodeError:
+                            log.warning(f"Leboncoin '{kw}': invalid JSON")
                             continue
 
-                        unique_id = self._make_id("leboncoin", ad_url)
-                        if unique_id in seen_ids:
-                            continue
-                        seen_ids.add(unique_id)
+                        ads = self._extract_ads(data)
+                        for ad in ads:
+                            title = (ad.get("subject") or ad.get("title") or "").strip()
+                            body = (ad.get("body") or ad.get("description") or "").strip()
 
-                        price = self._extract_price_from_ad(ad)
-                        location = self._extract_location_from_ad(ad)
+                            ad_url = ""
+                            list_id = ad.get("list_id") or ad.get("id")
+                            slug = ad.get("url") or ""
+                            if slug:
+                                ad_url = slug if slug.startswith("http") else f"https://www.leboncoin.fr{slug}"
+                            elif list_id:
+                                ad_url = f"https://www.leboncoin.fr/ad/instruments_de_musique/{list_id}.htm"
 
-                        full_text = f"{title} {body}"
-                        if self._is_excluded(full_text):
-                            continue
-                        if self._is_excluded_location(location):
-                            continue
-                        if price != "N/A" and not self._price_in_range(price):
-                            continue
-                        if not self._year_in_range(full_text):
-                            continue
+                            if not ad_url or not title:
+                                continue
 
-                        score = self._relevance_score(title, body)
-                        if score < 2:
-                            continue
+                            # Strict Zeta check
+                            ad_text = (title + " " + body).lower()
+                            if not any(sig in ad_text for sig in ZETA_SIGNALS):
+                                continue
 
-                        results.append({
-                            "id": unique_id,
-                            "platform": "Leboncoin",
-                            "title": title,
-                            "price": price,
-                            "location": location,
-                            "url": ad_url,
-                            "description": body[:300],
-                            "relevance_score": score,
-                        })
+                            unique_id = self._make_id("leboncoin", ad_url)
+                            if unique_id in seen_ids:
+                                continue
+                            seen_ids.add(unique_id)
 
-                except Exception as e:
-                    log.warning(f"Leboncoin '{kw}' error: {e}")
+                            price = self._get_price(ad)
+                            location = self._get_location(ad)
+
+                            full_text = f"{title} {body}"
+                            if self._is_excluded(full_text):
+                                continue
+                            if self._is_excluded_location(location):
+                                continue
+                            if price != "N/A" and not self._price_in_range(price):
+                                continue
+                            if not self._year_in_range(full_text):
+                                continue
+
+                            score = self._relevance_score(title, body)
+                            if score < 2:
+                                continue
+
+                            results.append({
+                                "id": unique_id,
+                                "platform": "Leboncoin",
+                                "title": title,
+                                "price": price,
+                                "location": location,
+                                "url": ad_url,
+                                "description": body[:300],
+                                "relevance_score": score,
+                            })
+
+                    except Exception as e:
+                        log.warning(f"Leboncoin '{kw}' error: {e}")
+
+                await browser.close()
+
+        except Exception as e:
+            log.error(f"Leboncoin Playwright error: {e}")
 
         log.info(f"Leboncoin: {len(results)} listings found")
         return results
 
     def _extract_ads(self, data: dict) -> list:
-        """Navigate Leboncoin's __NEXT_DATA__ to find ad objects."""
+        """Navigate Leboncoin __NEXT_DATA__ JSON to find ads."""
         ads = []
         try:
-            # Try common Leboncoin JSON paths
             props = data.get("props", {}).get("pageProps", {})
-
-            # Path 1: searchData.ads
-            search_data = props.get("searchData", {})
-            if isinstance(search_data, dict):
-                raw_ads = search_data.get("ads", [])
-                if isinstance(raw_ads, list):
-                    ads.extend(raw_ads)
-
-            # Path 2: initialProps.searchData.ads
-            initial = props.get("initialProps", {})
-            if isinstance(initial, dict):
-                search_data2 = initial.get("searchData", {})
-                if isinstance(search_data2, dict):
-                    raw_ads2 = search_data2.get("ads", [])
-                    if isinstance(raw_ads2, list):
-                        ads.extend(raw_ads2)
-
-            # Path 3: direct ads array
-            if not ads:
-                raw_ads3 = props.get("ads", [])
-                if isinstance(raw_ads3, list):
-                    ads.extend(raw_ads3)
-
+            for key_path in [
+                lambda p: p.get("searchData", {}).get("ads", []),
+                lambda p: p.get("initialProps", {}).get("searchData", {}).get("ads", []),
+                lambda p: p.get("ads", []),
+                lambda p: p.get("results", {}).get("ads", []),
+                lambda p: p.get("searchResults", {}).get("ads", []),
+            ]:
+                try:
+                    found = key_path(props)
+                    if isinstance(found, list) and found:
+                        ads.extend(found)
+                        break
+                except Exception:
+                    continue
         except Exception as e:
             log.warning(f"Leboncoin JSON nav error: {e}")
         return ads
 
-    def _extract_price_from_ad(self, ad: dict) -> str:
-        """Extract price from Leboncoin ad object."""
+    def _parse_html_fallback(self, html_content: str, seen_ids: set) -> list:
+        """Fallback: parse listing links from HTML if no __NEXT_DATA__."""
+        results = []
         try:
-            price_list = ad.get("price", [])
-            if isinstance(price_list, list) and price_list:
-                return f"{price_list[0]} EUR"
-            if isinstance(price_list, (int, float)):
-                return f"{price_list} EUR"
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, "html.parser")
+            links = soup.select('a[href*="/ad/"]')
+            for link in links:
+                href = link.get("href", "")
+                if not href:
+                    continue
+                if not href.startswith("http"):
+                    href = "https://www.leboncoin.fr" + href
+
+                title = link.get_text(strip=True)
+                if not title:
+                    continue
+
+                ad_text = title.lower()
+                if not any(sig in ad_text for sig in ZETA_SIGNALS):
+                    continue
+
+                unique_id = self._make_id("leboncoin", href)
+                if unique_id in seen_ids:
+                    continue
+                seen_ids.add(unique_id)
+
+                score = self._relevance_score(title)
+                if score < 2:
+                    continue
+
+                results.append({
+                    "id": unique_id,
+                    "platform": "Leboncoin",
+                    "title": title,
+                    "price": "N/A",
+                    "location": "France",
+                    "url": href,
+                    "description": "",
+                    "relevance_score": score,
+                })
+        except Exception as e:
+            log.warning(f"Leboncoin HTML fallback error: {e}")
+        return results
+
+    def _get_price(self, ad: dict) -> str:
+        try:
+            p = ad.get("price", [])
+            if isinstance(p, list) and p:
+                return f"{p[0]} EUR"
+            if isinstance(p, (int, float)):
+                return f"{p} EUR"
             attrs = ad.get("attributes", [])
             if isinstance(attrs, list):
-                for attr in attrs:
-                    if isinstance(attr, dict) and attr.get("key") == "price":
-                        return f"{attr.get('value', '?')} EUR"
+                for a in attrs:
+                    if isinstance(a, dict) and a.get("key") == "price":
+                        return f"{a.get('value', '?')} EUR"
         except Exception:
             pass
         return "N/A"
 
-    def _extract_location_from_ad(self, ad: dict) -> str:
-        """Extract location from Leboncoin ad object."""
+    def _get_location(self, ad: dict) -> str:
         try:
             loc = ad.get("location", {})
             if isinstance(loc, dict):
-                parts = [
-                    loc.get("city", ""),
-                    loc.get("department_name", ""),
-                    loc.get("region_name", ""),
-                ]
+                parts = [loc.get("city", ""), loc.get("department_name", "")]
                 return ", ".join(p for p in parts if p)
         except Exception:
             pass
