@@ -30,7 +30,6 @@ from scrapers.yahoo_jp import YahooJPScraper
 from scrapers.guitar_center import GuitarCenterScraper
 from scrapers.facebook_marketplace import FacebookMarketplaceScraper
 
-from ai_verifier import verify_listings_batch
 from price_tracker import PriceTracker
 from status_tracker import StatusTracker
 from config import Config
@@ -175,7 +174,7 @@ def build_scrapers() -> list:
         SubitoScraper(),
         MercariJPScraper(),
         YahooJPScraper(),
-        GuitarCenterScraper(),
+        # GuitarCenterScraper(),  # disabled — Cloudflare TCP-blocks Railway EU containers
         FacebookMarketplaceScraper(),
         RedditScraper(),
     ]
@@ -287,20 +286,12 @@ async def run_search_cycle():
             # Send immediately per-platform so results are not lost on container restarts.
             if new_listings:
                 try:
-                    # AI re-verification — filter out false positives
-                    verified = await verify_listings_batch(new_listings)
-                    ai_rejected = len(new_listings) - len(verified)
-                    if ai_rejected > 0:
-                        log.info(f"🤖 AI rejected {ai_rejected} listing(s) from {platform_name}")
-                        status_tracker.record_ai_rejection(platform_name, ai_rejected)
-                    if verified:
-                        # Enrich with price context
-                        for v in verified:
-                            v["price_context"] = price_tracker.record_listing(v)
-                        log.info(f"📬 Sending {len(verified)} verified listing(s) from {platform_name} to Telegram...")
-                        await notifier.send_listings(verified)
-                        sent_any = True
-                        all_new_listings = [l for l in all_new_listings if l in verified or l not in new_listings]
+                    # Enrich with price context then send directly — no AI gate
+                    for listing in new_listings:
+                        listing["price_context"] = price_tracker.record_listing(listing)
+                    log.info(f"📬 Sending {len(new_listings)} listing(s) from {platform_name} to Telegram...")
+                    await notifier.send_listings(new_listings)
+                    sent_any = True
                 except Exception as e:
                     log.error(f"Telegram send error for {platform_name}: {e}")
 

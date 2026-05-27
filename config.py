@@ -85,8 +85,13 @@ class Config:
     # Scope: public. Without this, Reverb API returns 401 and scraper returns 0 results.
     REVERB_API_TOKEN = os.getenv("REVERB_API_TOKEN", "")
 
-    # --- OpenAI API (GPT-4o-mini for AI re-verification) ---
+    # --- OpenAI API (kept for reference, AI re-verification removed from pipeline) ---
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+    # --- Yahoo Japan Auctions API (free, required for Yahoo JP scraper) ---
+    # Register at: https://developer.yahoo.co.jp/webapi/auctions/
+    # Free Yahoo Japan account required. Set permitted URL to * or your Railway URL.
+    YAHOO_JP_APP_ID = os.getenv("YAHOO_JP_APP_ID", "")
 
     # --- Craigslist coverage tuning ---
     CRAIGSLIST_CONCURRENCY = int(os.getenv("CRAIGSLIST_CONCURRENCY", "24"))
