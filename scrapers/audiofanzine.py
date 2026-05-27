@@ -72,8 +72,6 @@ class AudiofanzineScraper(BaseScraper):
                             continue
 
                         score = self._relevance_score(title)
-                        if score < 2:
-                            continue
 
                         # Try to find price in parent element
                         parent = link.find_parent("div") or link.find_parent("li")

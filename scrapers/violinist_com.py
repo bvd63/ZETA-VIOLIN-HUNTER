@@ -70,8 +70,6 @@ class ViolinistComScraper(BaseScraper):
                             continue
 
                         score = self._relevance_score(title)
-                        if score < 2:
-                            continue
 
                         results.append({
                             "id": unique_id,

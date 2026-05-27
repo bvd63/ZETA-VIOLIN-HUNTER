@@ -19,7 +19,7 @@ violas, cellos, basses, mandolins — violins only).
 
 ---
 
-## 2. CURRENT STATE (verified from live Railway logs on 2026-04-14)
+## 2. CURRENT STATE (last verified 2026-05-27 — deep audit in Prompt 11)
 
 ### Infrastructure
 - Deployment status: Active
@@ -28,8 +28,8 @@ violas, cellos, basses, mandolins — violins only).
 - HTTP server: port 8080, endpoints `/search`, `/health`, `/status` reachable
 
 ### What works
-- `scrapers/reverb.py` — returns listings from Reverb API. FIXED in Prompt 3: reduced to 8 keywords × 2 pages (was 30+ × 5). Expanded to 11 keywords in Prompt 10 (+Strados violin, 5-string MIDI, Jean-Luc Ponty).
-- `scrapers/craigslist.py` — returns listings from RSS feeds (scans ~400 US cities)
+- `scrapers/reverb.py` — Reverb API with optional X-Auth-Token. FIXED Prompt 11: auth token support added (REVERB_API_TOKEN env var), year_min/year_max removed from API params, non-200 responses now logged. Expanded to 11 keywords in Prompt 10.
+- `scrapers/craigslist.py` — Craigslist RSS is dead since ~2020. Scraper silently gets 0 from RSS loop then falls back to DuckDuckGo HTML scrape → Google CSE. The fallback chain works.
 - `scrapers/ebay.py` — REWRITTEN in Prompt 2. Now uses eBay Browse API
   with OAuth2 client_credentials grant. Searches 13 marketplaces with 8
   keywords. Requires EBAY_CLIENT_ID + EBAY_CLIENT_SECRET.
@@ -65,7 +65,11 @@ violas, cellos, basses, mandolins — violins only).
 - `scrapers/violinist_com.py` — disabled (404 / search errors). Covered by Google CSE.
 - `scrapers/audiofanzine.py` — disabled (404 / search errors). Covered by Google CSE.
 
-### What is broken
+### What is broken / known issues post-Prompt 11
+- **Reverb requires REVERB_API_TOKEN** — without it, API returns 401 and scraper silently returns 0. Token is now optional with graceful degradation + logged warning. Owner must create a Personal Access Token at reverb.com/account/applications (scope: public) and add it to Railway Variables.
+- **Craigslist RSS is dead** (removed by Craigslist ~2020). The scraper falls back to DuckDuckGo then Google CSE. The DuckDuckGo fallback is untested recently. This is lower priority since Google CSE covers craigslist.org via `site:craigslist.org` queries.
+- **Google CSE API sunsets January 1, 2027** — existing project keys work until then. Plan migration to a replacement search API before that date.
+- **Subito.it potentially Cloudflare-blocked** — plain httpx may get blocked intermittently. File retained; Google CSE covers subito.it.
 
 ### Database state (zeta_listings.db)
 - 18 total entries, of which 3 are real Zeta violins:
@@ -360,7 +364,8 @@ Optional tuning:
 - MAX_PRICE (default 99999)
 - CONDITION (default "all": all | new | used)
 - MIN_YEAR (default 1980)
-- MAX_YEAR (default 2014)
+- MAX_YEAR (default 2026) ← FIXED Prompt 11: was 2014, caused all modern listings to be dropped
+- REVERB_API_TOKEN (optional but STRONGLY recommended — without it Reverb returns 401)
 - SCRAPER_TIMEOUT_SEC (default 900)
 - SCRAPER_RETRIES (default 1)
 - SCRAPER_CONCURRENCY (default 4)
@@ -380,9 +385,10 @@ Optional tuning:
   needs Client Secret for Browse API migration)
 
 ### Pending
-- Obtain eBay Client Secret (Cert ID) for OAuth2 Browse API (Prompt 2 
-  manual step)
+- ~~Obtain eBay Client Secret (Cert ID) for OAuth2 Browse API~~ ✅ Done
+- **Create Reverb Personal Access Token** (scope: public) at reverb.com/account/applications → add REVERB_API_TOKEN to Railway Variables
 - Verify Railway persistent volume for zeta_listings.db (optional, post-MVP)
+- Plan Google CSE replacement before January 1, 2027 (API retirement)
 
 ---
 
@@ -401,8 +407,10 @@ Optional tuning:
 - Prompt 9 (FINAL) — Dashboard /status + disable blocked scrapers + per-scraper stats ✅ COMPLETED (2026-04-16)
 
 - Prompt 10 — Reverb +3 keywords, 2x/day schedule (09:00+21:00 UTC), Google 10h guard ✅ COMPLETED (2026-04-16)
+- Prompt 11 — Deep audit + zero-results root cause fixes ✅ COMPLETED (2026-05-27)
+- Prompt 12 — Craigslist rewrite (JSON-LD + 2023 HTML selectors) + Yahoo Auctions JP + Guitar Center Used + Facebook Marketplace (Playwright) ✅ COMPLETED (2026-05-27)
 
-ALL PROMPTS COMPLETED. Bot is fully operational.
+Bot is operational. See Section 2 "What is broken" for remaining known issues.
 
 ---
 
@@ -430,6 +438,12 @@ ALL PROMPTS COMPLETED. Bot is fully operational.
 | 2026-04-16 | Reverb +3 keywords (Strados violin, 5-string MIDI, Jean-Luc Ponty), schedule 2x/day (09:00+21:00 UTC), Google guard 20h→10h | Prompt 10. Broader Reverb coverage catches listings without "Zeta" in title. Evening run doubles detection frequency. |
 | 2026-04-16 | Disabled 6 anti-bot-blocked scrapers, added /status dashboard with per-scraper stats and price history | Prompt 9 (FINAL). Disabled scrapers remain in codebase for future re-activation. Active scraper count: 7. |
 | 2026-04-16 | Pin playwright==1.47.0 explicitly | Each Playwright Python release bundles specific browser versions; pinning prevents surprise breakage on Railway rebuild |
+| 2026-05-27 | MAX_YEAR default changed from 2014 to 2026 (config.py) | PRIMARY cause of zero results for weeks. _year_in_range() found years like "2019"/"2022" in listing descriptions (purchase year, not manufacture year) and dropped them. Zeta stopped manufacturing ~2014 but listings appear every year. |
+| 2026-05-27 | Removed year_min/year_max from Reverb API parameters (reverb.py) | Reverb uses these params to filter by instrument manufacture year. Sellers rarely fill in this field; passing year_max=2014 excluded ~90% of listings silently. |
+| 2026-05-27 | Added REVERB_API_TOKEN optional header to reverb.py | Reverb API now returns 401 without authentication. Token is optional with graceful degradation + warning log. Owner must create Personal Access Token at reverb.com/account/applications (scope: public). |
+| 2026-05-27 | Removed /forum from URL bad_fragments filter in main.py | Forum listing URLs (maestronet.com/forum/topic/...) and Google CSE results from forum sites were being silently dropped. Forum classifieds are valid listings. |
+| 2026-05-27 | Removed relevance_score threshold filtering from all scrapers and main.py | Score filter was a secondary gate that could silently drop valid listings (e.g. non-English titles, unusual formulations). _is_strict_zeta_violin() in main.py is the real guard. Score field kept in listing dict for informational purposes only. |
+| 2026-05-27 | Craigslist RSS confirmed dead since ~2020 | Craigslist removed RSS support. Scraper silently returns 0 from RSS loop, then falls back to DuckDuckGo and Google CSE. No code change needed — fallback works. |
 
 ---
 
@@ -450,6 +464,11 @@ ALL PROMPTS COMPLETED. Bot is fully operational.
 | Duplicate file scrapers/58com.py and scrapers/com_58.py | Low | Fixed (both deleted) in Prompt 1a |
 | Kleinanzeigen/Wallapop/Leboncoin permanently blocked by anti-bot | Medium | Disabled in Prompt 9, covered by Google CSE |
 | Maestronet/Violinist.com/Audiofanzine 404 on search URLs | Low | Disabled in Prompt 9, covered by Google CSE |
+| MAX_YEAR=2014 caused ALL listings with modern years in description to be silently dropped | Critical | Fixed in Prompt 11 (changed default to 2026) |
+| Reverb API returns 401 without auth token — scraper returned 0 results silently | High | Fixed in Prompt 11 (REVERB_API_TOKEN support + warning log). Owner must set token in Railway. |
+| Reverb API year_min/year_max params silently excluded unlabeled listings | Medium | Fixed in Prompt 11 (params removed) |
+| /forum in URL bad_fragments dropped maestronet.com/forum/* and similar Google CSE results | Medium | Fixed in Prompt 11 (removed from filter) |
+| Craigslist RSS feed returns 0 (removed by Craigslist ~2020) | Medium | Existing DuckDuckGo + Google CSE fallback handles this — no fix needed |
 
 ---
 

@@ -86,8 +86,6 @@ class MercariJPScraper(BaseScraper):
                             continue
 
                         score = self._relevance_score(name)
-                        if score < 2:
-                            continue
 
                         results.append({
                             "id": unique_id,

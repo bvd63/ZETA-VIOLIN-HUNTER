@@ -26,6 +26,9 @@ from scrapers.reddit_scraper import RedditScraper
 from scrapers.maestronet import MaestronetScraper
 from scrapers.violinist_com import ViolinistComScraper
 from scrapers.audiofanzine import AudiofanzineScraper
+from scrapers.yahoo_jp import YahooJPScraper
+from scrapers.guitar_center import GuitarCenterScraper
+from scrapers.facebook_marketplace import FacebookMarketplaceScraper
 
 from ai_verifier import verify_listings_batch
 from price_tracker import PriceTracker
@@ -141,7 +144,9 @@ def _is_valid_listing_url(url: str) -> bool:
         return False
 
     # Drop obvious non-listing pages.
-    bad_fragments = ["/search", "?q=", "/category", "/categories", "/forum", "/help", "/about"]
+    # NOTE: /forum intentionally removed — maestronet.com/forum/topic/... and similar
+    # forum classifieds are valid listing URLs returned by Google CSE.
+    bad_fragments = ["/search", "?q=", "/category", "/categories", "/help", "/about"]
     if any(fragment in raw for fragment in bad_fragments):
         return False
 
@@ -169,6 +174,9 @@ def build_scrapers() -> list:
         CraigslistScraper(),
         SubitoScraper(),
         MercariJPScraper(),
+        YahooJPScraper(),
+        GuitarCenterScraper(),
+        FacebookMarketplaceScraper(),
         RedditScraper(),
     ]
 
@@ -203,9 +211,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, semaphore: asyncio
                     if not _is_valid_listing_url(str(listing.get("url", ""))):
                         dropped_url += 1
                         continue
-                    if not _passes_platform_score(listing):
-                        dropped_score += 1
-                        continue
+                    # relevance_score filtering removed — _is_strict_zeta_violin() is sufficient
                     if not db.is_seen(listing["id"]):
                         db.mark_seen(listing["id"], listing)
                         new_listings.append(listing)

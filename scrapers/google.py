@@ -176,8 +176,6 @@ class GoogleScraper(BaseScraper):
 
                             platform = self._extract_platform(url)
                             score = self._relevance_score(title, snippet)
-                            if score < 2:
-                                continue
 
                             results.append({
                                 "id": unique_id,

@@ -63,8 +63,12 @@ class Config:
     EXCLUDED_COUNTRY_CODES = ["RO"]
 
     # --- Year filter ---
+    # MIN_YEAR = manufacture year lower bound (Zeta started ~1987)
+    # MAX_YEAR = upper bound for TEXT mentions — set to current year so a
+    # listing saying "bought in 2022" is NOT dropped by _year_in_range().
+    # Zeta violins were manufactured up to ~2014 but listings appear any year.
     MIN_YEAR = int(os.getenv("MIN_YEAR", "1980"))
-    MAX_YEAR = int(os.getenv("MAX_YEAR", "2014"))
+    MAX_YEAR = int(os.getenv("MAX_YEAR", "2026"))
 
     # --- Runtime hardening ---
     SCRAPER_TIMEOUT_SEC = int(os.getenv("SCRAPER_TIMEOUT_SEC", "900"))
@@ -75,6 +79,11 @@ class Config:
     REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
     REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
     REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "ZetaViolinHunter/1.0")
+
+    # --- Reverb API token (optional but recommended — Reverb now requires auth) ---
+    # Create a free account at reverb.com → Account Settings → Apps → Personal Access Token
+    # Scope: public. Without this, Reverb API returns 401 and scraper returns 0 results.
+    REVERB_API_TOKEN = os.getenv("REVERB_API_TOKEN", "")
 
     # --- OpenAI API (GPT-4o-mini for AI re-verification) ---
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

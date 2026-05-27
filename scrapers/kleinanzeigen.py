@@ -139,8 +139,6 @@ class KleinanzeigenScraper(BaseScraper):
                                 continue
 
                             score = self._relevance_score(title, description)
-                            if score < 2:
-                                continue
 
                             results.append({
                                 "id": unique_id,

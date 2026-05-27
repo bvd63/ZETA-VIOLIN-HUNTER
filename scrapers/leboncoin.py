@@ -137,8 +137,6 @@ class LeboncoinScraper(BaseScraper):
                                 continue
 
                             score = self._relevance_score(title, body)
-                            if score < 2:
-                                continue
 
                             results.append({
                                 "id": unique_id,
@@ -213,8 +211,6 @@ class LeboncoinScraper(BaseScraper):
                 seen_ids.add(unique_id)
 
                 score = self._relevance_score(title)
-                if score < 2:
-                    continue
 
                 results.append({
                     "id": unique_id,

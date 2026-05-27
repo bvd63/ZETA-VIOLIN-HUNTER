@@ -10,11 +10,29 @@ from config import Config
 log = logging.getLogger(__name__)
 
 REVERB_API = "https://api.reverb.com/api/listings"
-HEADERS = {
-    "Accept": "application/hal+json",
-    "Accept-Version": "3.0",
-    "User-Agent": "ZetaViolinHunter/1.0",
-}
+
+
+def _build_headers() -> dict:
+    """Build Reverb API headers. Adds auth token if configured.
+
+    Reverb now requires a Personal Access Token for all API calls.
+    Without it the API returns 401 and the scraper returns 0 results.
+    Get one at: reverb.com → Account → Apps → Personal Access Token (scope: public)
+    Set env var: REVERB_API_TOKEN
+    """
+    headers = {
+        "Accept": "application/hal+json",
+        "Accept-Version": "3.0",
+        "User-Agent": "ZetaViolinHunter/1.0",
+    }
+    if Config.REVERB_API_TOKEN:
+        headers["X-Auth-Token"] = Config.REVERB_API_TOKEN
+    else:
+        log.warning(
+            "REVERB_API_TOKEN not set — Reverb API may return 401. "
+            "Create a Personal Access Token at reverb.com/account/applications"
+        )
+    return headers
 
 
 class ReverbScraper(BaseScraper):
@@ -38,6 +56,7 @@ class ReverbScraper(BaseScraper):
         max_pages = 2
 
         seen_ids = set()
+        headers = _build_headers()
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             for kw in keywords:
                 for page in range(1, max_pages + 1):
@@ -47,11 +66,17 @@ class ReverbScraper(BaseScraper):
                             "per_page": 50,
                             "page": page,
                             "state": "all",
-                            "year_min": Config.MIN_YEAR,
-                            "year_max": Config.MAX_YEAR,
+                            # NOTE: year_min/year_max intentionally omitted.
+                            # Reverb uses these for the instrument's manufacture year.
+                            # Sellers rarely fill in the year field, so passing
+                            # year_max=2014 would silently exclude ~90% of listings.
                         }
-                        resp = await client.get(REVERB_API, headers=HEADERS, params=params)
+                        resp = await client.get(REVERB_API, headers=headers, params=params)
                         if resp.status_code != 200:
+                            log.warning(
+                                f"Reverb API returned HTTP {resp.status_code} for '{kw}' p{page}"
+                                + (" — missing REVERB_API_TOKEN?" if resp.status_code == 401 else "")
+                            )
                             break
                         data = resp.json()
                         listings = data.get("listings", [])
@@ -93,8 +118,6 @@ class ReverbScraper(BaseScraper):
                                 continue
 
                             score = self._relevance_score(title, description)
-                            if score < 2:
-                                continue
 
                             results.append({
                                 "id": listing_id,
