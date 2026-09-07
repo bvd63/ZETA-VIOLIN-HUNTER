@@ -15,7 +15,9 @@ from filters import has_zeta_signal
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.gumtree.com/search"
-KEYWORDS = ["zeta violin", "zeta electric violin", "zeta strados"]
+# "electric violin" is broad on purpose: it always returns tiles (so the
+# watchdog sees the site alive) and the Zeta-signal filter picks any Zeta.
+KEYWORDS = ["electric violin", "zeta violin", "zeta strados"]
 PRICE_RX = re.compile(r"£\s?[\d,]+(?:\.\d{2})?")
 
 

@@ -55,13 +55,19 @@ class FacebookMarketplaceScraper(BaseScraper):
     name = "Facebook Marketplace"
 
     def is_configured(self) -> bool:
+        # Verified 2026-09-07 from Railway (Singapore): Chromium runs fine but
+        # Facebook shows the login wall → 0 listings, 47 s wasted. Only worth
+        # running through a US egress.
         try:
             import playwright  # noqa: F401
-            return True
         except ImportError:
             return False
+        return Config.has_us_egress()
 
     async def search(self) -> list:
+        if not self.is_configured():
+            log.info("Facebook Marketplace: no US egress — skipping (login wall for datacenter IPs)")
+            return []
         results = []
         seen_ids: set = set()
 

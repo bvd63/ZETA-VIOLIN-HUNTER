@@ -27,10 +27,10 @@ OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 BROWSE_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 OAUTH_SCOPE = "https://api.ebay.com/oauth/api_scope"
 
+# Verified 2026-09-07: MY, TW, PH answer 409 "marketplace is not supported".
 MARKETPLACES = [
     "EBAY_US", "EBAY_GB", "EBAY_DE", "EBAY_FR", "EBAY_IT", "EBAY_ES", "EBAY_AU", "EBAY_CA",
-    "EBAY_AT", "EBAY_CH", "EBAY_NL", "EBAY_PL", "EBAY_IE", "EBAY_BE",
-    "EBAY_SG", "EBAY_HK", "EBAY_MY", "EBAY_TW", "EBAY_PH",
+    "EBAY_AT", "EBAY_CH", "EBAY_NL", "EBAY_PL", "EBAY_IE", "EBAY_BE", "EBAY_SG", "EBAY_HK",
 ]
 
 # (query, category_ids or "")
@@ -128,7 +128,7 @@ class EbayScraper(BaseScraper):
                         if resp.status_code == 429:
                             log.warning(f"eBay rate limit hit on {marketplace}")
                             break
-                        if resp.status_code == 400 and "marketplace" in resp.text.lower():
+                        if resp.status_code in (400, 409) and "marketplace" in resp.text.lower():
                             log.info(f"eBay {marketplace}: not supported by Browse API — skipping")
                             marketplace_ok = False
                             break

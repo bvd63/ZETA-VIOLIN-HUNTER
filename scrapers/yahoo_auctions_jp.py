@@ -25,11 +25,16 @@ from filters import has_zeta_signal
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://auctions.yahoo.co.jp/search/search"
+# Broad category queries first: they always have results (so the watchdog can
+# see the site works and the parser can be validated from the logs) and any
+# Zeta among them is caught by the signal filter. Zeta-specific queries with no
+# results answer HTTP 404 on Yahoo — that is "no results", not an error.
 KEYWORDS = [
+    "エレキバイオリン",
+    "電子バイオリン",
     "ZETA バイオリン",
     "ゼータ バイオリン",
     "ゼータ ヴァイオリン",
-    "ZETA エレキバイオリン",
     "zeta violin",
     "zeta strados",
 ]
@@ -69,11 +74,14 @@ class YahooAuctionsJPScraper(BaseScraper):
                     resp = await client.get(SEARCH_URL, params={
                         "p": kw, "va": kw, "n": 50, "s1": "new", "o1": "d", "exflg": 1, "b": 1,
                     })
+                    if resp.status_code == 404:
+                        log.info(f"Yahoo Auctions JP '{kw}': no results (404)")
+                        continue
                     if resp.status_code != 200:
                         log.warning(f"Yahoo Auctions JP '{kw}' HTTP {resp.status_code}")
                         continue
                     items = self._parse(resp.text)
-                    if not items and len(resp.text) > 50000:
+                    if not items and len(resp.text) > 50000 and kw == KEYWORDS[0]:
                         self._log_structure(resp.text, kw)
                     self.fetched += len(items)
 
