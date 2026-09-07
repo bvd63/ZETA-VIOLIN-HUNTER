@@ -393,7 +393,8 @@ Optional tuning:
 - SEARCH_HOURS (default "9,21" UTC; legacy SEARCH_HOUR still honoured as the first hour)
 - MIN_PRICE (default 0)
 - MAX_PRICE (default 99999)
-- CONDITION (default "all": all | new | used)
+- CONDITION (default "used" = second-hand only, drops New/Brand New/Open box/B-Stock + dealers + shop language; "all" = no condition filter)
+- EXCLUDED_SELLERS (default "electricviolinshop,electric violin shop,zetaviolins,zeta violins,zetamusic.com" — new-stock Zeta dealers, matched against seller/shop/URL host)
 - MIN_YEAR (default 1980)
 - MAX_YEAR (default = next calendar year, computed at startup — Prompt 13; a fixed 2026 would have dropped every "2027" mention from January)
 - REVERB_API_TOKEN (optional — Reverb works without it with a browser UA; a token only raises rate limits)
@@ -466,6 +467,7 @@ Bot is operational. See Section 2 "What is broken" for remaining known issues.
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-09-07 | **Second-hand only, any model/year** (`CONDITION=used` default): drop platform conditions New/Brand New/Open box/B-Stock, new-stock dealers (`EXCLUDED_SELLERS`: electricviolinshop, zetaviolins, …) and shop language in titles (brand new, NIB, authorized dealer, in stock). MIN_YEAR/MAX_YEAR kept only as a loose text guard | Owner: "modele noi sunt OK dacă sunt second-hand, nu nou-nouțe". The text year filter cannot tell manufacture year (sellers write purchase years), so MAX_YEAR=2014 would again drop vintage listings; condition + seller are the reliable signals. Verified live: the 2 Electric Violin Shop "Brand New" Zetas are dropped, the 3 used ones pass. |
 | 2026-09-07 | Prompt 14: watchdog on `fetched` (pre-filter count) instead of on filtered results | Broad-query scrapers (Craigslist, ShopGoodwill, HiBid, OLX) legitimately return 0 Zeta candidates most cycles; only "source returned nothing" is a failure signal. Unconfigured scrapers (`is_configured()` False) are excluded. |
 | 2026-09-07 | Prompt 14: direct scrapers only for sites that answered a live probe from an EU IP (HiBid GraphQL, Kijiji, Marktplaats/2dehands, Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX). Catawiki, Proxibid, Heritage, the-saleroom, Bidspotter, Lot-tissimo, Easylive, Interencheres, Buyee, ZenMarket, Allegro, Ricardo, tutti.ch, Vinted, Invaluable, LiveAuctioneers, EstateSales left to Google/Brave | §7: no scrapers that return empty results. Probe table in this row is the authoritative list of what a Railway (EU) container can and cannot reach as of 2026-09-07. |
 | 2026-09-07 | Prompt 14: US proxy as env plumbing only (`US_PROXY_URL`), no OfferUp/Mercari US scrapers yet | Cannot verify blind scrapers without a US egress; Guitar Center (existing, verified selectors) and Facebook Chromium are wired to the proxy. |

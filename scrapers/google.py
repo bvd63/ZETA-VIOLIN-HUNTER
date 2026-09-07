@@ -51,8 +51,9 @@ SITE_GROUPS = [
     "site:craigslist.org OR site:offerup.com OR site:mercari.com OR site:facebook.com/marketplace "
     "OR site:shopgoodwill.com OR site:etsy.com OR site:bonanza.com OR site:5miles.com",
     # USA — music retail (used gear) & violin specialists
+    # (electricviolinshop.com / fiddlershop.com deliberately absent: new-stock dealers)
     "site:guitarcenter.com OR site:sweetwater.com OR site:samash.com OR site:musicgoround.com "
-    "OR site:chicagomusicexchange.com OR site:electricviolinshop.com OR site:fiddlershop.com OR site:elderly.com",
+    "OR site:chicagomusicexchange.com OR site:elderly.com OR site:reverb.com/marketplace OR site:5miles.com",
     # Auctions & estate sales
     "site:hibid.com OR site:liveauctioneers.com OR site:invaluable.com OR site:proxibid.com "
     "OR site:estatesales.net OR site:catawiki.com OR site:tarisio.com OR site:bonhams.com",

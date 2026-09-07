@@ -135,6 +135,24 @@ OTHER_BRAND_RX = _rx([
 ])
 
 # ---------------------------------------------------------------------------
+# NEW STOCK — owner wants second-hand only (any model, any year).
+# ---------------------------------------------------------------------------
+# Platform condition labels meaning "new": eBay "New", "New with tags",
+# "New other (see details)", "Open box"; Reverb "Brand New", "B-Stock".
+# "Mint" / "Like New" / "wie neu" are USED and must pass.
+NEW_CONDITION_RX = re.compile(
+    r"^\s*(?:brand[\s\-]*new|new(?:\s*\(|\s+with|\s+without|\s+other|\s*$)|b[\s\-]*stock|open[\s\-]*box|nuovo|neuf|neu|nieuw|nuevo)",
+    re.IGNORECASE,
+)
+# Title-only shop language for new stock.
+NEW_STOCK_TITLE_RX = _rx([
+    "brand new", "brandneu", "nagelneu", "nuovissimo", "new in box", "nib", "bnib",
+    "authorized dealer", "authorised dealer", "in stock", "financing", "free financing",
+    "factory sealed", "sealed", "nou nouț", "nou nout",
+])
+
+
+# ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
 def _text(listing: dict) -> tuple:
@@ -206,6 +224,25 @@ def is_sold_or_ended(title: str) -> bool:
     return bool(SOLD_RX.search(title))
 
 
+def is_new_stock(listing: dict, condition_mode: str, excluded_sellers: list) -> bool:
+    """True when the listing is new merchandise or comes from a new-stock
+    dealer. Only active when condition_mode == "used"."""
+    if condition_mode != "used":
+        return False
+    condition = str(listing.get("condition", "") or "")
+    if condition and NEW_CONDITION_RX.search(condition):
+        return True
+    title = str(listing.get("title", "") or "")
+    if NEW_STOCK_TITLE_RX.search(title):
+        return True
+    haystack = " ".join([
+        str(listing.get("seller", "") or ""),
+        str(listing.get("platform", "") or ""),
+        urlsplit(str(listing.get("url", "") or "")).netloc,
+    ]).lower()
+    return any(s and s in haystack for s in excluded_sellers)
+
+
 def is_valid_listing_url(url: str) -> bool:
     if not url:
         return False
@@ -225,9 +262,12 @@ def is_valid_listing_url(url: str) -> bool:
 def classify(listing: dict) -> str:
     """Return "" if the listing should be alerted, otherwise a short reason
     (used for per-reason counters in main.py)."""
+    from config import Config  # local import keeps filters importable in tests
     title, desc = _text(listing)
     if is_other_brand(title):
         return "other_brand"
+    if is_new_stock(listing, Config.CONDITION, Config.EXCLUDED_SELLERS):
+        return "new_stock"
     if has_noise(title, desc):
         return "noise"
     if is_excluded_intent(title, desc):

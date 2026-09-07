@@ -6,11 +6,32 @@ Plain asserts, no pytest dependency (Railway image has none).
 import os
 import sys
 
+os.environ["CONDITION"] = "used"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from filters import classify, has_zeta_signal  # noqa: E402
 
 URL = "https://example.com/item/123"
+
+# (listing dict, expected reason) — second-hand-only rules
+CONDITION_CASES = [
+    ({"title": "Zeta Strados Electric Violin", "condition": "Brand New", "url": URL}, "new_stock"),
+    ({"title": "Zeta Strados Electric Violin", "condition": "New", "url": URL}, "new_stock"),
+    ({"title": "Zeta Strados Electric Violin", "condition": "New other (see details)", "url": URL}, "new_stock"),
+    ({"title": "Zeta Strados Electric Violin", "condition": "Open box", "url": URL}, "new_stock"),
+    ({"title": "Zeta Strados Electric Violin", "condition": "B-Stock", "url": URL}, "new_stock"),
+    ({"title": "Zeta Strados Electric Violin", "condition": "Mint", "url": URL}, ""),
+    ({"title": "Zeta Strados Electric Violin", "condition": "Used", "url": URL}, ""),
+    ({"title": "Zeta Strados Electric Violin", "condition": "Very Good", "url": URL}, ""),
+    ({"title": "Zeta Strados like new", "condition": "Excellent", "url": URL}, ""),
+    ({"title": "Zeta Geige wie neu", "condition": "", "url": URL}, ""),
+    ({"title": "Brand New Zeta Strados 5-string", "condition": "", "url": URL}, "new_stock"),
+    ({"title": "Zeta Jazz Fusion NIB authorized dealer", "condition": "", "url": URL}, "new_stock"),
+    ({"title": "ZETA SV24 Strados Modern violin", "condition": "Brand New", "seller": "electricviolinshop", "url": URL}, "new_stock"),
+    ({"title": "ZETA SV24 Strados Modern violin", "condition": "Used", "seller": "electricviolinshop", "url": URL}, "new_stock"),
+    ({"title": "Zeta Strados violin", "condition": "", "url": "https://www.zetaviolins.com/products/strados"}, "new_stock"),
+    ({"title": "Zeta Strados violin", "condition": "", "seller": "hoosierville-mercantile", "url": URL}, ""),
+]
 
 # (title, description, expected reason or "" for accept)
 CASES = [
@@ -88,7 +109,14 @@ def main() -> int:
         ok = got == expected
         failures += 0 if ok else 1
         print(f"{'ok  ' if ok else 'FAIL'} has_zeta_signal({text[:40]!r}) = {got}")
-    print(f"\n{len(CASES) + len(SIGNAL_CASES) - failures} passed, {failures} failed")
+    for listing, expected in CONDITION_CASES:
+        got = classify({"platform": "test", "description": "", **listing})
+        ok = got == expected
+        failures += 0 if ok else 1
+        print(f"{'ok  ' if ok else 'FAIL'} [{expected or 'PASS':<11}] got={got or 'PASS':<11} "
+              f"cond={listing.get('condition', '')!r:<26} seller={listing.get('seller', '')!r} {listing['title'][:40]}")
+    total = len(CASES) + len(SIGNAL_CASES) + len(CONDITION_CASES)
+    print(f"\n{total - failures} passed, {failures} failed")
     return 1 if failures else 0
 
 

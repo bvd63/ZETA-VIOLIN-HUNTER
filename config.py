@@ -60,7 +60,18 @@ class Config:
     # --- Filters ---
     MIN_PRICE = float(os.getenv("MIN_PRICE", "0"))
     MAX_PRICE = float(os.getenv("MAX_PRICE", "99999"))
-    CONDITION = os.getenv("CONDITION", "all")  # "new", "used", "all"
+    # "used" (default): drop listings the platform marks as new / brand new /
+    # open box, listings from new-stock dealers and titles with shop language.
+    # "all": no condition filtering. Any model/year is fine as long as it is second-hand.
+    CONDITION = os.getenv("CONDITION", "used").strip().lower()
+    # Sellers / shops / domains that sell NEW Zeta stock — never alert their listings
+    # (comma separated, matched case-insensitively against seller name, shop slug, URL host).
+    EXCLUDED_SELLERS = [
+        s.strip().lower() for s in os.getenv(
+            "EXCLUDED_SELLERS",
+            "electricviolinshop,electric violin shop,zetaviolins,zeta violins,zetamusic.com",
+        ).split(",") if s.strip()
+    ]
 
     # Excluded countries/regions (owner is in Romania, not buying local)
     EXCLUDED_LOCATIONS = ["Romania"]

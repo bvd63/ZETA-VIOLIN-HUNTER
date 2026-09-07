@@ -49,6 +49,7 @@ status_tracker = StatusTracker()
 
 DROP_REASON_LABELS = {
     "other_brand": "other-brand",
+    "new_stock": "new-stock/dealer",
     "noise": "noise",
     "intent": "non-sale intent",
     "sold": "sold/ended",

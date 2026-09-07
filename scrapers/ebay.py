@@ -216,6 +216,7 @@ class EbayScraper(BaseScraper):
                                 "url": url,
                                 "description": description[:300],
                                 "condition": condition,
+                                "seller": str((item.get("seller") or {}).get("username") or ""),
                                 "relevance_score": score,
                                 "image_url": image_url,
                             })

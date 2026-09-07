@@ -120,6 +120,7 @@ class ReverbScraper(BaseScraper):
                                 "url": url,
                                 "description": description,
                                 "condition": condition,
+                                "seller": str((item.get("shop") or {}).get("slug") or item.get("shop_name") or ""),
                                 "date_posted": (item.get("published_at") or "")[:10],
                                 "relevance_score": self._relevance_score(title, description),
                                 "image_url": image_url,
