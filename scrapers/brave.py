@@ -71,7 +71,8 @@ class BraveScraper(BaseScraper):
         n = len(matrix)
         take = min(remaining, n)
         for i in range(take):
-            plan.append((matrix[(cursor + i) % n], {}))
+            # past year only — older indexed pages are almost always ended listings
+            plan.append((matrix[(cursor + i) % n], {"freshness": "py"}))
         return plan, ((cursor + take) % n if n else 0)
 
     async def search(self) -> list:
@@ -132,6 +133,7 @@ class BraveScraper(BaseScraper):
                             "date_posted": str(item.get("page_age") or item.get("age") or "")[:10],
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, snippet),
+                            "source": "search",  # main.py verifies the page is still live
                         })
                 except Exception as e:
                     log.warning(f"Brave search '{q[:60]}' error: {e}")

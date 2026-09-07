@@ -9,9 +9,14 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 from aiohttp import web
 
+from urllib.parse import urlsplit
+import httpx
+
 from database import Database
 from notifier import TelegramNotifier
 from filters import classify
+from liveness import is_live
+from scrapers.google import DIRECT_HOSTS
 
 from scrapers.reverb import ReverbScraper
 from scrapers.ebay import EbayScraper
@@ -55,7 +60,15 @@ DROP_REASON_LABELS = {
     "sold": "sold/ended",
     "non_zeta": "non-Zeta-violin",
     "url": "invalid-url",
+    "direct_covered": "search-hit on directly-scraped site",
+    "dead_link": "ended/expired page",
 }
+MAX_LIVENESS_CHECKS = 30  # per scraper per cycle
+
+
+def _is_direct_host(url: str) -> bool:
+    host = urlsplit(url).netloc.lower()
+    return any(h in host for h in DIRECT_HOSTS)
 
 
 def build_scrapers() -> list:
@@ -100,19 +113,37 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                 log.info(f"   Found {len(listings)} candidate listings from {scraper.name} ({fetched} items fetched)")
 
                 new_listings, drops, dropped = [], [], {}
-                for listing in listings:
-                    reason = classify(listing)
-                    if reason:
-                        dropped[reason] = dropped.get(reason, 0) + 1
-                        log.debug(f"   drop[{reason}] {listing.get('title', '')[:70]}")
-                        continue
-                    if db.is_seen(listing["id"]):
-                        info = price_tracker.update_price(listing)
-                        if info:
-                            drops.append((listing, info))
-                        continue
-                    db.mark_seen(listing["id"], listing)
-                    new_listings.append(listing)
+                checks_left = MAX_LIVENESS_CHECKS
+                async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
+                    for listing in listings:
+                        reason = classify(listing)
+                        if reason:
+                            dropped[reason] = dropped.get(reason, 0) + 1
+                            log.debug(f"   drop[{reason}] {listing.get('title', '')[:70]}")
+                            continue
+                        if db.is_seen(listing["id"]):
+                            info = price_tracker.update_price(listing)
+                            if info:
+                                drops.append((listing, info))
+                            continue
+                        if listing.get("source") == "search":
+                            # Search engines return years-old "ended" pages. Skip hosts we
+                            # scrape directly, and open every other page once to confirm it is live.
+                            if _is_direct_host(listing.get("url", "")):
+                                dropped["direct_covered"] = dropped.get("direct_covered", 0) + 1
+                                db.mark_seen(listing["id"], listing)
+                                continue
+                            if checks_left > 0:
+                                checks_left -= 1
+                                alive, why = await is_live(listing.get("url", ""), http)
+                                if not alive:
+                                    dropped["dead_link"] = dropped.get("dead_link", 0) + 1
+                                    log.info(f"   dead link ({why}): {listing.get('title', '')[:60]} {listing.get('url', '')[:80]}")
+                                    db.mark_seen(listing["id"], listing)  # never re-check
+                                    continue
+                                listing["liveness"] = why
+                        db.mark_seen(listing["id"], listing)
+                        new_listings.append(listing)
 
                 for reason, count in dropped.items():
                     log.info(f"   Filtered out {count} {DROP_REASON_LABELS.get(reason, reason)} listing(s) from {scraper.name}")
