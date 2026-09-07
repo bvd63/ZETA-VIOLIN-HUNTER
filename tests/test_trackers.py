@@ -33,7 +33,7 @@ def main() -> int:
     check(pt.update_price({**listing, "price": "2000.00 USD"}) == {}, "same price again → no alert")
     check(pt.update_price({**listing, "price": "2500.00 USD"}) == {}, "price increase → no alert")
     usd, cur = pt._parse_price("2000 €")
-    check(cur == "EUR" and usd == 2160.0, f"EUR parse {usd} {cur}")
+    check(cur == "EUR" and 2000 < usd < 2600, f"EUR parse {usd} {cur}")
     usd, cur = pt._parse_price("¥130000")
     check(cur == "JPY", f"JPY parse {usd} {cur}")
     from price_tracker import parse_amount

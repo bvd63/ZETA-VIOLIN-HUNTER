@@ -65,7 +65,7 @@ class ReverbScraper(BaseScraper):
                 for page in range(1, MAX_PAGES + 1):
                     try:
                         params = {**base_params, "per_page": 50, "page": page}
-                        resp = await client.get(REVERB_API, headers=headers, params=params)
+                        resp = await self.get_retry(client, REVERB_API, headers=headers, params=params)
                         if resp.status_code != 200:
                             log.warning(
                                 f"Reverb API HTTP {resp.status_code} for '{kw}' p{page}: "
@@ -121,6 +121,7 @@ class ReverbScraper(BaseScraper):
                                 "description": description,
                                 "condition": condition,
                                 "seller": str((item.get("shop") or {}).get("slug") or item.get("shop_name") or ""),
+                                "ships_to_ro": self._ships_to_ro(item),
                                 "date_posted": (item.get("published_at") or "")[:10],
                                 "relevance_score": self._relevance_score(title, description),
                                 "image_url": image_url,
@@ -131,6 +132,16 @@ class ReverbScraper(BaseScraper):
 
         log.info(f"Reverb: {len(results)} listings found")
         return results
+
+    @staticmethod
+    def _ships_to_ro(item: dict):
+        """True/False from Reverb shipping regions (XX = worldwide, EUR_EU = EU,
+        RO = Romania); None when the listing has no rate table."""
+        rates = (item.get("shipping") or {}).get("rates") or []
+        if not rates:
+            return None
+        codes = {str((r or {}).get("region_code", "")).upper() for r in rates}
+        return bool(codes & {"XX", "EUR_EU", "EU", "RO", "EUROPE"})
 
     @staticmethod
     def _location(item: dict) -> str:

@@ -16,13 +16,17 @@ from filters import has_zeta_signal
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz"
+# Musikinstrumente category — bare brand query without the non-music noise
+CATEGORY_URL = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/musikinstrumente-2001"
 
+# (keyword, category-scoped)
 KEYWORDS = [
-    "zeta geige",
-    "zeta violine",
-    "zeta violin",
-    "zeta strados",
-    "e-geige zeta",
+    ("zeta", True),
+    ("strados", True),
+    ("zeta geige", False),
+    ("zeta violine", False),
+    ("zeta violin", False),
+    ("e-geige zeta", False),
 ]
 
 
@@ -35,9 +39,9 @@ class WillhabenScraper(BaseScraper):
         headers = {**BROWSER_HEADERS, "Accept-Language": "de-AT,de;q=0.9,en;q=0.8"}
 
         async with self.make_client(headers=headers) as client:
-            for kw in KEYWORDS:
+            for kw, in_category in KEYWORDS:
                 try:
-                    resp = await client.get(SEARCH_URL, params={"keyword": kw})
+                    resp = await client.get(CATEGORY_URL if in_category else SEARCH_URL, params={"keyword": kw})
                     if resp.status_code != 200:
                         log.warning(f"Willhaben '{kw}' HTTP {resp.status_code}")
                         continue

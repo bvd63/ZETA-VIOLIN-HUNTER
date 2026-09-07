@@ -41,8 +41,10 @@ ZETA_ONLY_ARTIST_RX = _rx(["jean-luc ponty", "jean luc ponty", "jlp", "jlp5", "b
 STRADOS_RX = _rx(["strados"])  # alone is OK
 MODEL_NAME_RX = _rx([
     "jazz fusion", "jazz standard", "jazz modern", "jazz classic", "jazz acoustic pro",
+    "jazz fusion legacy", "fusion legacy", "jazz legacy",
     "strados modern", "strados fusion", "strados acoustic pro", "strados standard", "strados legacy",
     "e-fusion", "e-modern", "ev acoustic pro", "acoustic pro", "acoustic-pro",
+    "educator",  # Zeta Educator student series (requires Zeta context)
     "vanessa-mae", "vanessa mae",
 ])
 
@@ -132,6 +134,8 @@ OTHER_BRAND_RX = _rx([
     "ns design", "ns wav", "ns cr", "mark wood", "wood violin", "wood viper", "viper", "stingray",
     "fender", "fv-1", "stagg", "cantini", "cecilio", "kinglos", "glasser", "eco-ion",
     "electric violin lutherie", "evl", "vangoa",
+    "jordan", "realist", "barcus berry", "barcus-berry", "skyinbow", "harley benton",
+    "3dvarius", "ted brewer", "wood violins", "gewa", "aurora violin", "eastar", "vangoa",
 ])
 
 # ---------------------------------------------------------------------------

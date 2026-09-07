@@ -18,13 +18,20 @@ SITES = [
     ("2dehands", "https://www.2dehands.be", "Belgium"),
 ]
 
+# (keyword, l1CategoryId or None). 728 = Muziek en Instrumenten — lets the bare
+# brand query skip the "Linea Zeta" shoes.
 KEYWORDS = [
-    "zeta viool",
-    "zeta violin",
-    "zeta strados",
-    "elektrische viool zeta",
-    "zeta jazz fusion",
+    ("zeta", 728),
+    ("strados", 728),
+    ("zeta viool", None),
+    ("zeta violin", None),
+    ("elektrische viool zeta", None),
+    ("zeta jazz fusion", None),
 ]
+
+DUTCH_MONTHS = {"jan": 1, "feb": 2, "mrt": 3, "maa": 3, "apr": 4, "mei": 5, "jun": 6, "jul": 7,
+                "aug": 8, "sep": 9, "okt": 10, "nov": 11, "dec": 12,
+                "fév": 2, "mar": 3, "avr": 4, "mai": 5, "juin": 6, "juil": 7, "aoû": 8, "oct": 10, "déc": 12}
 
 HEADERS = {
     "User-Agent": BROWSER_UA,
@@ -42,9 +49,12 @@ class MarktplaatsScraper(BaseScraper):
 
         async with self.make_client(headers=HEADERS) as client:
             for site_name, base, country in SITES:
-                for kw in KEYWORDS:
+                for kw, category in KEYWORDS:
                     try:
-                        resp = await client.get(f"{base}/lrp/api/search", params={"query": kw, "limit": 30, "offset": 0})
+                        params = {"query": kw, "limit": 30, "offset": 0}
+                        if category:
+                            params["l1CategoryId"] = category
+                        resp = await client.get(f"{base}/lrp/api/search", params=params)
                         if resp.status_code != 200:
                             log.warning(f"{site_name} '{kw}' HTTP {resp.status_code}")
                             continue
@@ -86,7 +96,7 @@ class MarktplaatsScraper(BaseScraper):
                                 "location": location,
                                 "url": url,
                                 "description": description[:300],
-                                "date_posted": str(ad.get("date") or "")[:10],
+                                "date_posted": self._date(str(ad.get("date") or "")),
                                 "image_url": image_url,
                                 "relevance_score": self._relevance_score(title, description),
                             })
@@ -95,6 +105,33 @@ class MarktplaatsScraper(BaseScraper):
 
         log.info(f"Marktplaats/2dehands: {len(results)} listings found")
         return results
+
+    @staticmethod
+    def _date(raw: str) -> str:
+        """'26 aug 26' / '26 aug. 2026' → '2026-08-26'; 'Vandaag'/'Gisteren'/'Eergisteren' → ISO."""
+        from datetime import date, timedelta
+        import re
+        low = raw.strip().lower()
+        if not low:
+            return ""
+        today = date.today()
+        if low.startswith(("vandaag", "aujourd", "today")):
+            return today.isoformat()
+        if low.startswith(("gisteren", "hier", "yesterday")):
+            return (today - timedelta(days=1)).isoformat()
+        if low.startswith(("eergisteren", "avant-hier")):
+            return (today - timedelta(days=2)).isoformat()
+        m = re.match(r"(\d{1,2})\s+([a-zéû]+)\.?\s+(\d{2,4})", low)
+        if m:
+            month = DUTCH_MONTHS.get(m.group(2)[:3]) or DUTCH_MONTHS.get(m.group(2)[:4])
+            year = int(m.group(3))
+            year = year + 2000 if year < 100 else year
+            if month:
+                try:
+                    return date(year, month, int(m.group(1))).isoformat()
+                except ValueError:
+                    return ""
+        return raw[:10]
 
     @staticmethod
     def _price(price_info: dict) -> str:

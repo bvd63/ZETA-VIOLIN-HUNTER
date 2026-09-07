@@ -17,12 +17,16 @@ from filters import has_zeta_signal
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.kijiji.ca/b-canada/{slug}/k0l0"
+# Musical Instruments category (c17): bare brand query with less noise
+CATEGORY_URL = "https://www.kijiji.ca/b-musical-instruments/canada/{slug}/k0c17l0"
 
+# (keyword, category-scoped)
 KEYWORDS = [
-    "zeta violin",
-    "zeta electric violin",
-    "zeta strados",
-    "violon zeta",
+    ("zeta", True),
+    ("strados", True),
+    ("zeta violin", False),
+    ("zeta electric violin", False),
+    ("violon zeta", False),
 ]
 
 
@@ -34,10 +38,10 @@ class KijijiScraper(BaseScraper):
         seen_ids = set()
 
         async with self.make_client(headers=BROWSER_HEADERS) as client:
-            for kw in KEYWORDS:
+            for kw, in_category in KEYWORDS:
                 slug = re.sub(r"[^a-z0-9]+", "-", kw.lower()).strip("-")
                 try:
-                    resp = await client.get(SEARCH_URL.format(slug=slug))
+                    resp = await client.get((CATEGORY_URL if in_category else SEARCH_URL).format(slug=slug))
                     if resp.status_code != 200:
                         log.warning(f"Kijiji '{kw}' HTTP {resp.status_code}")
                         continue

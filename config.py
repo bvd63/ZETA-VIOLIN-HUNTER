@@ -78,12 +78,18 @@ class Config:
     CONDITION = os.getenv("CONDITION", "used").strip().lower()
     # Sellers / shops / domains that sell NEW Zeta stock — never alert their listings
     # (comma separated, matched case-insensitively against seller name, shop slug, URL host).
+    # Only the manufacturer by default: dealers such as Electric Violin Shop also
+    # sell trade-ins, and their NEW stock is already dropped by the condition check.
     EXCLUDED_SELLERS = [
         s.strip().lower() for s in os.getenv(
-            "EXCLUDED_SELLERS",
-            "electricviolinshop,electric violin shop,zetaviolins,zeta violins,zetamusic.com",
+            "EXCLUDED_SELLERS", "zetaviolins,zeta violins,zetamusic.com",
         ).split(",") if s.strip()
     ]
+    # Weekly digest (active listings + price stats): weekday in SEARCH_TIMEZONE,
+    # sent right after the search of that day. "" disables it.
+    WEEKLY_DIGEST_DAY = os.getenv("WEEKLY_DIGEST_DAY", "sun").strip().lower()
+    # Run the reachability diagnostic at startup (logs which blocked sites answer from here)
+    STARTUP_DIAGNOSTICS = _bool("STARTUP_DIAGNOSTICS", "true")
 
     # Excluded countries/regions (owner is in Romania, not buying local)
     EXCLUDED_LOCATIONS = ["Romania"]

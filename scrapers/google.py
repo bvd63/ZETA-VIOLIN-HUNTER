@@ -35,6 +35,8 @@ GLOBAL_QUERIES = [
     "Zeta Jazz Fusion violin",
     "violino elettrico Zeta OR violon électrique Zeta OR violín eléctrico Zeta OR Zeta Geige OR Zeta viool",
     "Zetta violin OR Zeta JV44 OR Zeta SV24 OR Zeta JLP violin",
+    "ゼータ バイオリン OR ゼータ エレキバイオリン OR ZETA エレクトリックヴァイオリン",
+    "Zeta скрипка OR Zeta электроскрипка OR Zeta цигулка OR Zeta skrzypce OR Zeta hegedű",
 ]
 
 MATRIX_KEYWORDS = [

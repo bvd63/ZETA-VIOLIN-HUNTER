@@ -106,12 +106,20 @@ class PriceTracker:
             currency = "JPY"
         elif "KR" in upper and currency == "USD":
             currency = "SEK"
+        elif "ZŁ" in upper or "ZL" in upper.replace(".", ""):
+            currency = "PLN"
+        elif "LEI" in upper:
+            currency = "RON"
 
         price_local = parse_amount(price_str)
         if price_local is None:
             return None, None
-        rate = CURRENCY_TO_USD.get(currency, 1.0)
-        return round(price_local * rate, 2), currency
+        try:
+            from fx import to_usd  # live ECB rates, cached; static fallback inside
+            return to_usd(price_local, currency), currency
+        except Exception:
+            rate = CURRENCY_TO_USD.get(currency, 1.0)
+            return round(price_local * rate, 2), currency
 
     def record_listing(self, listing: dict) -> dict:
         """Record a NEW listing's price and return price context

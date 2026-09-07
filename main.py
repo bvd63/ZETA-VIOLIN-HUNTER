@@ -16,6 +16,10 @@ from database import Database
 from notifier import TelegramNotifier
 from filters import classify
 from liveness import is_live
+from dedup import is_duplicate
+from fx import refresh_rates
+from diagnostics import run_reachability
+from telegram_commands import TelegramCommands
 from scrapers.google import DIRECT_HOSTS
 
 from scrapers.reverb import ReverbScraper
@@ -32,6 +36,7 @@ from scrapers.schibsted import SchibstedScraper
 from scrapers.gumtree import GumtreeScraper
 from scrapers.olx import OlxScraper
 from scrapers.subito import SubitoScraper
+from scrapers.shopify_dealers import ShopifyDealersScraper
 from scrapers.mercari_jp import MercariJPScraper
 from scrapers.guitar_center import GuitarCenterScraper
 from scrapers.reddit_scraper import RedditScraper
@@ -62,6 +67,7 @@ DROP_REASON_LABELS = {
     "url": "invalid-url",
     "direct_covered": "search-hit on directly-scraped site",
     "dead_link": "ended/expired page",
+    "duplicate": "same instrument already alerted",
 }
 MAX_LIVENESS_CHECKS = 30  # per scraper per cycle
 
@@ -87,6 +93,7 @@ def build_scrapers() -> list:
         GumtreeScraper(),
         OlxScraper(),
         SubitoScraper(),
+        ShopifyDealersScraper(),
         MercariJPScraper(),
         GuitarCenterScraper(),          # runs only when US_PROXY_URL is set
         FacebookMarketplaceScraper(),   # Playwright; uses US_PROXY_URL when set
@@ -114,6 +121,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
 
                 new_listings, drops, dropped = [], [], {}
                 checks_left = MAX_LIVENESS_CHECKS
+                recent_alerts = db.recent_alerts(days=60)
                 async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
                     for listing in listings:
                         reason = classify(listing)
@@ -121,6 +129,8 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                             dropped[reason] = dropped.get(reason, 0) + 1
                             log.debug(f"   drop[{reason}] {listing.get('title', '')[:70]}")
                             continue
+                        if listing.get("source") != "search":
+                            db.touch_active(listing)  # still live on its platform this cycle
                         if db.is_seen(listing["id"]):
                             info = price_tracker.update_price(listing)
                             if info:
@@ -142,7 +152,19 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                                     db.mark_seen(listing["id"], listing)  # never re-check
                                     continue
                                 listing["liveness"] = why
+                        # Same instrument already alerted from another platform / relisted?
+                        price_usd, _ = price_tracker._parse_price(listing.get("price", ""))
+                        dup = is_duplicate(listing.get("title", ""), price_usd, recent_alerts)
+                        if dup:
+                            dropped["duplicate"] = dropped.get("duplicate", 0) + 1
+                            log.info(f"   duplicate of [{dup.get('platform')}] {dup.get('title', '')[:50]}: "
+                                     f"{listing.get('title', '')[:50]}")
+                            db.mark_seen(listing["id"], listing)
+                            continue
                         db.mark_seen(listing["id"], listing)
+                        db.record_alert(listing, price_usd)
+                        recent_alerts.append({"title": listing.get("title", ""), "price_usd": price_usd,
+                                              "platform": listing.get("platform", ""), "url": listing.get("url", "")})
                         new_listings.append(listing)
 
                 for reason, count in dropped.items():
@@ -207,6 +229,7 @@ async def run_search_cycle():
         status_tracker.start_cycle()
         log.info("=" * 80)
 
+        await refresh_rates()
         db = Database()
         notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)
         price_tracker = PriceTracker()
@@ -276,6 +299,23 @@ async def run_search_cycle():
         )
         await _watchdog(scrapers, notifier)
         return len(all_new_listings)
+
+
+async def send_weekly_digest():
+    """Sunday overview of live Zeta listings, disappeared ones and price stats."""
+    notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)
+    db = Database()
+    try:
+        active = db.active_listings(days=3)
+        gone = db.gone_since(days_active=3, days_gone=14)
+    finally:
+        db.close()
+    stats = status_tracker.get_status().get("price_stats") or {}
+    log.info(f"📰 Weekly digest: {len(active)} active, {len(gone)} gone")
+    try:
+        await notifier.send_digest(active, gone, stats)
+    except Exception as e:
+        log.error(f"Weekly digest error: {e}")
 
 
 def _authorized(request) -> bool:
@@ -350,6 +390,8 @@ async def main():
     log.info(f"   DB: {Config.DB_PATH} | US proxy: {'yes' if Config.US_PROXY_URL else 'no'} | "
              f"Brave: {'yes' if Config.BRAVE_API_KEY else 'no'} | condition: {Config.CONDITION}")
     await detect_egress()
+    if Config.STARTUP_DIAGNOSTICS:
+        asyncio.create_task(run_reachability())
 
     app = web.Application()
     app.router.add_post('/search', handle_search)
@@ -371,10 +413,26 @@ async def main():
     hours = _parse_hours(Config.SEARCH_HOURS)
     scheduler = AsyncIOScheduler()
     job = scheduler.add_job(run_search_cycle, "cron", hour=hours, minute=0, timezone=Config.SEARCH_TIMEZONE)
+    if Config.WEEKLY_DIGEST_DAY:
+        first_hour = hours.split(",")[0]
+        scheduler.add_job(send_weekly_digest, "cron", day_of_week=Config.WEEKLY_DIGEST_DAY,
+                          hour=first_hour, minute=30, timezone=Config.SEARCH_TIMEZONE)
     scheduler.start()
     log.info(f"⏰ Scheduled daily at {hours}:00 {Config.SEARCH_TIMEZONE} "
              f"(next run {job.next_run_time:%Y-%m-%d %H:%M %Z}); "
-             f"Google {Config.GOOGLE_QUERIES_PER_RUN}/run, Brave {Config.BRAVE_QUERIES_PER_RUN}/run")
+             f"Google {Config.GOOGLE_QUERIES_PER_RUN}/run, Brave {Config.BRAVE_QUERIES_PER_RUN}/run"
+             + (f"; weekly digest {Config.WEEKLY_DIGEST_DAY} {first_hour}:30" if Config.WEEKLY_DIGEST_DAY else ""))
+
+    # Telegram commands (/cauta /status /active) via long polling
+    commands = TelegramCommands(
+        Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID,
+        on_search=run_search_cycle,
+        is_searching=search_cycle_lock.locked,
+        status_tracker=status_tracker,
+        database_factory=Database,
+        notifier=TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID),
+    )
+    asyncio.create_task(commands.run())
 
     try:
         while True:

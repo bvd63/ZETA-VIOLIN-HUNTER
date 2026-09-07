@@ -137,8 +137,11 @@ class TelegramNotifier:
         safe_url = self._normalize_url(url)
         lines = [
             f"🎻 <b>#{idx} — {html.escape(title)}</b>",
-            f"💰 <b>Price:</b> {html.escape(price)}",
+            f"💰 <b>Price:</b> {html.escape(price)}{self._eur_hint(price_context)}",
         ]
+        rare = self._rare_flags(title, description)
+        if rare:
+            lines.append(f"🔥 <b>Rar:</b> {html.escape(', '.join(rare))}")
 
         if price_context.get("avg_price"):
             avg = price_context["avg_price"]
@@ -150,7 +153,13 @@ class TelegramNotifier:
                 lines.append(f"📊 Avg: ${avg:.0f} ({total} seen)")
 
         lines.append(f"📍 <b>Location:</b> {html.escape(location)}")
-        lines.append(f"🛒 <b>Platform:</b> {html.escape(platform)}")
+        ships = listing.get("ships_to_ro")
+        if ships is True:
+            lines.append("🚚 <b>Livrează în România:</b> da")
+        elif ships is False:
+            lines.append("🚚 <b>Livrează în România:</b> nu / neprecizat")
+        lines.append(f"🛒 <b>Platform:</b> {html.escape(platform)}"
+                     + (f" · {html.escape(str(listing.get('condition')))}" if listing.get("condition") else ""))
         if date_posted:
             lines.append(f"📅 <b>Posted:</b> {html.escape(date_posted)}")
         if description:
@@ -162,6 +171,49 @@ class TelegramNotifier:
             lines.append(safe_url)
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _eur_hint(price_context: dict) -> str:
+        usd = (price_context or {}).get("price_usd")
+        if not usd:
+            return ""
+        try:
+            from fx import usd_to
+            eur = usd_to(float(usd), "EUR")
+            return f"  (≈ {eur:,.0f} €)".replace(",", " ")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _rare_flags(title: str, description: str) -> list:
+        import re
+        text = f"{title} {description}".lower()
+        flags = []
+        if re.search(r"jean[\s\-]*luc[\s\-]*ponty|\bjlp\b|ponty signature", text):
+            flags.append("Jean-Luc Ponty signature")
+        if re.search(r"\b5[\s\-]*(string|strings|str|corde|corzi|saiten|cordes|cuerdas|snarig|弦)", text):
+            flags.append("5 corzi")
+        if re.search(r"\bmidi\b", text):
+            flags.append("MIDI")
+        if re.search(r"boyd tinsley|eileen ivers", text):
+            flags.append("model signature")
+        return flags
+
+    async def send_digest(self, active: list, gone: list, price_stats: dict):
+        """Weekly overview: live Zeta listings, ones that disappeared (probably sold), price stats."""
+        lines = [f"📰 <b>ZETA VIOLIN HUNTER — rezumat săptămânal</b>",
+                 f"🎻 {len(active)} anunț(uri) active, {len(gone)} dispărute în ultimele 2 săptămâni"]
+        for r in active[:20]:
+            lines.append(f"• {html.escape(r['title'][:55])} — {html.escape(r['price'])} [{html.escape(r['platform'][:18])}]\n  {html.escape(r['url'])}")
+        if gone:
+            lines.append("\n<b>Dispărute (probabil vândute):</b>")
+            for r in gone[:10]:
+                lines.append(f"• {html.escape(r['title'][:55])} — {html.escape(r['price'])} [{html.escape(r['platform'][:18])}]")
+        if price_stats and price_stats.get("total_tracked"):
+            lines.append(f"\n📊 Prețuri urmărite: {price_stats['total_tracked']} · medie ${price_stats.get('avg_usd', 0):,.0f} "
+                         f"· min ${price_stats.get('min_usd', 0):,.0f} · max ${price_stats.get('max_usd', 0):,.0f}")
+        lines.append(f"🕒 {datetime.utcnow():%Y-%m-%d %H:%M} UTC")
+        await self.send("\n".join(lines)[:3900])
 
     def _normalize_url(self, raw_url: str) -> str:
         if not raw_url:

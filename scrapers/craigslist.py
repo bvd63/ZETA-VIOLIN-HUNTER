@@ -8,9 +8,13 @@ Why (verified 2026-09-07):
       https://sapi.craigslist.org/web/v8/postings/search/full
         ?batch={AreaID}-0-360-0-0&cc=US&lang=en&query=...&searchPath=msa|sss
     which answers plain JSON, ~15 ms per call, no blocking observed at
-    concurrency 10 (826 calls in 13 s).
+    concurrency 10 (1400 calls in 28 s).
   * Area IDs come from the official list https://reference.craigslist.org/Areas
-    (413 US + 100+ CA areas).
+    (413 US + ~55 CA areas).
+
+The search API returns TITLES only. Titles like "Electric violin 5 string"
+often hide a Zeta in the body, so every violin-titled posting (cap MAX_ENRICH)
+gets its page fetched and its description searched for Zeta signals.
 
 Item format (compact arrays):
   [postingIdOffset, postedOffset, categoryId, price, "locIdx:descIdx:nbIdx~lat~lon",
@@ -27,7 +31,7 @@ from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_UA
 from config import Config
-from filters import has_zeta_signal
+from filters import has_zeta_signal, has_violin_word, is_other_brand
 
 log = logging.getLogger(__name__)
 
@@ -42,16 +46,15 @@ STATIC_AREAS = [
 ]
 
 # (query, searchPath). "msa" = musical instruments (all), "sss" = all for sale.
-# Broad single-word queries + local Zeta-signal filter beat many narrow queries:
-# fewer requests, and titles like "Zeta Strados 5-string" are still caught.
 QUERIES = [
     ("zeta", "msa"),
     ("strados", "msa"),
     ("zeta violin", "sss"),
+    ("electric violin", "msa"),   # unbranded titles — body is checked for Zeta
 ]
 
-# Max posting pages fetched per cycle for full descriptions
-MAX_ENRICH = 20
+# Max posting pages fetched per cycle (full descriptions)
+MAX_ENRICH = 150
 
 HEADERS = {
     "User-Agent": BROWSER_UA,
@@ -67,6 +70,8 @@ class CraigslistScraper(BaseScraper):
     async def search(self) -> list:
         results: list = []
         seen_ids: set = set()
+        definite: list = []    # Zeta signal already in the title
+        potential: list = []   # violin in the title, no brand — body must be checked
 
         async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers=HEADERS) as client:
             areas = await self._load_areas(client)
@@ -110,43 +115,41 @@ class CraigslistScraper(BaseScraper):
                         if item["id"] in seen_ids:
                             continue
                         seen_ids.add(item["id"])
-                        if not has_zeta_signal(item["title"]):
-                            continue
-                        if self._is_excluded(item["title"]):
-                            continue
-                        if item["price"] != "N/A" and not self._price_in_range(item["price"]):
-                            continue
-                        if not self._year_in_range(item["title"]):
-                            continue
-                        results.append(item)
+                        title = item["title"]
+                        if has_zeta_signal(title):
+                            definite.append(item)
+                        elif has_violin_word(title) and not is_other_brand(title):
+                            potential.append(item)
 
-            # The search API returns titles only. Fetch the posting page for the
-            # few Zeta-signal hits so filters can see the full description.
-            await asyncio.gather(*[self._enrich(client, item) for item in results[:MAX_ENRICH]])
-            for item in results:
+            # Fetch posting pages: all definite hits + as many unbranded violin
+            # postings as the budget allows (newest first).
+            potential.sort(key=lambda x: x.get("date_posted", ""), reverse=True)
+            to_enrich = definite + potential[:max(0, MAX_ENRICH - len(definite))]
+            log.info(f"Craigslist: {len(definite)} Zeta-titled, {len(potential)} unbranded violin postings; "
+                     f"fetching {len(to_enrich)} pages")
+            enrich_sem = asyncio.Semaphore(8)
+
+            async def enrich(item: dict) -> None:
+                async with enrich_sem:
+                    await self._enrich(client, item)
+
+            await asyncio.gather(*[enrich(item) for item in to_enrich])
+
+            for item in definite + potential[:max(0, MAX_ENRICH - len(definite))]:
+                text = f"{item['title']} {item.get('description', '')}"
+                if item not in definite and not has_zeta_signal(text):
+                    continue
+                if self._is_excluded(item["title"]):
+                    continue
+                if item["price"] != "N/A" and not self._price_in_range(item["price"]):
+                    continue
+                if not self._year_in_range(text):
+                    continue
                 item["relevance_score"] = self._relevance_score(item["title"], item.get("description", ""))
+                results.append(item)
 
         log.info(f"Craigslist: {len(results)} listings found")
         return results
-
-    async def _enrich(self, client: httpx.AsyncClient, item: dict) -> None:
-        try:
-            resp = await client.get(item["url"], headers={**HEADERS, "Accept": "text/html,*/*;q=0.8"})
-            if resp.status_code != 200:
-                return
-            soup = BeautifulSoup(resp.text, "lxml")
-            body = soup.select_one("#postingbody")
-            if body:
-                for junk in body.select(".print-information, .print-qrcode-container"):
-                    junk.decompose()
-                text = body.get_text(" ", strip=True).replace("QR Code Link to This Post", "").strip()
-                item["description"] = text[:300]
-            if not item.get("image_url"):
-                img = soup.select_one(".gallery img, .slide img, #thumbs img")
-                if img and img.get("src"):
-                    item["image_url"] = img["src"]
-        except Exception as e:
-            log.debug(f"Craigslist enrich error for {item.get('url', '')}: {e}")
 
     def _decode(self, data: dict, host: str) -> list:
         """Turn sapi compact arrays into listing dicts (no filtering)."""
@@ -180,13 +183,9 @@ class CraigslistScraper(BaseScraper):
                         image = f"https://images.craigslist.org/{key}_600x450.jpg"
             if not price and isinstance(it[3], (int, float)) and it[3]:
                 price = f"${it[3]}"
-
-            if token and slug:
-                url = f"https://www.craigslist.org/view/d/{slug}/{token}"
-            else:
+            if not (token and slug):
                 continue
 
-            # Location: "locIdx:descIdx:nbIdx~lat~lon"
             area_host, place = host, ""
             try:
                 loc_idx, desc_idx = str(it[4]).split("~")[0].split(":")[:2]
@@ -207,13 +206,33 @@ class CraigslistScraper(BaseScraper):
                 "title": title,
                 "price": price or "N/A",
                 "location": ", ".join(p for p in [place.title() if place else "", area_host] if p),
-                "url": url,
+                "url": f"https://www.craigslist.org/view/d/{slug}/{token}",
                 "description": "",
                 "date_posted": posted,
                 "image_url": image,
                 "relevance_score": 1,
             })
         return out
+
+    async def _enrich(self, client: httpx.AsyncClient, item: dict) -> None:
+        """Fetch the posting page for the full description and first image."""
+        try:
+            resp = await client.get(item["url"], headers={**HEADERS, "Accept": "text/html,*/*;q=0.8"})
+            if resp.status_code != 200:
+                return
+            soup = BeautifulSoup(resp.text, "lxml")
+            body = soup.select_one("#postingbody")
+            if body:
+                for junk in body.select(".print-information, .print-qrcode-container"):
+                    junk.decompose()
+                text = body.get_text(" ", strip=True).replace("QR Code Link to This Post", "").strip()
+                item["description"] = text[:600]
+            if not item.get("image_url"):
+                img = soup.select_one(".gallery img, .slide img, #thumbs img")
+                if img and img.get("src"):
+                    item["image_url"] = img["src"]
+        except Exception as e:
+            log.debug(f"Craigslist enrich error for {item.get('url', '')}: {e}")
 
     async def _load_areas(self, client: httpx.AsyncClient) -> list:
         wanted = {c.strip().upper() for c in Config.CRAIGSLIST_COUNTRIES.split(",") if c.strip()}

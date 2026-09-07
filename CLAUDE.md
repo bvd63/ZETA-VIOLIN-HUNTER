@@ -49,6 +49,24 @@ violas, cellos, basses, mandolins — violins only).
 - **Reverb `make=Zeta`** — NEW Prompt 14. Structured brand filter query added to the keyword list (catches odd titles).
 - **HTTP hardening** — `PORT` env honoured; `SEARCH_TOKEN` protects `/search` and `/status` (header `X-Search-Token` or `?token=`).
 - `.github/workflows/tests.yml` — compiles everything and runs `tests/test_filters.py` on every push.
+
+### Prompt 15 additions (2026-09-07 evening — "nothing must slip")
+- **Description-level recall.** Craigslist now also queries "electric violin" in every area and fetches the posting page of every violin-titled, unbranded posting (cap 150/cycle) to find Zetas mentioned only in the body. eBay requests `fieldgroups=EXTENDED` (shortDescription) and a bare `zeta` query in category 619 (Musical Instruments & Gear). Kijiji, Marktplaats/2dehands (l1CategoryId 728) and Willhaben (musikinstrumente-2001) run bare `zeta`/`strados` queries scoped to their instrument categories. Verified live: found "Violon ZETA", 1300 €, Schaerbeek (2dehands) that keyword queries missed.
+- **eBay**: 19 marketplaces (+BE, SG, HK, MY, TW, PH; unsupported ones answer 400 once and are skipped), `X-EBAY-C-ENDUSERCTX: contextualLocation=country=RO` → `ships_to_ro` from shippingOptions.
+- **Reverb**: `ships_to_ro` from shipping rate regions (XX/EUR_EU/RO), one retry on 5xx (`BaseScraper.get_retry`).
+- `scrapers/shopify_dealers.py` — NEW. Shopify JSON (`/collections/{used}/products.json`, `/search/suggest.json?q=zeta`) for Electric Violin Shop (used collection), StringWorks (pre-owned), Guitar Chimp. Products count as NEW unless title/tags/collection say used/pre-owned/consignment → CONDITION=used keeps only trade-ins. `EXCLUDED_SELLERS` default reduced to the manufacturer (zetaviolins).
+- **Google/Brave**: Japanese and Cyrillic/Polish/Hungarian global queries added.
+- `telegram_commands.py` — NEW. Long-polling `getUpdates`: `/cauta` (run a cycle now), `/status` (per-source health with streaks), `/active` (Zetas seen live in the last 3 days), `/help`. Only the owner's chat id is honoured. No public URL needed.
+- `database.py`: `listing_activity` (every live sighting → `/active`, digest, sold detection) and `alerts` (for dedup).
+- `dedup.py` — NEW. Cross-platform duplicate detection: Jaccard ≥ 0.75 on title tokens (filler words removed) + price within 12 % vs alerts of the last 60 days → dropped as "duplicate".
+- `fx.py` — NEW. Live ECB rates via frankfurter.app cached 24 h in SQLite (`kv` table), static fallback; price_tracker uses it; alerts show "≈ N €".
+- **Alerts** show 🚚 "Livrează în România: da/nu", condition, and 🔥 rare flags (Jean-Luc Ponty signature, 5 corzi, MIDI, Tinsley/Ivers).
+- **Weekly digest** (`WEEKLY_DIGEST_DAY`, default Sunday, 30 min after the search): active listings, ones gone in the last 2 weeks (probably sold), price stats.
+- `diagnostics.py` — NEW. At startup, probes 15 blocked/unknown sites (Yahoo JP, Buyee, ZenMarket, OfferUp, Mercari US, Etsy, Guitar Center, Facebook, Catawiki, Proxibid, LiveAuctioneers, Oodle, Allegro, Ricardo, Wallapop) and logs ok/BLOCKED — the container runs in **Singapore** (verified from the egress log), so this tells which sites could get direct scrapers. `STARTUP_DIAGNOSTICS=false` disables.
+- `railway.toml`: `healthcheckPath=/health`.
+- Filters: other-brand list extended (Jordan, Realist, Barcus Berry, Skyinbow, Harley Benton, 3Dvarius, Ted Brewer, GEWA, Eastar); model names + Educator, Fusion Legacy.
+- Tests: `tests/test_dedup.py` (dedup, FX, Dutch dates) added; 71 filter cases.
+- **Still impossible from code**: OfferUp / Mercari US / Etsy / Facebook Marketplace / Guitar Center without `US_PROXY_URL`; Facebook groups (login); unbranded listings identifiable only from photos (needs a vision model — owner declined); Oodle / Gbase / Sweetwater Gear Exchange / The Gear Page (Cloudflare) → Google/Brave only.
 - `scrapers/ebay.py` — REWRITTEN in Prompt 2. Now uses eBay Browse API
   with OAuth2 client_credentials grant. Searches 13 marketplaces with 8
   keywords. Requires EBAY_CLIENT_ID + EBAY_CLIENT_SECRET.
@@ -108,8 +126,13 @@ violas, cellos, basses, mandolins — violins only).
 
 File layout (top level):
 
-- main.py — Entry point + AsyncIO scheduler + HTTP server
+- main.py — Entry point + AsyncIO scheduler + HTTP server + watchdog + weekly digest
 - filters.py — ALL keyword lists (§4) and filter logic (§5); word-boundary regex
+- liveness.py — dead-listing detection for search-engine hits
+- dedup.py — cross-platform duplicate detection
+- fx.py — live exchange rates (frankfurter.app, cached)
+- telegram_commands.py — /cauta /status /active via long polling
+- diagnostics.py — startup reachability probe of blocked sites
 - config.py — Env-var-based configuration
 - database.py — SQLite dedup (zeta_listings.db)
 - notifier.py — Telegram sendMessage wrapper
@@ -121,6 +144,7 @@ File layout (top level):
   - ebay.py — eBay Browse API (OAuth2, 13 marketplaces)
   - google.py — Google Custom Search (rotating keyword × site-group matrix)
   - brave.py — Brave Search API (Google replacement; same site matrix)
+  - shopify_dealers.py — Electric Violin Shop (used), StringWorks (pre-owned), Guitar Chimp via Shopify JSON
   - craigslist.py — Craigslist internal JSON API (sapi) across all US + CA areas, posting pages for descriptions
   - shopgoodwill.py — ShopGoodwill.com buyer API (US auctions)
   - hibid.py — HiBid GraphQL lotSearch (US/CA estate & liquidation auctions)
@@ -415,6 +439,8 @@ Added in Prompt 14 (all optional):
 - US_PROXY_URL (http://user:pass@host:port — US egress for Guitar Center + Facebook Marketplace)
 - SEARCH_TOKEN (protects POST /search and GET /status when set), PORT (default 8080; Railway injects it)
 - PRICE_DROP_PCT (15), WATCHDOG_ZERO_STREAK (3), SEND_NO_CHANGES (true), SEND_PHOTOS (true)
+- WEEKLY_DIGEST_DAY (default "sun"; "" disables), STARTUP_DIAGNOSTICS (true)
+- EXCLUDED_SELLERS (default "zetaviolins,zeta violins,zetamusic.com")
 
 ---
 
@@ -459,6 +485,7 @@ Added in Prompt 14 (all optional):
 - Prompt 11 — Deep audit + zero-results root cause fixes ✅ COMPLETED (2026-05-27)
 - Prompt 12 — Craigslist rewrite (JSON-LD + 2023 HTML selectors) + Yahoo Auctions JP + Guitar Center Used + Facebook Marketplace (Playwright) ✅ COMPLETED (2026-05-27)
 - Prompt 13 — Live-probe audit + fixes: Reverb UA, Craigslist sapi rewrite (all US+CA areas), Subito originalList, filters.py word-boundary rewrite + tests, Google CSE rotating matrix with US/auction/forum groups, ShopGoodwill scraper, Mercari id_/sold fixes, Yahoo JP deleted, MAX_YEAR dynamic, .env untracked ✅ COMPLETED (2026-09-07)
+- Prompt 15 — "Nothing must slip": description-level recall (Craigslist bodies, eBay EXTENDED, category-scoped bare-brand queries), 6 more eBay marketplaces, ships-to-Romania flag, Shopify dealer trade-ins, Telegram commands, cross-platform dedup, live FX + EUR in alerts, weekly digest, startup reachability diagnostic, JP/Cyrillic search queries, second-hand-only rule, liveness check for search-engine hits, once-a-day schedule at 12:00 Bucharest ✅ COMPLETED (2026-09-07)
 - Prompt 14 — Reliability + coverage: watchdog, price-drop alerts, Telegram photos, DB_PATH volume, Craigslist descriptions, Reverb make=Zeta, Brave Search, US proxy plumbing, SEARCH_TOKEN/PORT, GitHub Actions tests; 8 new direct scrapers (HiBid, Kijiji, Marktplaats/2dehands, Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX ×4); multilingual WTB + violin terms; EU price parsing ✅ COMPLETED (2026-09-07)
 
 Bot is operational. See Section 2 "What is broken" for remaining known issues.

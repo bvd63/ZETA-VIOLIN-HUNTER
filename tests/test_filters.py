@@ -28,7 +28,7 @@ CONDITION_CASES = [
     ({"title": "Brand New Zeta Strados 5-string", "condition": "", "url": URL}, "new_stock"),
     ({"title": "Zeta Jazz Fusion NIB authorized dealer", "condition": "", "url": URL}, "new_stock"),
     ({"title": "ZETA SV24 Strados Modern violin", "condition": "Brand New", "seller": "electricviolinshop", "url": URL}, "new_stock"),
-    ({"title": "ZETA SV24 Strados Modern violin", "condition": "Used", "seller": "electricviolinshop", "url": URL}, "new_stock"),
+    ({"title": "ZETA SV24 Strados Modern violin", "condition": "Used", "seller": "electricviolinshop", "url": URL}, ""),  # dealer trade-in is fine
     ({"title": "Zeta Strados violin", "condition": "", "url": "https://www.zetaviolins.com/products/strados"}, "new_stock"),
     ({"title": "Zeta Strados violin", "condition": "", "seller": "hoosierville-mercantile", "url": URL}, ""),
 ]
@@ -80,6 +80,7 @@ CASES = [
     ("2000年前後　ゼータ　カタログ　ZETA　エレクトリックヴァイオリン", "", "noise"),   # JP catalog
     ("ZETA エレキバイオリン ジャンク", "", "noise"),                                   # JP junk/for parts
     ("Cantini Earphonic Electric/Midi Violin", "", "other_brand"),
+    ("USED Jordan 4-String electric violin (#3)", "Zeta-style bridge pickup, plays great", "other_brand"),
     ("Roland 300 GX", "stage piano", "non_zeta"),
     ("Violino elettrico 5 corde", "made in China", "non_zeta"),
     ("Zeta potential analyzer", "", "noise"),

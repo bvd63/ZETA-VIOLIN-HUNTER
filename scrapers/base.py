@@ -47,6 +47,24 @@ class BaseScraper:
             kwargs["proxy"] = Config.US_PROXY_URL
         return httpx.AsyncClient(**kwargs)
 
+    async def get_retry(self, client: httpx.AsyncClient, url: str, retries: int = 1, **kwargs) -> httpx.Response:
+        """GET with one retry on 5xx / transport errors (Reverb answers 502 now and then)."""
+        import asyncio
+        last_exc = None
+        for attempt in range(retries + 1):
+            try:
+                resp = await client.get(url, **kwargs)
+                if resp.status_code < 500 or attempt == retries:
+                    return resp
+            except (httpx.TransportError, httpx.TimeoutException) as e:
+                last_exc = e
+                if attempt == retries:
+                    raise
+            await asyncio.sleep(1.5 * (attempt + 1))
+        if last_exc:
+            raise last_exc
+        return resp  # pragma: no cover
+
     def _is_excluded(self, text: str) -> bool:
         """True if the TITLE says the listing is sold/ended/expired.
         Word-boundary match; 'sold as is' does not count (see filters.py)."""
