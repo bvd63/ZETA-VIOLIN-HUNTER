@@ -342,7 +342,7 @@ async def detect_egress() -> None:
 
 def _parse_hours(raw: str) -> str:
     hours = sorted({int(h) for h in raw.split(",") if h.strip().isdigit() and 0 <= int(h) <= 23})
-    return ",".join(str(h) for h in hours) or "9,21"
+    return ",".join(str(h) for h in hours) or "12"
 
 
 async def main():
@@ -370,9 +370,11 @@ async def main():
 
     hours = _parse_hours(Config.SEARCH_HOURS)
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(run_search_cycle, "cron", hour=hours, minute=0, timezone="UTC")
+    job = scheduler.add_job(run_search_cycle, "cron", hour=hours, minute=0, timezone=Config.SEARCH_TIMEZONE)
     scheduler.start()
-    log.info(f"⏰ Scheduled to run daily at {hours} UTC")
+    log.info(f"⏰ Scheduled daily at {hours}:00 {Config.SEARCH_TIMEZONE} "
+             f"(next run {job.next_run_time:%Y-%m-%d %H:%M %Z}); "
+             f"Google {Config.GOOGLE_QUERIES_PER_RUN}/run, Brave {Config.BRAVE_QUERIES_PER_RUN}/run")
 
     try:
         while True:

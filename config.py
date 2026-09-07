@@ -34,21 +34,28 @@ class Config:
     EBAY_CLIENT_ID = os.getenv("EBAY_CLIENT_ID", os.getenv("EBAY_APP_ID", ""))
     EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "")
 
+    # --- Schedule ---
+    # Hours (comma separated) in SEARCH_TIMEZONE. Default: once a day at 12:00
+    # Romania time (DST handled by the timezone). Legacy SEARCH_HOUR (UTC) is ignored.
+    SEARCH_HOURS = os.getenv("SEARCH_HOURS", "12")
+    SEARCH_TIMEZONE = os.getenv("SEARCH_TIMEZONE", "Europe/Bucharest")
+    RUNS_PER_DAY = max(1, len([h for h in SEARCH_HOURS.split(",") if h.strip().isdigit()]))
+
     # --- Google Custom Search (retires 2027-01-01) ---
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
     GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
-    # Free quota is 100/day and resets at midnight Pacific; with two runs per
-    # day each run may spend at most this many queries.
-    GOOGLE_QUERIES_PER_RUN = int(os.getenv("GOOGLE_QUERIES_PER_RUN", "48"))
+    # Free quota is 100/day (resets at midnight Pacific). Default budget splits
+    # 96 queries across the day's runs: 96 with one run, 48 with two.
+    GOOGLE_QUERIES_PER_RUN = int(os.getenv("GOOGLE_QUERIES_PER_RUN", str(max(1, 96 // RUNS_PER_DAY))))
     # Do not run Google again if the previous run was less than N hours ago
-    # (protects the quota on container restarts).
-    GOOGLE_GUARD_HOURS = int(os.getenv("GOOGLE_GUARD_HOURS", "10"))
+    # (protects the quota on container restarts). 20h with one run/day, 10h otherwise.
+    GOOGLE_GUARD_HOURS = int(os.getenv("GOOGLE_GUARD_HOURS", "20" if RUNS_PER_DAY == 1 else "10"))
 
     # --- Brave Search API (Google replacement; $5 monthly credit ≈ 1000 queries) ---
     BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
-    # 16 × 2 runs × 30 days ≈ 960 queries/month
-    BRAVE_QUERIES_PER_RUN = int(os.getenv("BRAVE_QUERIES_PER_RUN", "16"))
-    BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "10"))
+    # 32 queries/day × 30 days ≈ 960/month, split across the day's runs
+    BRAVE_QUERIES_PER_RUN = int(os.getenv("BRAVE_QUERIES_PER_RUN", str(max(1, 32 // RUNS_PER_DAY))))
+    BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "20" if RUNS_PER_DAY == 1 else "10"))
 
     # --- US egress proxy (http://user:pass@host:port) for sites that block
     # European datacenter IPs: Guitar Center, Facebook Marketplace, ... ---
@@ -61,9 +68,6 @@ class Config:
     @classmethod
     def has_us_egress(cls) -> bool:
         return bool(cls.US_PROXY_URL) or cls.EGRESS_COUNTRY.upper() == "US"
-
-    # --- Schedule (UTC hours, comma separated). 9 = 12:00 Romania ---
-    SEARCH_HOURS = os.getenv("SEARCH_HOURS", os.getenv("SEARCH_HOUR", "9") + ",21")
 
     # --- Filters ---
     MIN_PRICE = float(os.getenv("MIN_PRICE", "0"))
