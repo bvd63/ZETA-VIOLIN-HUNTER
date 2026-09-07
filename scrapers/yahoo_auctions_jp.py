@@ -38,7 +38,9 @@ KEYWORDS = [
     "zeta violin",
     "zeta strados",
 ]
-AUCTION_RX = re.compile(r"page\.auctions\.yahoo\.co\.jp/jp/auction/([a-z]\d+)", re.I)
+# Railway log 2026-09-07: hrefs are ".../jp/auction/x123" on auctions.yahoo.co.jp
+# (not page.auctions...), so match the path only.
+AUCTION_RX = re.compile(r"/jp/auction/([a-z]\d+)", re.I)
 # 未使用 = unused (new); 未使用に近い = "nearly unused" and 新品同様 = "like new" are USED
 NEW_JP_RX = re.compile(r"未使用(?!に近い)|新品(?!同様)")
 
@@ -123,6 +125,12 @@ class YahooAuctionsJPScraper(BaseScraper):
             if not auction_id or not title or auction_id in seen:
                 return
             seen.add(auction_id)
+            if url.startswith("//"):
+                url = "https:" + url
+            elif url.startswith("/"):
+                url = "https://auctions.yahoo.co.jp" + url
+            elif not url.startswith("http"):
+                url = f"https://page.auctions.yahoo.co.jp/jp/auction/{auction_id}"
             out.append({"auction_id": auction_id, "title": title.strip(), "price": price or "N/A",
                         "image": image or "", "url": url, "extra": extra})
 
@@ -145,7 +153,7 @@ class YahooAuctionsJPScraper(BaseScraper):
 
         # Fallback: any auction anchor
         if not out:
-            for a in soup.select("a[href*='page.auctions.yahoo.co.jp/jp/auction/']"):
+            for a in soup.select("a[href*='/jp/auction/']"):
                 m = AUCTION_RX.search(a.get("href", ""))
                 title = a.get("title") or a.get_text(" ", strip=True)
                 if not m or len(title) < 4:
