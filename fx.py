@@ -12,7 +12,7 @@ from database import connect
 
 log = logging.getLogger(__name__)
 
-FX_URL = "https://api.frankfurter.app/latest"
+FX_URL = "https://api.frankfurter.dev/v1/latest"  # old host api.frankfurter.app 301s here
 CURRENCIES = ["EUR", "GBP", "CAD", "AUD", "CHF", "SEK", "NOK", "DKK", "PLN", "JPY", "RON", "CZK", "HUF"]
 
 # Units of currency per 1 USD (static fallback, mid-2026 ballpark)
@@ -52,8 +52,8 @@ async def refresh_rates() -> None:
         if row and datetime.utcnow() - datetime.fromisoformat(row[0]) < timedelta(hours=24):
             conn.close()
             return
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(FX_URL, params={"from": "USD", "to": ",".join(CURRENCIES)})
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            resp = await client.get(FX_URL, params={"base": "USD", "symbols": ",".join(CURRENCIES)})
             if resp.status_code != 200:
                 log.warning(f"fx: frankfurter HTTP {resp.status_code}")
                 conn.close()
