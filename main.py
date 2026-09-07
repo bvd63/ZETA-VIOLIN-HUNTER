@@ -283,6 +283,32 @@ async def handle_status(request):
         return web.json_response({"error": str(e)}, status=500)
 
 
+async def detect_egress() -> None:
+    """Log where the container's traffic comes out (IP + country) and store the
+    country in Config.EGRESS_COUNTRY. Decides whether US-only scrapers can run
+    without a proxy. Never fatal."""
+    import httpx
+    for url in ("https://ipapi.co/json/", "https://ipinfo.io/json"):
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                resp = await client.get(url, headers={"User-Agent": "ZetaViolinHunter/1.0"})
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                country = str(data.get("country_code") or data.get("country") or "").upper()
+                city = data.get("city", "")
+                ip = data.get("ip", "")
+                if country:
+                    Config.EGRESS_COUNTRY = country
+                    log.info(f"🌍 Egress IP {ip} — {city}, {country}"
+                             + (" → US-only scrapers enabled" if country == "US" else
+                                " → US-only sites (Guitar Center, OfferUp, Mercari US, Etsy, Facebook) need US_PROXY_URL"))
+                    return
+        except Exception as e:
+            log.debug(f"egress detection via {url} failed: {e}")
+    log.warning("🌍 Could not detect egress country — assuming non-US")
+
+
 def _parse_hours(raw: str) -> str:
     hours = sorted({int(h) for h in raw.split(",") if h.strip().isdigit() and 0 <= int(h) <= 23})
     return ",".join(str(h) for h in hours) or "9,21"
@@ -291,7 +317,8 @@ def _parse_hours(raw: str) -> str:
 async def main():
     log.info("🎻 Zeta Violin Hunter starting up...")
     log.info(f"   DB: {Config.DB_PATH} | US proxy: {'yes' if Config.US_PROXY_URL else 'no'} | "
-             f"Brave: {'yes' if Config.BRAVE_API_KEY else 'no'}")
+             f"Brave: {'yes' if Config.BRAVE_API_KEY else 'no'} | condition: {Config.CONDITION}")
+    await detect_egress()
 
     app = web.Application()
     app.router.add_post('/search', handle_search)

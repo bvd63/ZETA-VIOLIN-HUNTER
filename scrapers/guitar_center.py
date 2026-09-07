@@ -49,13 +49,13 @@ class GuitarCenterScraper(BaseScraper):
     name = "Guitar Center"
 
     def is_configured(self) -> bool:
-        # guitarcenter.com TCP-blocks European datacenter IPs (Railway); only
-        # useful through a US egress proxy.
-        return bool(Config.US_PROXY_URL)
+        # guitarcenter.com TCP-blocks European datacenter IPs; runs when the
+        # container itself is in the US or a US proxy is configured.
+        return Config.has_us_egress()
 
     async def search(self) -> list:
         if not self.is_configured():
-            log.info("Guitar Center: US_PROXY_URL not set — skipping (site blocks EU datacenter IPs)")
+            log.info("Guitar Center: no US egress (US_PROXY_URL unset, container not in US) — skipping")
             return []
 
         results = []

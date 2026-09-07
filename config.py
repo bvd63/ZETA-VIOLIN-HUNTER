@@ -53,6 +53,14 @@ class Config:
     # --- US egress proxy (http://user:pass@host:port) for sites that block
     # European datacenter IPs: Guitar Center, Facebook Marketplace, ... ---
     US_PROXY_URL = os.getenv("US_PROXY_URL", "")
+    # Filled at startup by main.detect_egress(): ISO country of the container's
+    # public IP (e.g. "US", "NL"). Lets US-only scrapers run without a proxy
+    # when Railway already places the container in the US.
+    EGRESS_COUNTRY = os.getenv("EGRESS_COUNTRY", "")
+
+    @classmethod
+    def has_us_egress(cls) -> bool:
+        return bool(cls.US_PROXY_URL) or cls.EGRESS_COUNTRY.upper() == "US"
 
     # --- Schedule (UTC hours, comma separated). 9 = 12:00 Romania ---
     SEARCH_HOURS = os.getenv("SEARCH_HOURS", os.getenv("SEARCH_HOUR", "9") + ",21")
