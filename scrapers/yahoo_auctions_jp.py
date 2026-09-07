@@ -34,7 +34,8 @@ KEYWORDS = [
     "zeta strados",
 ]
 AUCTION_RX = re.compile(r"page\.auctions\.yahoo\.co\.jp/jp/auction/([a-z]\d+)", re.I)
-NEW_JP_RX = re.compile(r"未使用|新品")
+# 未使用 = unused (new); 未使用に近い = "nearly unused" and 新品同様 = "like new" are USED
+NEW_JP_RX = re.compile(r"未使用(?!に近い)|新品(?!同様)")
 
 EEA_UK = {
     "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT",
