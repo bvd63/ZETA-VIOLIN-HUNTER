@@ -390,7 +390,9 @@ Required after eBay migration (REQUIRED — configured):
 - EBAY_CLIENT_SECRET — developer.ebay.com Cert ID
 
 Optional tuning:
-- SEARCH_HOURS (default "9,21" UTC; legacy SEARCH_HOUR still honoured as the first hour)
+- SEARCH_HOURS (default "12" — hours in SEARCH_TIMEZONE; legacy SEARCH_HOUR is IGNORED since Prompt 14)
+- SEARCH_TIMEZONE (default "Europe/Bucharest" — one run per day at 12:00 Romania time, DST-safe)
+- Google/Brave per-run budgets default to 96 and 32 divided by the number of runs per day; guards default to 20h with one run/day
 - MIN_PRICE (default 0)
 - MAX_PRICE (default 99999)
 - CONDITION (default "used" = second-hand only, drops New/Brand New/Open box/B-Stock + dealers + shop language; "all" = no condition filter)
@@ -467,6 +469,7 @@ Bot is operational. See Section 2 "What is broken" for remaining known issues.
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-09-07 | **One search per day at 12:00 Europe/Bucharest** (`SEARCH_HOURS=12`, `SEARCH_TIMEZONE`), Google 96 queries/run, Brave 32/run, guards 20h | Owner request. Scheduler timezone is Bucharest so the hour survives DST; budgets scale automatically if more hours are added. Startup run on deploy still happens (guards protect quotas). |
 | 2026-09-07 | **Search-engine hits are verified before alerting** (`liveness.py`): (1) hits on hosts we scrape directly (Reverb, eBay, Craigslist, Subito, Marktplaats, Kijiji, Willhaben, HiBid, ShopGoodwill, OLX, Nordics, Gumtree, Mercari JP) are dropped — those sites are removed from the Google/Brave site groups too; (2) every other new hit is fetched once: 404/410, redirect to home/search, or a multilingual "listing has ended / posting expired / non più disponibile" marker = dead → marked seen, never alerted; Reverb URLs are checked via the API `state`; (3) matrix queries limited to the past year (`dateRestrict=y1`, `freshness=py`). Max 30 checks per scraper per cycle; network errors keep the listing | Owner received Brave/Google alerts for Reverb/eBay pages ended in 2008–2013. Direct scrapers only return live inventory, so search engines are useful only for sites we cannot reach, and only after a liveness check. |
 | 2026-09-07 | **Second-hand only, any model/year** (`CONDITION=used` default): drop platform conditions New/Brand New/Open box/B-Stock, new-stock dealers (`EXCLUDED_SELLERS`: electricviolinshop, zetaviolins, …) and shop language in titles (brand new, NIB, authorized dealer, in stock). MIN_YEAR/MAX_YEAR kept only as a loose text guard | Owner: "modele noi sunt OK dacă sunt second-hand, nu nou-nouțe". The text year filter cannot tell manufacture year (sellers write purchase years), so MAX_YEAR=2014 would again drop vintage listings; condition + seller are the reliable signals. Verified live: the 2 Electric Violin Shop "Brand New" Zetas are dropped, the 3 used ones pass. |
 | 2026-09-07 | Prompt 14: watchdog on `fetched` (pre-filter count) instead of on filtered results | Broad-query scrapers (Craigslist, ShopGoodwill, HiBid, OLX) legitimately return 0 Zeta candidates most cycles; only "source returned nothing" is a failure signal. Unconfigured scrapers (`is_configured()` False) are excluded. |
