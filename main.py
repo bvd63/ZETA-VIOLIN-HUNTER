@@ -5,7 +5,11 @@ Searches globally for Zeta electric violin listings and sends Telegram alerts.
 
 import asyncio
 import logging
+import warnings
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# Python 3.12 (Railway image) warns on datetime.utcnow(); keep the logs readable.
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 from datetime import datetime
 from aiohttp import web
 
@@ -37,6 +41,7 @@ from scrapers.gumtree import GumtreeScraper
 from scrapers.olx import OlxScraper
 from scrapers.subito import SubitoScraper
 from scrapers.shopify_dealers import ShopifyDealersScraper
+from scrapers.yahoo_auctions_jp import YahooAuctionsJPScraper
 from scrapers.mercari_jp import MercariJPScraper
 from scrapers.guitar_center import GuitarCenterScraper
 from scrapers.reddit_scraper import RedditScraper
@@ -95,6 +100,7 @@ def build_scrapers() -> list:
         SubitoScraper(),
         ShopifyDealersScraper(),
         MercariJPScraper(),
+        YahooAuctionsJPScraper(),       # runs only from non-EEA egress (Railway = Singapore)
         GuitarCenterScraper(),          # runs only when US_PROXY_URL is set
         FacebookMarketplaceScraper(),   # Playwright; uses US_PROXY_URL when set
         RedditScraper(),

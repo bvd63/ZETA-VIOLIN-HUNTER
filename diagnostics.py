@@ -39,7 +39,9 @@ async def _probe(client: httpx.AsyncClient, label: str, url: str, block_marker: 
         r = await client.get(url, headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.8",
                                            "Accept-Language": "en-US,en;q=0.9"})
         blocked = r.status_code in (401, 403, 429, 503) or (block_marker and block_marker.lower() in r.text[:20000].lower())
-        verdict = "BLOCKED" if blocked else ("ok" if r.status_code < 400 else f"http {r.status_code}")
+        # A 200/202 with a tiny body is a JS challenge or an empty shell, not content.
+        shell = r.status_code < 400 and len(r.text) < 5000
+        verdict = "BLOCKED" if blocked else ("JS-SHELL" if shell else ("ok" if r.status_code < 400 else f"http {r.status_code}"))
         return f"{verdict:<8} {label} (HTTP {r.status_code}, {len(r.text) // 1024} KB)"
     except Exception as e:
         return f"{'TIMEOUT' if 'timeout' in type(e).__name__.lower() else 'ERROR':<8} {label} ({type(e).__name__})"
@@ -52,6 +54,7 @@ async def run_reachability() -> None:
         log.info("🔎 Reachability from this container (sites without direct scrapers):")
         for line in lines:
             log.info(f"   {line}")
-        log.info("   → 'ok' sites are candidates for direct scrapers; BLOCKED ones stay on Google/Brave or need US_PROXY_URL")
+        log.info("   → 'ok' = real content (candidate for a direct scraper); JS-SHELL = needs a browser; "
+                 "BLOCKED = stays on Google/Brave or needs US_PROXY_URL")
     except Exception as e:
         log.warning(f"reachability diagnostic failed: {e}")

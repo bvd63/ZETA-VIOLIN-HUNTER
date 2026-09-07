@@ -36,14 +36,21 @@ class TelegramCommands:
             log.info("Telegram commands disabled (no token/chat id)")
             return
         url = f"https://api.telegram.org/bot{self.token}/getUpdates"
-        log.info("💬 Telegram commands active: /cauta /status /active /help")
         async with httpx.AsyncClient(timeout=70) as client:
+            # A webhook set once in the past makes getUpdates answer 409 forever — clear it.
+            try:
+                await client.post(f"https://api.telegram.org/bot{self.token}/deleteWebhook",
+                                  json={"drop_pending_updates": False})
+            except Exception as e:
+                log.debug(f"deleteWebhook failed: {e}")
+            log.info("💬 Telegram commands active: /cauta /status /active /help")
             while True:
                 try:
                     resp = await client.get(url, params={"timeout": 50, "offset": self.offset,
                                                          "allowed_updates": '["message"]'})
                     if resp.status_code == 409:
-                        log.warning("Telegram getUpdates 409 (another poller/webhook active) — retrying in 60s")
+                        # Usually the previous container still polling during a deploy overlap.
+                        log.info("Telegram getUpdates 409 (previous container still polling) — retrying in 60s")
                         await asyncio.sleep(60)
                         continue
                     if resp.status_code != 200:
