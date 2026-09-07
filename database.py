@@ -1,20 +1,33 @@
 """
 SQLite database — tracks seen listings so we only alert on NEW ones.
+Path comes from Config.DB_PATH (point it at a Railway volume to survive deploys).
 """
 
+import os
 import sqlite3
 import json
 import logging
 from datetime import datetime
+from config import Config
 
 log = logging.getLogger(__name__)
 
-DB_PATH = "zeta_listings.db"
+DB_PATH = Config.DB_PATH
+
+
+def connect() -> sqlite3.Connection:
+    """Open the shared SQLite file, creating its directory if needed."""
+    directory = os.path.dirname(os.path.abspath(DB_PATH))
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except OSError as e:
+        log.warning(f"Could not create DB directory {directory}: {e}")
+    return sqlite3.connect(DB_PATH)
 
 
 class Database:
     def __init__(self):
-        self.conn = sqlite3.connect(DB_PATH)
+        self.conn = connect()
         self._init()
 
     def _init(self):
@@ -51,7 +64,7 @@ class Database:
                     listing.get("price", ""),
                     listing.get("location", ""),
                     listing.get("url", ""),
-                    json.dumps(listing),
+                    json.dumps(listing, ensure_ascii=False, default=str),
                     datetime.utcnow().isoformat(),
                 ),
             )

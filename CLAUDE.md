@@ -19,7 +19,7 @@ violas, cellos, basses, mandolins — violins only).
 
 ---
 
-## 2. CURRENT STATE (last verified 2026-05-27 — deep audit in Prompt 11)
+## 2. CURRENT STATE (last verified 2026-09-07 — Prompt 13 audit/rewrite + Prompt 14 coverage expansion)
 
 ### Infrastructure
 - Deployment status: Active
@@ -28,16 +28,33 @@ violas, cellos, basses, mandolins — violins only).
 - HTTP server: port 8080, endpoints `/search`, `/health`, `/status` reachable
 
 ### What works
-- `scrapers/reverb.py` — Reverb API with optional X-Auth-Token. FIXED Prompt 11: auth token support added (REVERB_API_TOKEN env var), year_min/year_max removed from API params, non-200 responses now logged. Expanded to 11 keywords in Prompt 10.
-- `scrapers/craigslist.py` — Craigslist RSS is dead since ~2020. Scraper silently gets 0 from RSS loop then falls back to DuckDuckGo HTML scrape → Google CSE. The fallback chain works.
+- `filters.py` — NEW Prompt 13. Single implementation of §4 keyword lists and §5 logic, WORD-BOUNDARY regex matching (no more substring bugs: "hard shell case" ≠ jacket, "sold as is" ≠ sold, "no defects" ≠ defective). Accepts unique model codes / signature artists / Strados without the brand string (per §4.1–4.2), handles JP (ゼータ/バイオリン) and NL (viool) terms, drops other brands (title only), replicas, accessories (MIDI controllers, covers, pedals), other instruments (cello, bass, viola). `classify(listing)` returns a drop reason or "". Tests: `python -m tests.test_filters` (46 cases).
+- `scrapers/reverb.py` — REWRITTEN Prompt 13. Root cause of 0 results was the User-Agent: Reverb's edge returns 403 (HTML) to `ZetaViolinHunter/1.0` and 200 to a browser UA — NO token needed (the Prompt 11 "401 / needs REVERB_API_TOKEN" diagnosis was wrong). Skips non-`live` listings, strips HTML from descriptions, derives seller region from shipping rates (the API no longer returns a shop address). 13 keywords × 2 pages. Verified live: 13 raw → 5 real Zeta violins pass.
+- `scrapers/craigslist.py` — REWRITTEN Prompt 13 on the internal JSON API `sapi.craigslist.org/web/v8/postings/search/full` (the same call the JS frontend makes). Area IDs from `reference.craigslist.org/Areas` (413 US + ~55 CA areas, `CRAIGSLIST_COUNTRIES`). 3 broad queries per area ("zeta" msa, "strados" msa, "zeta violin" sss) + local Zeta-signal filter. Verified live: 1404 requests, all HTTP 200, 28 s. Old approach was dead: geo index lists only `www`, RSS is 403, HTML is JS-rendered, JSON-LD items have no URL.
+- `scrapers/shopgoodwill.py` — NEW Prompt 13. Goodwill's US auction site via `POST buyerapi.shopgoodwill.com/api/Search/ItemListing` (no auth, description search). 4 broad queries, Zeta-signal filter.
+- `scrapers/hibid.py` — NEW Prompt 14. HiBid (largest US/CA estate & liquidation auction platform) via unauthenticated GraphQL `lotSearch` at hibid.com/graphql (the HTML is a JS shell; introspection disabled, fields discovered by trial). Lot URL `hibid.com/lot/{id}`, live bid as price.
+- `scrapers/kijiji.py` — NEW Prompt 14. Kijiji.ca via the Apollo cache in `__NEXT_DATA__` (`StandardListing:*`). Verified live: found "Zeta Electric Violin With Case", 795 CAD, Oshawa.
+- `scrapers/marktplaats.py` — NEW Prompt 14. Marktplaats (NL) + 2dehands (BE) via the open `/lrp/api/search` JSON API. Verified live: found "Zeta Jazz Violin Viool 5", 2200 €, Gent.
+- `scrapers/willhaben.py` — NEW Prompt 14. Willhaben (AT) via `__NEXT_DATA__ → searchResult.advertSummaryList`. Verified live: found "Zeta Geige Jazz Fusion", 6.900 €, Wien.
+- `scrapers/schibsted.py` — NEW Prompt 14. FINN (NO), Tori (FI), DBA (DK), Blocket (SE): one parser reading the schema.org `ItemList` of `Product` in JSON-LD.
+- `scrapers/gumtree.py` — NEW Prompt 14. Gumtree UK server-rendered tiles (`article[data-q=search-result]`).
+- `scrapers/olx.py` — NEW Prompt 14. OLX PL/PT/BG/UA via the open `/api/v1/offers/` JSON API (olx.ro excluded on purpose).
+- `scrapers/brave.py` — NEW Prompt 14. Brave Search API, reuses Google's keyword × site-group matrix; skips if `BRAVE_API_KEY` unset. Planned Google CSE replacement for 2027.
+- `scrapers/guitar_center.py` — re-enabled Prompt 14 but only runs when `US_PROXY_URL` is set (site TCP-blocks EU datacenter IPs).
+- **Watchdog** (main.py `_watchdog`) — NEW Prompt 14. After each cycle, any configured scraper with 0 fetched items for `WATCHDOG_ZERO_STREAK` (3) consecutive cycles, or errors in 2 consecutive cycles, triggers a Telegram warning (repeated every 10 cycles). Each scraper reports `self.fetched` = items returned by the source BEFORE local Zeta filtering, so "site answered, nothing matched" ≠ "site blocked us".
+- **Price-drop alerts** (price_tracker.py `update_price`) — NEW Prompt 14. Already-seen listings whose price fell ≥ `PRICE_DROP_PCT` (15%) are re-alerted. `parse_amount()` handles EU/US number formats ("€ 6.900" = 6900, "2,749.00" = 2749).
+- **Photos in Telegram** (notifier.py) — NEW Prompt 14. Listings with `image_url` go out as `sendPhoto` with HTML caption, falling back to text.
+- **Persistent DB path** — NEW Prompt 14. `DB_PATH` env (all modules use `database.connect()`); point it at a Railway volume so dedup, Google/Brave cursors and price history survive deploys.
+- **Craigslist full descriptions** — NEW Prompt 14. The few Zeta-signal hits get their posting page fetched (`#postingbody`, first image), max 20 per cycle.
+- **Reverb `make=Zeta`** — NEW Prompt 14. Structured brand filter query added to the keyword list (catches odd titles).
+- **HTTP hardening** — `PORT` env honoured; `SEARCH_TOKEN` protects `/search` and `/status` (header `X-Search-Token` or `?token=`).
+- `.github/workflows/tests.yml` — compiles everything and runs `tests/test_filters.py` on every push.
 - `scrapers/ebay.py` — REWRITTEN in Prompt 2. Now uses eBay Browse API
   with OAuth2 client_credentials grant. Searches 13 marketplaces with 8
   keywords. Requires EBAY_CLIENT_ID + EBAY_CLIENT_SECRET.
-- `scrapers/subito.py` — FIXED in Prompt 3. Strict Zeta filter — requires
-  "zeta" or model code in ad's own text. 5 focused keywords.
-- `scrapers/google.py` — FIXED in Prompt 3. Quota guard via SQLite prevents
-  double-run on container restart. Guard reduced to 10h in Prompt 10 for 2x/day schedule.
-- `main.py` core orchestration: scheduler, concurrency, dedup, Telegram send
+- `scrapers/subito.py` — REWRITTEN Prompt 13. Ads live in `__NEXT_DATA__ → initialState.items.originalList/galleryList`, NOT `.items.list` (always empty → the scraper had returned 0 since the Subito redesign). Nationwide search, 6 keywords, no city suffix (appending "Milan"/"Rome" to the query killed results), browser UA, DuckDuckGo fallback removed. Verified live: found the Zeta Acoustic Pro 5-string in Taranto (2000 €, posted 2026-09-03) that the old code missed.
+- `scrapers/google.py` — REWRITTEN Prompt 13. Budget `GOOGLE_QUERIES_PER_RUN` (48; 2 runs/day fit the 100/day quota, which resets at midnight Pacific so both runs share one quota day). Each run: 6 global fresh queries (`dateRestrict=w2`, `sort=date`) + a rotating slice of the 6-keyword × 12-site-group matrix (cursor in SQLite → full matrix every 2 runs). 12 site groups now include US (Craigslist, OfferUp, Mercari US, FB Marketplace, ShopGoodwill, Etsy, Guitar Center, Sweetwater, Sam Ash, Music Go Round, Electric Violin Shop), auctions (HiBid, LiveAuctioneers, Invaluable, Proxibid, EstateSales), UK/CA/AU, DE/AT/CH/NL/BE, FR/IT/ES/PT, Nordics/PL/CZ, JP/Asia, forums, CEE, LatAm. 429/403 stop the run AND still mark it (previously the guard was skipped on 429). Image/price from `pagemap`.
+- `main.py` core orchestration: scheduler (`SEARCH_HOURS`), concurrency, `filters.classify()` gate with per-reason counters, dedup, per-platform Telegram send
 - `database.py` — SQLite dedup with hash(platform:url)
 - `notifier.py` — Telegram formatted alerts
 - `config.py` — env-based configuration. FIXED in Prompt 3: location exclusion
@@ -46,7 +63,7 @@ violas, cellos, basses, mandolins — violins only).
   musical instruments category (Prompt 5).
 - `scrapers/wallapop.py` — public API, Spanish marketplace (Prompt 5).
 - `scrapers/leboncoin.py` — httpx + __NEXT_DATA__ JSON, French marketplace (Prompt 5).
-- `scrapers/mercari_jp.py` — mercapi async wrapper, Japan's #1 C2C marketplace (Prompt 6).
+- `scrapers/mercari_jp.py` — mercapi async wrapper, Japan's #1 C2C marketplace (Prompt 6). FIXED Prompt 13: mercapi exposes the id as `id_` (old code read `id` → always empty → 0 results), sold status is `ITEM_STATUS_SOLD_OUT` (old check for `sold_out` never matched), Mercari Shops products use `/shops/product/{id}` URLs.
 - `scrapers/reddit_scraper.py` — praw official Reddit API, searches violin subreddits (Prompt 6). Requires REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET; skips gracefully if not set.
 - `scrapers/maestronet.py` — Maestronet forum classifieds, httpx + BeautifulSoup (Prompt 7).
 - `scrapers/violinist_com.py` — Violinist.com forum, httpx + BeautifulSoup (Prompt 7).
@@ -65,11 +82,14 @@ violas, cellos, basses, mandolins — violins only).
 - `scrapers/violinist_com.py` — disabled (404 / search errors). Covered by Google CSE.
 - `scrapers/audiofanzine.py` — disabled (404 / search errors). Covered by Google CSE.
 
-### What is broken / known issues post-Prompt 11
-- **Reverb requires REVERB_API_TOKEN** — without it, API returns 401 and scraper silently returns 0. Token is now optional with graceful degradation + logged warning. Owner must create a Personal Access Token at reverb.com/account/applications (scope: public) and add it to Railway Variables.
-- **Craigslist RSS is dead** (removed by Craigslist ~2020). The scraper falls back to DuckDuckGo then Google CSE. The DuckDuckGo fallback is untested recently. This is lower priority since Google CSE covers craigslist.org via `site:craigslist.org` queries.
-- **Google CSE API sunsets January 1, 2027** — existing project keys work until then. Plan migration to a replacement search API before that date.
-- **Subito.it potentially Cloudflare-blocked** — plain httpx may get blocked intermittently. File retained; Google CSE covers subito.it.
+### What is broken / known issues post-Prompt 14
+- **Google CSE API sunsets January 1, 2027** (confirmed; already closed to new customers). Brave scraper is ready (`BRAVE_API_KEY`); Google must be removed before 2027.
+- **Sites blocked from EU datacenter IPs (Railway)** — verified 2026-09-07: OfferUp (403 geo), Mercari US (Cloudflare), Etsy (403), Guitar Center (TCP timeout), Facebook Marketplace (login wall), Yahoo JP web + API, Buyee, ZenMarket, Catawiki, Proxibid, Heritage, the-saleroom, Bidspotter, Lot-tissimo, Easylive, Interencheres, Auction.fr, Allegro, Ricardo, tutti.ch, Wallapop API, Vinted (Datadome), Invaluable + LiveAuctioneers + EstateSales (JS shells). Covered only via Google/Brave site groups. Setting `US_PROXY_URL` (a US residential/VPS HTTP proxy) re-enables Guitar Center and routes Facebook's Chromium through it; OfferUp/Mercari US scrapers are NOT written yet (cannot be verified without the proxy).
+- **Brave, US proxy, Reddit need owner-side setup** — keys/URLs in Railway Variables; every one of these scrapers skips gracefully and is excluded from the watchdog when unconfigured.
+- **Facebook Marketplace scraper (Playwright)** most likely returns 0 on Railway (login wall). Not verifiable locally (no Chromium). Check Railway logs for `Facebook Marketplace: N listings found`; if always 0, disable to save ~40 s/cycle.
+- **eBay and Reddit not verifiable locally** — the local `.env` has empty values; credentials live only in Railway Variables. Confirm in Railway logs that eBay answers HTTP 200 (the bogus `X-EBAY-C-ENDUSERCTX` placeholder header was removed in Prompt 13).
+- **Violas are dropped** (title word "viola" in `filters.NOISE_TITLE_RX`) per §1 scope. The Reverb "ZETA Jazz Modern Electric Viola" therefore no longer alerts. Remove "viola"/"violas" from that list if the owner wants violas.
+- **Railway DB is ephemeral** — after this deploy the first cycle will alert every currently live listing (≈5 Reverb + 1 Subito) as "new".
 
 ### Database state (zeta_listings.db)
 - 18 total entries, of which 3 are real Zeta violins:
@@ -89,17 +109,28 @@ violas, cellos, basses, mandolins — violins only).
 File layout (top level):
 
 - main.py — Entry point + AsyncIO scheduler + HTTP server
+- filters.py — ALL keyword lists (§4) and filter logic (§5); word-boundary regex
 - config.py — Env-var-based configuration
 - database.py — SQLite dedup (zeta_listings.db)
 - notifier.py — Telegram sendMessage wrapper
+- tests/test_filters.py — filter regression tests (`python -m tests.test_filters`)
 - scrapers/ — Per-platform scraper modules
   - __init__.py
-  - base.py — Base class: filters, relevance scoring
-  - reverb.py — Reverb.com public API
+  - base.py — Base class: BROWSER_UA, price/year/location helpers, relevance scoring
+  - reverb.py — Reverb.com public API (browser UA, token optional)
   - ebay.py — eBay Browse API (OAuth2, 13 marketplaces)
-  - google.py — Google Custom Search (site: operator)
-  - craigslist.py — Craigslist RSS across US cities
-  - subito.py — Subito.it (Italian classifieds; strict Zeta filter)
+  - google.py — Google Custom Search (rotating keyword × site-group matrix)
+  - brave.py — Brave Search API (Google replacement; same site matrix)
+  - craigslist.py — Craigslist internal JSON API (sapi) across all US + CA areas, posting pages for descriptions
+  - shopgoodwill.py — ShopGoodwill.com buyer API (US auctions)
+  - hibid.py — HiBid GraphQL lotSearch (US/CA estate & liquidation auctions)
+  - kijiji.py — Kijiji.ca (Apollo cache in __NEXT_DATA__)
+  - marktplaats.py — Marktplaats.nl + 2dehands.be (open JSON API)
+  - willhaben.py — Willhaben.at (__NEXT_DATA__ advertSummaryList)
+  - schibsted.py — FINN.no, Tori.fi, DBA.dk, Blocket.se (JSON-LD Product lists)
+  - gumtree.py — Gumtree UK (server-rendered tiles)
+  - olx.py — OLX PL/PT/BG/UA (open JSON API)
+  - subito.py — Subito.it (Italian classifieds; nationwide __NEXT_DATA__ parse)
   - kleinanzeigen.py — Kleinanzeigen.de (Playwright headless Chromium)
   - wallapop.py — Wallapop (Spain, public API)
   - leboncoin.py — Leboncoin.fr (httpx + __NEXT_DATA__)
@@ -123,8 +154,8 @@ Execution flow per run:
    (semaphore = 4)
 3. Each scraper returns a list of dicts `{id, platform, title, price, 
    location, url, description, relevance_score, ...}`
-4. Main filter pipeline: strict Zeta check → noise check → intent check → 
-   URL validity → platform score threshold → DB dedup
+4. Main filter pipeline = `filters.classify()`: other-brand (title) → noise → 
+   intent → sold/ended (title) → Zeta-violin acceptance (§5) → URL validity → DB dedup
 5. New listings flushed to Telegram immediately per-platform (so partial 
    results are not lost on container restart)
 6. Cycle summary logged; if no new listings, a "no changes" message is sent
@@ -359,18 +390,28 @@ Required after eBay migration (REQUIRED — configured):
 - EBAY_CLIENT_SECRET — developer.ebay.com Cert ID
 
 Optional tuning:
-- SEARCH_HOUR (default 9 = 09:00 UTC = 12:00 Romania)
+- SEARCH_HOURS (default "9,21" UTC; legacy SEARCH_HOUR still honoured as the first hour)
 - MIN_PRICE (default 0)
 - MAX_PRICE (default 99999)
 - CONDITION (default "all": all | new | used)
 - MIN_YEAR (default 1980)
-- MAX_YEAR (default 2026) ← FIXED Prompt 11: was 2014, caused all modern listings to be dropped
-- REVERB_API_TOKEN (optional but STRONGLY recommended — without it Reverb returns 401)
+- MAX_YEAR (default = next calendar year, computed at startup — Prompt 13; a fixed 2026 would have dropped every "2027" mention from January)
+- REVERB_API_TOKEN (optional — Reverb works without it with a browser UA; a token only raises rate limits)
+- GOOGLE_QUERIES_PER_RUN (default 48 — 2 runs/day must stay ≤ 100)
+- GOOGLE_GUARD_HOURS (default 10 — skip Google if it ran less than N hours ago)
 - SCRAPER_TIMEOUT_SEC (default 900)
 - SCRAPER_RETRIES (default 1)
 - SCRAPER_CONCURRENCY (default 4)
-- CRAIGSLIST_CONCURRENCY (default 24)
-- CRAIGSLIST_MAX_US_CITIES (default 0 = all discovered)
+- CRAIGSLIST_CONCURRENCY (default 10, clamped 4–16 — requests against sapi.craigslist.org)
+- CRAIGSLIST_MAX_US_CITIES (default 0 = all areas of CRAIGSLIST_COUNTRIES)
+- CRAIGSLIST_COUNTRIES (default "US,CA")
+
+Added in Prompt 14 (all optional):
+- DB_PATH (default "zeta_listings.db" — set to e.g. /data/zeta_listings.db with a Railway volume mounted at /data)
+- BRAVE_API_KEY, BRAVE_QUERIES_PER_RUN (16), BRAVE_GUARD_HOURS (10)
+- US_PROXY_URL (http://user:pass@host:port — US egress for Guitar Center + Facebook Marketplace)
+- SEARCH_TOKEN (protects POST /search and GET /status when set), PORT (default 8080; Railway injects it)
+- PRICE_DROP_PCT (15), WATCHDOG_ZERO_STREAK (3), SEND_NO_CHANGES (true), SEND_PHOTOS (true)
 
 ---
 
@@ -386,9 +427,14 @@ Optional tuning:
 
 ### Pending
 - ~~Obtain eBay Client Secret (Cert ID) for OAuth2 Browse API~~ ✅ Done
-- **Create Reverb Personal Access Token** (scope: public) at reverb.com/account/applications → add REVERB_API_TOKEN to Railway Variables
-- Verify Railway persistent volume for zeta_listings.db (optional, post-MVP)
-- Plan Google CSE replacement before January 1, 2027 (API retirement)
+- ~~Create Reverb Personal Access Token~~ — NOT needed (Prompt 13: browser UA fixes the 403; token optional)
+- After deploying Prompt 13: trigger `POST /search` on Railway and check the logs for `Reverb: N listings found`, `Craigslist: … requests`, `Subito: N listings found`, eBay HTTP status, `Facebook Marketplace: N listings found`
+- Optional: create Reddit API credentials (reddit.com/prefs/apps, "script" type) → REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET in Railway, enables r/Gear4Sale etc.
+- **Mount a Railway volume** (e.g. at /data) and set `DB_PATH=/data/zeta_listings.db` — otherwise every deploy re-alerts all live listings and resets the Google/Brave cursors
+- **Create a Brave Search API key** (api-dashboard.search.brave.com, $5 monthly credit) → `BRAVE_API_KEY`
+- **Optional US proxy** (`US_PROXY_URL`) to unlock Guitar Center + Facebook Marketplace; then write OfferUp / Mercari US scrapers
+- Optional: `SEARCH_TOKEN` + a public Railway domain to trigger `/search` from the phone
+- Remove Google CSE before January 1, 2027 (Brave already wired in)
 
 ---
 
@@ -409,6 +455,8 @@ Optional tuning:
 - Prompt 10 — Reverb +3 keywords, 2x/day schedule (09:00+21:00 UTC), Google 10h guard ✅ COMPLETED (2026-04-16)
 - Prompt 11 — Deep audit + zero-results root cause fixes ✅ COMPLETED (2026-05-27)
 - Prompt 12 — Craigslist rewrite (JSON-LD + 2023 HTML selectors) + Yahoo Auctions JP + Guitar Center Used + Facebook Marketplace (Playwright) ✅ COMPLETED (2026-05-27)
+- Prompt 13 — Live-probe audit + fixes: Reverb UA, Craigslist sapi rewrite (all US+CA areas), Subito originalList, filters.py word-boundary rewrite + tests, Google CSE rotating matrix with US/auction/forum groups, ShopGoodwill scraper, Mercari id_/sold fixes, Yahoo JP deleted, MAX_YEAR dynamic, .env untracked ✅ COMPLETED (2026-09-07)
+- Prompt 14 — Reliability + coverage: watchdog, price-drop alerts, Telegram photos, DB_PATH volume, Craigslist descriptions, Reverb make=Zeta, Brave Search, US proxy plumbing, SEARCH_TOKEN/PORT, GitHub Actions tests; 8 new direct scrapers (HiBid, Kijiji, Marktplaats/2dehands, Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX ×4); multilingual WTB + violin terms; EU price parsing ✅ COMPLETED (2026-09-07)
 
 Bot is operational. See Section 2 "What is broken" for remaining known issues.
 
@@ -418,6 +466,21 @@ Bot is operational. See Section 2 "What is broken" for remaining known issues.
 
 | Date | Decision | Justification |
 |---|---|---|
+| 2026-09-07 | Prompt 14: watchdog on `fetched` (pre-filter count) instead of on filtered results | Broad-query scrapers (Craigslist, ShopGoodwill, HiBid, OLX) legitimately return 0 Zeta candidates most cycles; only "source returned nothing" is a failure signal. Unconfigured scrapers (`is_configured()` False) are excluded. |
+| 2026-09-07 | Prompt 14: direct scrapers only for sites that answered a live probe from an EU IP (HiBid GraphQL, Kijiji, Marktplaats/2dehands, Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX). Catawiki, Proxibid, Heritage, the-saleroom, Bidspotter, Lot-tissimo, Easylive, Interencheres, Buyee, ZenMarket, Allegro, Ricardo, tutti.ch, Vinted, Invaluable, LiveAuctioneers, EstateSales left to Google/Brave | §7: no scrapers that return empty results. Probe table in this row is the authoritative list of what a Railway (EU) container can and cannot reach as of 2026-09-07. |
+| 2026-09-07 | Prompt 14: US proxy as env plumbing only (`US_PROXY_URL`), no OfferUp/Mercari US scrapers yet | Cannot verify blind scrapers without a US egress; Guitar Center (existing, verified selectors) and Facebook Chromium are wired to the proxy. |
+| 2026-09-07 | Prompt 14: photos via `sendPhoto` with 1000-char caption, fallback to text | Owner sees the instrument without opening the link; Telegram caption limit is 1024. |
+| 2026-09-07 | Prompt 14: price-drop threshold 15%, stored per listing in `last_prices` | Reverb/eBay/Craigslist re-list the same item with new prices; a 15% cut on a known Zeta is actionable, smaller moves are noise. |
+| 2026-09-07 | Reverb: browser User-Agent instead of `ZetaViolinHunter/1.0`; token optional | Live probe: 403 (HTML) with bot UA, 200 without any token with a Chrome UA. The Prompt 11 "needs token" diagnosis was wrong; owner never had to create a token. |
+| 2026-09-07 | Craigslist rewritten on `sapi.craigslist.org` JSON API + `reference.craigslist.org/Areas`; 3 broad queries per area instead of 8 keywords × 2 categories | RSS 403, geo index dead, HTML JS-rendered, JSON-LD without URLs → old scraper returned 0. sapi: 1404 requests / 28 s / all 200. Broad "zeta"+"strados" queries + local signal filter catch titles like "Zeta Strados 5-string" that narrow queries missed. |
+| 2026-09-07 | Subito: parse `originalList`/`galleryList`, nationwide query without city, DuckDuckGo fallback removed | `.items.list` is always empty; "Zeta violino Milan" returned 0 while "Zeta violino" returned 2 (incl. a real Acoustic Pro). Fallback produced stale search-engine results. |
+| 2026-09-07 | New `filters.py` with word-boundary regex; substring lists in main.py/config.py removed | Substring matches dropped legit listings: "hard shell case"→shell, "clear coat"→coat, "skilled"→ski, "sold as is"→SOLD, "recommended"→ENDED, "no defects"→defect, "repaired"→repair, "unwanted gift"→wanted, "if you're looking for"→looking for. Also implements §4.1/§4.2 acceptance without brand string, §4.5 other-brand blacklist (title only), JP/NL terms, replica and accessory blacklists (AI verifier is gone, so noise must be caught here). |
+| 2026-09-07 | Violas dropped (title word "viola") | §1 scope says violins only. Flip by removing "viola"/"violas" from `NOISE_TITLE_RX`. |
+| 2026-09-07 | Google CSE: 48 queries/run, rotating keyword × site-group matrix with cursor, 6 fresh global queries with `dateRestrict=w2`, 12 site groups incl. US/auctions/forums; mark run on 429 | 65 × 2 runs = 130 > 100/day (quota resets at midnight Pacific, both runs same day) → evening run truncated. Same 10 relevance-ranked results every run → 0 new. US retail/auction/forum groups were never queried. |
+| 2026-09-07 | New ShopGoodwill scraper (buyer API) | Verified reachable from EU IP without auth; US-wide donated instruments; description search. |
+| 2026-09-07 | Yahoo JP scraper deleted | API answers 403, web blocks EEA, no app id ever configured → permanently 0. Google CSE `site:auctions.yahoo.co.jp` covers it. Per §7: no scrapers that return empty results. |
+| 2026-09-07 | Mercari JP: read `id_`, match "sold" in status, Shops URLs | mercapi field is `id_`; old code read `id` → every item skipped → scraper always returned 0. Status strings are `ITEM_STATUS_SOLD_OUT`. |
+| 2026-09-07 | MAX_YEAR default = next calendar year; eBay `X-EBAY-C-ENDUSERCTX` placeholder header removed; `.env` untracked from git; `SEARCH_HOURS` env | Fixed 2026 would drop every "2027" mention from Jan 1. Header contained literal `<ePNCampaignId>`. `.env` was tracked despite `.gitignore` (values were empty). Scheduler ignored SEARCH_HOUR. |
 | 2026-04-16 | Added price history (SQLite), deal detection (30% below avg), image verification (GPT-4o-mini vision), enhanced Telegram alerts | Prompt 8. Cost ~$0.001/listing text + ~$0.003/listing image. |
 | 2026-04-16 | Added Maestronet, Violinist.com, Audiofanzine forum scrapers + GPT-4o-mini AI re-verification layer | Prompt 7. Forums catch niche listings missed by marketplaces. AI rejects false positives (jackets, accessories, wrong brand) before Telegram send. Fail-open: OPENAI_API_KEY absent or API error → listing passes through. Used httpx directly, no openai pip package. |
 | 2026-04-16 | Fixed eBay duplicates (dedup on itemId not URL), added Mercari JP (mercapi), Reddit (praw) | Prompt 6. eBay same item had different URLs per marketplace. Mercari uses async API wrapper. Reddit uses praw in asyncio.to_thread. |
@@ -468,7 +531,21 @@ Bot is operational. See Section 2 "What is broken" for remaining known issues.
 | Reverb API returns 401 without auth token — scraper returned 0 results silently | High | Fixed in Prompt 11 (REVERB_API_TOKEN support + warning log). Owner must set token in Railway. |
 | Reverb API year_min/year_max params silently excluded unlabeled listings | Medium | Fixed in Prompt 11 (params removed) |
 | /forum in URL bad_fragments dropped maestronet.com/forum/* and similar Google CSE results | Medium | Fixed in Prompt 11 (removed from filter) |
-| Craigslist RSS feed returns 0 (removed by Craigslist ~2020) | Medium | Existing DuckDuckGo + Google CSE fallback handles this — no fix needed |
+| Craigslist RSS feed returns 0 (removed by Craigslist ~2020) | Medium | Superseded — Prompt 13 rewrote Craigslist on the sapi JSON API |
+| Reverb returned 403 for bot User-Agent → 0 results for months (misdiagnosed as missing token in Prompt 11) | Critical | Fixed in Prompt 13 (browser UA) |
+| Craigslist scraper returned 0 everywhere (geo index dead, JSON-LD items lack URL, HTML JS-rendered) | Critical | Fixed in Prompt 13 (sapi API, 468 areas) |
+| Subito scraper parsed 0 ads (`items.list` empty; city appended to query) | High | Fixed in Prompt 13 (`originalList`, nationwide) |
+| Substring filters dropped legit listings ("hard shell case", "sold as is", "no defects", "recommended", ...) | High | Fixed in Prompt 13 (`filters.py`, word boundaries, 46 tests) |
+| Strict filter required literal "zeta" — dropped Strados/JV44/JLP-only, Japanese-only and Dutch titles | Medium | Fixed in Prompt 13 |
+| Google CSE: 130 queries/day > 100 quota; no date restriction → same stale top-10; US groups never queried; 429 skipped the guard | High | Fixed in Prompt 13 |
+| Mercari JP always 0 (read `id` instead of `id_`; sold check never matched) | Medium | Fixed in Prompt 13 |
+| MAX_YEAR fixed at 2026 → time bomb on 2027-01-01 | Medium | Fixed in Prompt 13 (dynamic) |
+| Yahoo JP API 403 / EEA-blocked, never configured | Low | Scraper deleted in Prompt 13; covered by Google CSE |
+| `.env` tracked in git despite `.gitignore` | Low | Fixed in Prompt 13 (`git rm --cached`) |
+| No alert when a scraper silently returns 0 for weeks | High | Fixed in Prompt 14 (watchdog) |
+| EU price strings ("€ 6.900") parsed as 6.9 | Medium | Fixed in Prompt 14 (`parse_amount`) |
+| Dutch/German/Italian "wanted" ads ("Gezocht:", "Suche") alerted as listings | Low | Fixed in Prompt 14 (multilingual INTENT_TITLE_RX) |
+| Ephemeral DB re-alerts everything on each deploy | Medium | Code ready in Prompt 14 (`DB_PATH`); owner must mount a Railway volume |
 
 ---
 

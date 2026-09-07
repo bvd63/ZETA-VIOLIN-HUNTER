@@ -59,6 +59,9 @@ class EbayScraper(BaseScraper):
         self._token: str = ""
         self._token_expires: float = 0.0
 
+    def is_configured(self) -> bool:
+        return bool(self.client_id and self.client_secret)
+
     async def _get_token(self, client: httpx.AsyncClient) -> str:
         """Get or refresh OAuth2 application token."""
         now = time.time()
@@ -123,7 +126,6 @@ class EbayScraper(BaseScraper):
                             headers={
                                 "Authorization": f"Bearer {token}",
                                 "X-EBAY-C-MARKETPLACE-ID": marketplace,
-                                "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=<ePNCampaignId>,affiliateReferenceId=<referenceId>",
                             },
                             params={
                                 "q": kw,
@@ -153,6 +155,7 @@ class EbayScraper(BaseScraper):
 
                         data = resp.json()
                         items = data.get("itemSummaries", [])
+                        self.fetched += len(items)
 
                         for item in items:
                             ebay_item_id = item.get("itemId", "")
@@ -191,9 +194,9 @@ class EbayScraper(BaseScraper):
                             if not image_url and thumbnails:
                                 image_url = thumbnails[0].get("imageUrl", "")
 
-                            # Apply standard filters
+                            # Apply standard filters (sold/ended check on title only)
                             full_text = f"{title} {description} {condition}"
-                            if self._is_excluded(full_text):
+                            if self._is_excluded(title):
                                 continue
                             if self._is_excluded_location(location + " " + country):
                                 continue

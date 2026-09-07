@@ -5,29 +5,31 @@ Searches globally for Zeta electric violin listings and sends Telegram alerts.
 
 import asyncio
 import logging
-import re
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 from aiohttp import web
 
 from database import Database
 from notifier import TelegramNotifier
+from filters import classify
 
 from scrapers.reverb import ReverbScraper
 from scrapers.ebay import EbayScraper
 from scrapers.google import GoogleScraper
+from scrapers.brave import BraveScraper
 from scrapers.craigslist import CraigslistScraper
+from scrapers.shopgoodwill import ShopGoodwillScraper
+from scrapers.hibid import HiBidScraper
+from scrapers.kijiji import KijijiScraper
+from scrapers.marktplaats import MarktplaatsScraper
+from scrapers.willhaben import WillhabenScraper
+from scrapers.schibsted import SchibstedScraper
+from scrapers.gumtree import GumtreeScraper
+from scrapers.olx import OlxScraper
 from scrapers.subito import SubitoScraper
-from scrapers.kleinanzeigen import KleinanzeigenScraper
-from scrapers.wallapop import WallapopScraper
-from scrapers.leboncoin import LeboncoinScraper
 from scrapers.mercari_jp import MercariJPScraper
-from scrapers.reddit_scraper import RedditScraper
-from scrapers.maestronet import MaestronetScraper
-from scrapers.violinist_com import ViolinistComScraper
-from scrapers.audiofanzine import AudiofanzineScraper
-from scrapers.yahoo_jp import YahooJPScraper
 from scrapers.guitar_center import GuitarCenterScraper
+from scrapers.reddit_scraper import RedditScraper
 from scrapers.facebook_marketplace import FacebookMarketplaceScraper
 
 from price_tracker import PriceTracker
@@ -45,124 +47,14 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 search_cycle_lock = asyncio.Lock()
 status_tracker = StatusTracker()
 
-
-VIOLIN_TERMS = {
-    "violin", "violins", "violino", "violon", "viola", "fiddle",
-    "geige", "skrzypce", "violonul", "violinul", "violines", "violoniste",
+DROP_REASON_LABELS = {
+    "other_brand": "other-brand",
+    "noise": "noise",
+    "intent": "non-sale intent",
+    "sold": "sold/ended",
+    "non_zeta": "non-Zeta-violin",
+    "url": "invalid-url",
 }
-
-ZETA_MODEL_TERMS = {
-    "strados",
-    "jazz fusion",
-    "jazz modern",
-    "jazz classic",
-    "strados legacy",
-    "acoustic-pro",
-    "acoustic pro",
-    "jv44",
-    "jv45",
-    "sv24",
-    "sv25",
-    "sv43",
-    "ev25",
-    "ev44",
-    "cv44",
-    "jlp",
-    "jean-luc ponty",
-}
-
-NOISE_TERMS = {
-    "arcteryx", "arc'teryx", "jacket", "jackets", "shell", "hardshell",
-    "coat", "hoodie", "pants", "backpack", "ski", "snowboard",
-}
-
-EXCLUDE_LISTING_TERMS = {
-    "wanted", "wtb", "looking for", "part only", "parts only", "for parts",
-    "repair", "broken", "defect", "not working", "case only", "bow only",
-    "bridge only", "pickup only case", "cover only", "gig bag only",
-}
-
-MIN_SCORE_BY_PLATFORM = {
-    "reverb": 2,
-    "ebay": 2,
-    "facebook marketplace": 3,
-    "subito": 3,
-    "kleinanzeigen": 3,
-    "leboncoin": 3,
-    "mercatinomusicale": 2,
-    "audiofanzine": 2,
-    "maestronet": 2,
-    "yahoo auctions japan": 2,
-}
-
-
-def _is_strict_zeta_violin(listing: dict) -> bool:
-    """Allow only Zeta violin-family listings, including explicit Zeta model names."""
-    text = " ".join([
-        str(listing.get("title", "")),
-        str(listing.get("description", "")),
-        str(listing.get("platform", "")),
-    ]).lower()
-
-    has_zeta = "zeta" in text or "zetta" in text
-    if not has_zeta:
-        return False
-
-    has_model_term = any(term in text for term in ZETA_MODEL_TERMS)
-    if has_model_term:
-        return True
-
-    tokens = set(re.findall(r"[a-zA-Z\u00C0-\u024F\u0400-\u04FF]+", text))
-    has_violin_term = any(term in tokens for term in VIOLIN_TERMS)
-    return has_violin_term
-
-
-def _has_noise_terms(listing: dict) -> bool:
-    text = " ".join([
-        str(listing.get("title", "")),
-        str(listing.get("description", "")),
-    ]).lower()
-    return any(term in text for term in NOISE_TERMS)
-
-
-def _is_excluded_listing_intent(listing: dict) -> bool:
-    text = " ".join([
-        str(listing.get("title", "")),
-        str(listing.get("description", "")),
-    ]).lower()
-    return any(term in text for term in EXCLUDE_LISTING_TERMS)
-
-
-def _is_valid_listing_url(url: str) -> bool:
-    if not url:
-        return False
-    raw = str(url).strip().lower()
-    if raw.startswith("//"):
-        raw = "https:" + raw
-    if not (raw.startswith("http://") or raw.startswith("https://")):
-        return False
-
-    # Drop obvious non-listing pages.
-    # NOTE: /forum intentionally removed — maestronet.com/forum/topic/... and similar
-    # forum classifieds are valid listing URLs returned by Google CSE.
-    bad_fragments = ["/search", "?q=", "/category", "/categories", "/help", "/about"]
-    if any(fragment in raw for fragment in bad_fragments):
-        return False
-
-    return True
-
-
-def _passes_platform_score(listing: dict) -> bool:
-    platform = str(listing.get("platform", "")).lower()
-    score = int(listing.get("relevance_score", 0) or 0)
-
-    threshold = 2
-    for key, value in MIN_SCORE_BY_PLATFORM.items():
-        if key in platform:
-            threshold = value
-            break
-
-    return score >= threshold
 
 
 def build_scrapers() -> list:
@@ -170,64 +62,66 @@ def build_scrapers() -> list:
         ReverbScraper(),
         EbayScraper(Config.EBAY_CLIENT_ID, Config.EBAY_CLIENT_SECRET),
         GoogleScraper(Config.GOOGLE_API_KEY, Config.GOOGLE_CSE_ID),
+        BraveScraper(),
         CraigslistScraper(),
+        ShopGoodwillScraper(),
+        HiBidScraper(),
+        KijijiScraper(),
+        MarktplaatsScraper(),
+        WillhabenScraper(),
+        SchibstedScraper(),
+        GumtreeScraper(),
+        OlxScraper(),
         SubitoScraper(),
         MercariJPScraper(),
-        YahooJPScraper(),
-        # GuitarCenterScraper(),  # disabled — Cloudflare TCP-blocks Railway EU containers
-        FacebookMarketplaceScraper(),
+        GuitarCenterScraper(),          # runs only when US_PROXY_URL is set
+        FacebookMarketplaceScraper(),   # Playwright; uses US_PROXY_URL when set
         RedditScraper(),
+        # Disabled (see CLAUDE.md §2): Kleinanzeigen, Wallapop, Leboncoin,
+        # Maestronet, Violinist.com, Audiofanzine — covered by Google/Brave.
     ]
 
 
-async def _run_scraper_with_resilience(scraper, db: Database, semaphore: asyncio.Semaphore):
+async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: PriceTracker,
+                                       semaphore: asyncio.Semaphore) -> dict:
+    """Run one scraper with timeout + retry, filter, dedup and detect price drops.
+    Returns {name, new, drops, status, raw}; status is int (== len(new)) or 'ERROR'."""
     async with semaphore:
         retries = max(0, Config.SCRAPER_RETRIES)
         for attempt in range(1, retries + 2):
+            started = datetime.utcnow()
             try:
                 log.info(f"🔍 Searching: {scraper.name} (attempt {attempt}/{retries + 1})")
                 listings = await asyncio.wait_for(
                     scraper.search(), timeout=max(1, Config.SCRAPER_TIMEOUT_SEC)
                 )
-                log.info(f"   Found {len(listings)} raw listings from {scraper.name}")
+                fetched = max(int(getattr(scraper, "fetched", 0) or 0), len(listings))
+                log.info(f"   Found {len(listings)} candidate listings from {scraper.name} ({fetched} items fetched)")
 
-                new_listings = []
-                dropped_non_zeta = 0
-                dropped_noise = 0
-                dropped_intent = 0
-                dropped_url = 0
-                dropped_score = 0
+                new_listings, drops, dropped = [], [], {}
                 for listing in listings:
-                    if not _is_strict_zeta_violin(listing):
-                        dropped_non_zeta += 1
+                    reason = classify(listing)
+                    if reason:
+                        dropped[reason] = dropped.get(reason, 0) + 1
+                        log.debug(f"   drop[{reason}] {listing.get('title', '')[:70]}")
                         continue
-                    if _has_noise_terms(listing):
-                        dropped_noise += 1
+                    if db.is_seen(listing["id"]):
+                        info = price_tracker.update_price(listing)
+                        if info:
+                            drops.append((listing, info))
                         continue
-                    if _is_excluded_listing_intent(listing):
-                        dropped_intent += 1
-                        continue
-                    if not _is_valid_listing_url(str(listing.get("url", ""))):
-                        dropped_url += 1
-                        continue
-                    # relevance_score filtering removed — _is_strict_zeta_violin() is sufficient
-                    if not db.is_seen(listing["id"]):
-                        db.mark_seen(listing["id"], listing)
-                        new_listings.append(listing)
+                    db.mark_seen(listing["id"], listing)
+                    new_listings.append(listing)
 
-                if dropped_non_zeta:
-                    log.info(f"   Filtered out {dropped_non_zeta} non-Zeta-violin listing(s) from {scraper.name}")
-                if dropped_noise:
-                    log.info(f"   Filtered out {dropped_noise} noise listing(s) from {scraper.name}")
-                if dropped_intent:
-                    log.info(f"   Filtered out {dropped_intent} non-sale listing(s) from {scraper.name}")
-                if dropped_url:
-                    log.info(f"   Filtered out {dropped_url} invalid-url listing(s) from {scraper.name}")
-                if dropped_score:
-                    log.info(f"   Filtered out {dropped_score} low-score listing(s) from {scraper.name}")
-
-                log.info(f"   ✅ {len(new_listings)} NEW listings from {scraper.name}")
-                return scraper.name, new_listings, len(new_listings)
+                for reason, count in dropped.items():
+                    log.info(f"   Filtered out {count} {DROP_REASON_LABELS.get(reason, reason)} listing(s) from {scraper.name}")
+                log.info(f"   ✅ {len(new_listings)} NEW listings from {scraper.name}"
+                         + (f", {len(drops)} price drop(s)" if drops else ""))
+                return {
+                    "name": scraper.name, "new": new_listings, "drops": drops,
+                    "status": len(new_listings), "raw": fetched,
+                    "duration": (datetime.utcnow() - started).total_seconds(),
+                }
 
             except asyncio.TimeoutError:
                 log.warning(
@@ -240,7 +134,33 @@ async def _run_scraper_with_resilience(scraper, db: Database, semaphore: asyncio
             if attempt <= retries:
                 await asyncio.sleep(min(2 * attempt, 5))
 
-        return scraper.name, [], "ERROR"
+        return {"name": scraper.name, "new": [], "drops": [], "status": "ERROR", "raw": 0, "duration": 0}
+
+
+async def _watchdog(scrapers: list, notifier: TelegramNotifier) -> None:
+    """Warn on Telegram when a configured scraper keeps fetching nothing or
+    keeps erroring — this is exactly how Reverb/Craigslist/Subito silently
+    died for months before Prompt 13."""
+    streaks = status_tracker.get_streaks()
+    threshold = max(2, Config.WATCHDOG_ZERO_STREAK)
+    alerts = []
+    for scraper in scrapers:
+        if not scraper.is_configured():
+            continue
+        st = streaks.get(scraper.name)
+        if not st:
+            continue
+        err, zero = st["error"], st["zero"]
+        if err >= 2 and (err == 2 or err % 10 == 0):
+            alerts.append(f"{scraper.name}: eroare în {err} cicluri consecutive")
+        elif zero >= threshold and (zero == threshold or zero % 10 == 0):
+            alerts.append(f"{scraper.name}: 0 rezultate brute în {zero} cicluri consecutive")
+    if alerts:
+        log.warning("WATCHDOG: " + "; ".join(alerts))
+        try:
+            await notifier.send_watchdog(alerts)
+        except Exception as e:
+            log.error(f"Watchdog Telegram error: {e}")
 
 
 async def run_search_cycle():
@@ -258,48 +178,54 @@ async def run_search_cycle():
         db = Database()
         notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)
         price_tracker = PriceTracker()
+        scrapers = build_scrapers()
 
-        all_new_listings = []
+        all_new_listings, all_drops = [], []
         platform_stats = {}
         sent_any = False
 
         semaphore = asyncio.Semaphore(max(1, Config.SCRAPER_CONCURRENCY))
         tasks = [
-            asyncio.create_task(_run_scraper_with_resilience(scraper, db, semaphore))
-            for scraper in build_scrapers()
+            asyncio.create_task(_run_scraper_with_resilience(scraper, db, price_tracker, semaphore))
+            for scraper in scrapers
         ]
 
         for task in asyncio.as_completed(tasks):
-            platform_name, new_listings, status = await task
+            result = await task
+            name, new_listings, drops, status = result["name"], result["new"], result["drops"], result["status"]
             all_new_listings.extend(new_listings)
-            platform_stats[platform_name] = status
+            all_drops.extend(drops)
+            platform_stats[name] = status
 
-            # Record scraper stats
-            raw_count = len(new_listings) if isinstance(status, int) else 0
             status_tracker.record_scraper(
-                platform_name,
-                raw=raw_count if status != "ERROR" else 0,
+                name,
+                raw=result["raw"],
                 new=len(new_listings),
-                error=str(status) if status == "ERROR" else "",
+                error="ERROR" if status == "ERROR" else "",
+                duration=result["duration"],
             )
 
             # Send immediately per-platform so results are not lost on container restarts.
             if new_listings:
                 try:
-                    # Enrich with price context then send directly — no AI gate
                     for listing in new_listings:
                         listing["price_context"] = price_tracker.record_listing(listing)
-                    log.info(f"📬 Sending {len(new_listings)} listing(s) from {platform_name} to Telegram...")
+                    log.info(f"📬 Sending {len(new_listings)} listing(s) from {name} to Telegram...")
                     await notifier.send_listings(new_listings)
                     sent_any = True
                 except Exception as e:
-                    log.error(f"Telegram send error for {platform_name}: {e}")
+                    log.error(f"Telegram send error for {name}: {e}")
 
-        if not all_new_listings:
+        if all_drops:
+            try:
+                await notifier.send_price_drops(all_drops)
+            except Exception as e:
+                log.error(f"Telegram price-drop send error: {e}")
+
+        if not all_new_listings and not all_drops:
             log.info("\n✅ No new listings found this cycle.")
             await notifier.send_no_changes()
-        elif not sent_any:
-            # Fallback: if incremental sends were skipped for any reason, send all once.
+        elif all_new_listings and not sent_any:
             log.info(f"\n📬 Sending {len(all_new_listings)} new listings to Telegram...")
             await notifier.send_listings(all_new_listings)
 
@@ -314,17 +240,23 @@ async def run_search_cycle():
 
         status_tracker.end_cycle(
             total_sent=len(all_new_listings),
-            total_ai_rejected=sum(
-                1 for s in platform_stats.values()
-                if s == "ERROR"
-            ),
+            total_ai_rejected=sum(1 for s in platform_stats.values() if s == "ERROR"),
         )
-
+        await _watchdog(scrapers, notifier)
         return len(all_new_listings)
 
 
+def _authorized(request) -> bool:
+    if not Config.SEARCH_TOKEN:
+        return True
+    supplied = request.headers.get("X-Search-Token") or request.query.get("token", "")
+    return supplied == Config.SEARCH_TOKEN
+
+
 async def handle_search(request):
-    """HTTP endpoint to trigger manual search."""
+    """HTTP endpoint to trigger manual search (protected by SEARCH_TOKEN if set)."""
+    if not _authorized(request):
+        return web.json_response({"status": "error", "message": "unauthorized"}, status=401)
     try:
         count = await run_search_cycle()
         return web.json_response({
@@ -334,30 +266,32 @@ async def handle_search(request):
         })
     except Exception as e:
         log.error(f"Manual search error: {e}")
-        return web.json_response({
-            "status": "error",
-            "message": str(e)
-        }, status=500)
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
 
 
 async def handle_health(request):
-    """Health check endpoint."""
     return web.json_response({"status": "healthy"})
 
 
 async def handle_status(request):
-    """Detailed status dashboard endpoint."""
+    if not _authorized(request):
+        return web.json_response({"status": "error", "message": "unauthorized"}, status=401)
     try:
-        status = status_tracker.get_status()
-        return web.json_response(status)
+        return web.json_response(status_tracker.get_status())
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
 
+def _parse_hours(raw: str) -> str:
+    hours = sorted({int(h) for h in raw.split(",") if h.strip().isdigit() and 0 <= int(h) <= 23})
+    return ",".join(str(h) for h in hours) or "9,21"
+
+
 async def main():
     log.info("🎻 Zeta Violin Hunter starting up...")
+    log.info(f"   DB: {Config.DB_PATH} | US proxy: {'yes' if Config.US_PROXY_URL else 'no'} | "
+             f"Brave: {'yes' if Config.BRAVE_API_KEY else 'no'}")
 
-    # Start HTTP server
     app = web.Application()
     app.router.add_post('/search', handle_search)
     app.router.add_get('/health', handle_health)
@@ -365,29 +299,22 @@ async def main():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    site = web.TCPSite(runner, '0.0.0.0', Config.PORT)
     await site.start()
-    log.info("🌐 HTTP server started on port 8080")
-    log.info("   POST /search - Trigger manual search")
+    log.info(f"🌐 HTTP server started on port {Config.PORT}")
+    log.info("   POST /search - Trigger manual search" + (" (X-Search-Token required)" if Config.SEARCH_TOKEN else ""))
     log.info("   GET /health - Health check")
     log.info("   GET /status - Detailed status dashboard")
 
     # Run first search in background so health endpoint is available immediately.
     asyncio.create_task(run_search_cycle())
 
-    # Then schedule daily at configured time
+    hours = _parse_hours(Config.SEARCH_HOURS)
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        run_search_cycle,
-        "cron",
-        hour="9,21",
-        minute=0,
-        timezone="UTC"
-    )
+    scheduler.add_job(run_search_cycle, "cron", hour=hours, minute=0, timezone="UTC")
     scheduler.start()
-    log.info("⏰ Scheduled to run 2x daily at 09:00 + 21:00 UTC")
+    log.info(f"⏰ Scheduled to run daily at {hours} UTC")
 
-    # Keep running
     try:
         while True:
             await asyncio.sleep(3600)

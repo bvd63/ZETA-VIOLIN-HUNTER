@@ -1,0 +1,19 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  filters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install httpx beautifulsoup4 lxml apscheduler aiohttp python-dotenv
+      - run: python -m py_compile main.py filters.py config.py scrapers/*.py
+      - run: python -m tests.test_filters
+      - run: python -m tests.test_trackers

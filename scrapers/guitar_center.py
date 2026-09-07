@@ -48,13 +48,20 @@ ZETA_SIGNALS = [
 class GuitarCenterScraper(BaseScraper):
     name = "Guitar Center"
 
+    def is_configured(self) -> bool:
+        # guitarcenter.com TCP-blocks European datacenter IPs (Railway); only
+        # useful through a US egress proxy.
+        return bool(Config.US_PROXY_URL)
+
     async def search(self) -> list:
+        if not self.is_configured():
+            log.info("Guitar Center: US_PROXY_URL not set — skipping (site blocks EU datacenter IPs)")
+            return []
+
         results = []
         seen_ids: set = set()
 
-        async with httpx.AsyncClient(
-            timeout=20, follow_redirects=True, headers=HEADERS
-        ) as client:
+        async with self.make_client(us_proxy=True, timeout=20, headers=HEADERS) as client:
             for kw in KEYWORDS:
                 try:
                     # Guitar Center search with used filter
@@ -68,6 +75,7 @@ class GuitarCenterScraper(BaseScraper):
                     if not listings:
                         log.debug(f"Guitar Center '{kw}': 0 listings parsed")
                         continue
+                    self.fetched += len(listings)
 
                     for item_id, title, price, url, description in listings:
                         combined = (title + " " + description).lower()

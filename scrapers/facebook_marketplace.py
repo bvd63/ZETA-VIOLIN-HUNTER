@@ -54,6 +54,13 @@ CLOSE_SELECTORS = [
 class FacebookMarketplaceScraper(BaseScraper):
     name = "Facebook Marketplace"
 
+    def is_configured(self) -> bool:
+        try:
+            import playwright  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
     async def search(self) -> list:
         results = []
         seen_ids: set = set()
@@ -64,10 +71,16 @@ class FacebookMarketplaceScraper(BaseScraper):
             log.warning("Playwright not installed — skipping Facebook Marketplace")
             return []
 
+        launch_kwargs = {}
+        if Config.US_PROXY_URL:
+            # Facebook shows a login wall to datacenter IPs; a US egress helps.
+            launch_kwargs["proxy"] = {"server": Config.US_PROXY_URL}
+
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
                     headless=True,
+                    **launch_kwargs,
                     args=[
                         "--no-sandbox",
                         "--disable-dev-shm-usage",
@@ -105,6 +118,7 @@ class FacebookMarketplaceScraper(BaseScraper):
 
                         html = await page.content()
                         new_results = self._parse_listings(html, seen_ids)
+                        self.fetched += len(new_results)
                         results.extend(new_results)
                         log.debug(f"Facebook Marketplace '{kw}': {len(new_results)} raw listings")
 

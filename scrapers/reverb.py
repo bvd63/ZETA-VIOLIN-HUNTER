@@ -1,37 +1,49 @@
 """
-Reverb.com scraper — uses public search API (no key required).
+Reverb.com scraper — public listings API.
+
+IMPORTANT (verified 2026-09-07): Reverb's edge blocks non-browser User-Agents
+with HTTP 403 (an HTML page). With a browser User-Agent the API answers 200
+WITHOUT any token. REVERB_API_TOKEN is therefore optional; if set it is sent
+as X-Auth-Token (raises rate limits).
 """
 
 import httpx
 import logging
-from scrapers.base import BaseScraper
+import re
+from scrapers.base import BaseScraper, BROWSER_UA
 from config import Config
 
 log = logging.getLogger(__name__)
 
 REVERB_API = "https://api.reverb.com/api/listings"
 
+KEYWORDS = [
+    "Zeta violin",
+    "Zeta electric violin",
+    "Zeta Strados",
+    "Zeta Jazz Fusion",
+    "Zeta Jazz Modern",
+    "Zeta Acoustic Pro",
+    "Zeta JV44",
+    "Zeta SV24",
+    "Zeta JLP",
+    "Zetta violin",
+    "Strados violin",
+    "Jean-Luc Ponty violin",
+    "electric violin 5 string MIDI",
+]
+MAX_PAGES = 2
+TAG_RX = re.compile(r"<[^>]+>")
+
 
 def _build_headers() -> dict:
-    """Build Reverb API headers. Adds auth token if configured.
-
-    Reverb now requires a Personal Access Token for all API calls.
-    Without it the API returns 401 and the scraper returns 0 results.
-    Get one at: reverb.com → Account → Apps → Personal Access Token (scope: public)
-    Set env var: REVERB_API_TOKEN
-    """
     headers = {
         "Accept": "application/hal+json",
         "Accept-Version": "3.0",
-        "User-Agent": "ZetaViolinHunter/1.0",
+        "User-Agent": BROWSER_UA,
     }
     if Config.REVERB_API_TOKEN:
         headers["X-Auth-Token"] = Config.REVERB_API_TOKEN
-    else:
-        log.warning(
-            "REVERB_API_TOKEN not set — Reverb API may return 401. "
-            "Create a Personal Access Token at reverb.com/account/applications"
-        )
     return headers
 
 
@@ -40,75 +52,57 @@ class ReverbScraper(BaseScraper):
 
     async def search(self) -> list:
         results = []
-        keywords = [
-            "Zeta violin",
-            "Zeta electric violin",
-            "Zeta Strados",
-            "Zeta Jazz Fusion",
-            "Zeta JV44",
-            "Zeta SV24",
-            "Zeta JLP",
-            "Zetta violin",
-            "Strados violin",
-            "electric violin 5 string MIDI",
-            "electric violin Jean-Luc Ponty",
-        ]
-        max_pages = 2
-
         seen_ids = set()
         headers = _build_headers()
+
+        # Keyword searches plus Reverb's structured brand filter (make=Zeta),
+        # which catches odd titles like "Very fine rare 5 strings Zeta Midi".
+        searches = [{"query": kw} for kw in KEYWORDS] + [{"make": "Zeta"}]
+
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            for kw in keywords:
-                for page in range(1, max_pages + 1):
+            for base_params in searches:
+                kw = base_params.get("query") or f"make={base_params.get('make')}"
+                for page in range(1, MAX_PAGES + 1):
                     try:
-                        params = {
-                            "query": kw,
-                            "per_page": 50,
-                            "page": page,
-                            "state": "all",
-                            # NOTE: year_min/year_max intentionally omitted.
-                            # Reverb uses these for the instrument's manufacture year.
-                            # Sellers rarely fill in the year field, so passing
-                            # year_max=2014 would silently exclude ~90% of listings.
-                        }
+                        params = {**base_params, "per_page": 50, "page": page}
                         resp = await client.get(REVERB_API, headers=headers, params=params)
                         if resp.status_code != 200:
                             log.warning(
-                                f"Reverb API returned HTTP {resp.status_code} for '{kw}' p{page}"
-                                + (" — missing REVERB_API_TOKEN?" if resp.status_code == 401 else "")
+                                f"Reverb API HTTP {resp.status_code} for '{kw}' p{page}: "
+                                f"{resp.text[:120]!r}"
                             )
                             break
-                        data = resp.json()
-                        listings = data.get("listings", [])
+                        listings = resp.json().get("listings", [])
                         if not listings:
                             break
+                        self.fetched += len(listings)
 
                         for item in listings:
-                            url = item.get("_links", {}).get("web", {}).get("href", "")
-                            listing_id = self._make_id("reverb", url)
+                            state = (item.get("state") or {}).get("slug", "live")
+                            if state != "live":
+                                continue
 
-                            if listing_id in seen_ids:
+                            url = item.get("_links", {}).get("web", {}).get("href", "")
+                            listing_id = self._make_id("reverb", str(item.get("id") or url))
+                            if not url or listing_id in seen_ids:
                                 continue
                             seen_ids.add(listing_id)
 
                             title = item.get("title", "")
-                            price_obj = item.get("price", {})
-                            price = f"{price_obj.get('amount', '?')} {price_obj.get('currency', '')}"
-                            condition = item.get("condition", {}).get("display_name", "")
-                            location = item.get("shop", {}).get("address", {}).get("country_code", "")
-                            description = item.get("description", "")[:300]
+                            price_obj = item.get("price", {}) or {}
+                            price = f"{price_obj.get('amount', '?')} {price_obj.get('currency', '')}".strip()
+                            condition = (item.get("condition") or {}).get("display_name", "")
+                            location = self._location(item)
+                            description = TAG_RX.sub(" ", item.get("description", "") or "")
+                            description = re.sub(r"\s+", " ", description).strip()[:300]
 
-                            # Extract primary image URL
-                            photos = item.get("photos", [])
                             image_url = ""
-                            if photos and isinstance(photos, list):
-                                first_photo = photos[0] if photos else {}
-                                if isinstance(first_photo, dict):
-                                    image_url = first_photo.get("_links", {}).get("large_crop", {}).get("href", "")
-                                    if not image_url:
-                                        image_url = first_photo.get("_links", {}).get("thumbnail", {}).get("href", "")
+                            photos = item.get("photos") or []
+                            if photos and isinstance(photos[0], dict):
+                                links = photos[0].get("_links", {})
+                                image_url = (links.get("large_crop") or links.get("thumbnail") or {}).get("href", "")
 
-                            if self._is_excluded(title + " " + condition):
+                            if self._is_excluded(title):
                                 continue
                             if self._is_excluded_location(location):
                                 continue
@@ -117,22 +111,39 @@ class ReverbScraper(BaseScraper):
                             if not self._year_in_range(title + " " + description):
                                 continue
 
-                            score = self._relevance_score(title, description)
-
                             results.append({
                                 "id": listing_id,
                                 "platform": "Reverb",
                                 "title": title,
                                 "price": price,
-                                "location": location,
+                                "location": location or "Unknown",
                                 "url": url,
                                 "description": description,
                                 "condition": condition,
-                                "relevance_score": score,
+                                "date_posted": (item.get("published_at") or "")[:10],
+                                "relevance_score": self._relevance_score(title, description),
                                 "image_url": image_url,
                             })
                     except Exception as e:
                         log.warning(f"Reverb keyword '{kw}' page {page} error: {e}")
                         break
 
+        log.info(f"Reverb: {len(results)} listings found")
         return results
+
+    @staticmethod
+    def _location(item: dict) -> str:
+        """The listings API no longer returns a shop address. Derive the seller
+        region from the first shipping rate (e.g. US_CON → US, GB → GB,
+        XX → Worldwide); fall back to the shop address if present."""
+        address = (item.get("shop") or {}).get("address") or {}
+        parts = [address.get("locality", ""), address.get("region", ""), address.get("country_code", "")]
+        joined = ", ".join(p for p in parts if p)
+        if joined:
+            return joined
+        rates = (item.get("shipping") or {}).get("rates") or []
+        for rate in rates:
+            code = str((rate or {}).get("region_code", "")).upper()
+            if code:
+                return "Worldwide" if code == "XX" else code.split("_")[0]
+        return "Unknown"

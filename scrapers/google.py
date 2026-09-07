@@ -1,42 +1,95 @@
 """
-Google Custom Search scraper.
-Catches listings on ALL platforms not covered by direct APIs:
-Kleinanzeigen, Leboncoin, Subito, Wallapop, Marktplaats, Catawiki,
-Tarisio, Mercari, Yahoo Japan, Gumtree, Craigslist, Reddit, forums, etc.
+Google Custom Search scraper — catches listings on every platform we cannot
+reach directly (anti-bot / geo-blocked from a European datacenter: Facebook
+Marketplace, OfferUp, Mercari US, Etsy, Guitar Center, Kleinanzeigen, ...).
 
-Setup: https://programmablesearchengine.google.com (free: 100 queries/day)
+Quota: 100 queries/day, reset at midnight Pacific. Both scheduled runs
+(09:00 + 21:00 UTC) fall in the same quota day, so each run spends at most
+Config.GOOGLE_QUERIES_PER_RUN (default 48).
+
+Per run:
+  * GLOBAL_QUERIES — no site filter, dateRestrict=w2, sorted by date: catches
+    anything fresh anywhere on the web.
+  * a rotating slice of the (keyword × site-group) MATRIX; a cursor stored in
+    SQLite makes consecutive runs continue where the previous stopped, so the
+    whole matrix is covered every ~2 runs.
+
+NOTE: Google retires this API on 2027-01-01 (already closed to new customers).
 """
 
 import httpx
 import logging
-import sqlite3
 from datetime import datetime, timedelta
 from scrapers.base import BaseScraper
 from config import Config
+from database import connect
 
 log = logging.getLogger(__name__)
 
 GOOGLE_API = "https://www.googleapis.com/customsearch/v1"
 
-# Sites to search via Google (covers your full list)
-SITE_GROUPS = [
-    # Global marketplaces
-    "site:reverb.com OR site:ebay.com OR site:ebay.de OR site:ebay.co.uk OR site:ebay.fr OR site:ebay.it OR site:ebay.es OR site:ebay.com.au OR site:ebay.pl",
-    "site:facebook.com/marketplace OR site:craigslist.org OR site:mercari.com OR site:offerup.com",
-    "site:gumtree.com OR site:kijiji.ca OR site:carousell.com",
-    "site:yahoo.co.jp OR site:rakuten.co.jp",
-    # European classifieds
-    "site:kleinanzeigen.de OR site:leboncoin.fr OR site:subito.it OR site:wallapop.com OR site:marktplaats.nl",
-    "site:willhaben.at OR site:ricardo.ch OR site:blocket.se OR site:finn.no OR site:tori.fi OR site:allegro.pl",
-    # Music marketplaces
-    "site:audiofanzine.com OR site:zikinf.com OR site:mercatinomusicale.com OR site:sweetwater.com",
-    "site:guitarcenter.com OR site:thomann.de OR site:gear4music.com OR site:chicagomusicexchange.com",
-    # Auctions
-    "site:catawiki.com OR site:invaluable.com OR site:hibid.com OR site:bonhams.com OR site:sothebys.com",
-    "site:tarisio.com",
-    # Forums & communities
-    "site:maestronet.com OR site:violinist.com OR site:reddit.com OR site:thegearpage.net OR site:talkbass.com",
+GLOBAL_QUERIES = [
+    "Zeta electric violin",
+    "Zeta Strados violin",
+    "Zeta violin for sale",
+    "Zeta Jazz Fusion violin",
+    "violino elettrico Zeta OR violon électrique Zeta OR violín eléctrico Zeta OR Zeta Geige OR Zeta viool",
+    "Zetta violin OR Zeta JV44 OR Zeta SV24 OR Zeta JLP violin",
 ]
+
+MATRIX_KEYWORDS = [
+    "Zeta violin",
+    "Zeta electric violin",
+    "Zeta Strados",
+    "Zeta Jazz Fusion",
+    "Zeta JV44 OR Zeta SV24 OR Zeta JLP",
+    "Zetta violin OR Zeta violino OR Zeta violon OR Zeta Geige OR Zeta viool",
+]
+
+SITE_GROUPS = [
+    # USA — general classifieds & consumer marketplaces (all blocked from EU IPs)
+    "site:craigslist.org OR site:offerup.com OR site:mercari.com OR site:facebook.com/marketplace "
+    "OR site:shopgoodwill.com OR site:etsy.com OR site:bonanza.com OR site:5miles.com",
+    # USA — music retail (used gear) & violin specialists
+    "site:guitarcenter.com OR site:sweetwater.com OR site:samash.com OR site:musicgoround.com "
+    "OR site:chicagomusicexchange.com OR site:electricviolinshop.com OR site:fiddlershop.com OR site:elderly.com",
+    # Auctions & estate sales
+    "site:hibid.com OR site:liveauctioneers.com OR site:invaluable.com OR site:proxibid.com "
+    "OR site:estatesales.net OR site:catawiki.com OR site:tarisio.com OR site:bonhams.com",
+    # Global marketplaces
+    "site:reverb.com OR site:ebay.com OR site:ebay.co.uk OR site:ebay.de OR site:ebay.fr "
+    "OR site:ebay.it OR site:ebay.es OR site:ebay.ca",
+    # UK / CA / AU / NZ / SEA
+    "site:gumtree.com OR site:gumtree.com.au OR site:kijiji.ca OR site:preloved.co.uk "
+    "OR site:carousell.com OR site:trademe.co.nz OR site:ebay.com.au OR site:donedeal.ie",
+    # DE / AT / CH / NL / BE
+    "site:kleinanzeigen.de OR site:willhaben.at OR site:ricardo.ch OR site:tutti.ch "
+    "OR site:marktplaats.nl OR site:2dehands.be OR site:2ememain.be OR site:anibis.ch",
+    # FR / IT / ES / PT
+    "site:leboncoin.fr OR site:subito.it OR site:wallapop.com OR site:milanuncios.com "
+    "OR site:olx.pt OR site:mercatinomusicale.com OR site:zikinf.com OR site:audiofanzine.com",
+    # Nordics / PL / CZ
+    "site:blocket.se OR site:finn.no OR site:tori.fi OR site:dba.dk "
+    "OR site:allegro.pl OR site:olx.pl OR site:bazos.cz OR site:sbazar.cz",
+    # Japan / Asia
+    "site:auctions.yahoo.co.jp OR site:jp.mercari.com OR site:rakuten.co.jp OR site:jmty.jp "
+    "OR site:digimart.net OR site:j-guitar.com OR site:carousell.sg OR site:bunjang.co.kr",
+    # Forums & communities
+    "site:maestronet.com OR site:violinist.com OR site:reddit.com OR site:thegearpage.net "
+    "OR site:talkbass.com OR site:fiddlehangout.com OR site:gearspace.com OR site:vi-control.net",
+    # Central / Eastern Europe & Turkey (Romania deliberately excluded)
+    "site:jofogas.hu OR site:hardverapro.hu OR site:olx.bg OR site:kupujemprodajem.com "
+    "OR site:njuskalo.hr OR site:bolha.com OR site:avito.ru OR site:sahibinden.com",
+    # Latin America / Africa
+    "site:mercadolibre.com.ar OR site:mercadolibre.com.mx OR site:mercadolivre.com.br "
+    "OR site:olx.com.br OR site:gumtree.co.za OR site:adverts.ie OR site:mudah.my OR site:olx.in",
+]
+
+
+def _db():
+    conn = connect()
+    conn.execute("CREATE TABLE IF NOT EXISTS scraper_runs (scraper TEXT PRIMARY KEY, last_run TEXT)")
+    return conn
 
 
 class GoogleScraper(BaseScraper):
@@ -46,159 +99,154 @@ class GoogleScraper(BaseScraper):
         self.api_key = api_key
         self.cse_id = cse_id
 
+    def is_configured(self) -> bool:
+        return bool(self.api_key and self.cse_id)
+
+    # --- quota guard ------------------------------------------------------
     def _should_run(self) -> bool:
-        """Check if enough time has passed since last Google run."""
         try:
-            conn = sqlite3.connect("zeta_listings.db")
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS scraper_runs (
-                    scraper TEXT PRIMARY KEY,
-                    last_run TEXT
-                )
-            """)
-            cur = conn.execute(
-                "SELECT last_run FROM scraper_runs WHERE scraper = 'google'"
-            )
-            row = cur.fetchone()
+            conn = _db()
+            row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper = 'google'").fetchone()
             conn.close()
             if row:
                 last_run = datetime.fromisoformat(row[0])
-                if datetime.utcnow() - last_run < timedelta(hours=10):
-                    log.info("Google CSE: skipping — last run was less than 10h ago")
+                if datetime.utcnow() - last_run < timedelta(hours=Config.GOOGLE_GUARD_HOURS):
+                    log.info(f"Google CSE: skipping — last run < {Config.GOOGLE_GUARD_HOURS}h ago")
                     return False
         except Exception as e:
             log.warning(f"Google quota guard check failed: {e}")
         return True
 
     def _mark_run(self) -> None:
-        """Record that Google search ran successfully."""
         try:
-            conn = sqlite3.connect("zeta_listings.db")
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS scraper_runs (
-                    scraper TEXT PRIMARY KEY,
-                    last_run TEXT
-                )
-            """)
-            conn.execute(
-                "INSERT OR REPLACE INTO scraper_runs (scraper, last_run) VALUES (?, ?)",
-                ("google", datetime.utcnow().isoformat()),
-            )
+            conn = _db()
+            conn.execute("INSERT OR REPLACE INTO scraper_runs VALUES ('google', ?)",
+                         (datetime.utcnow().isoformat(),))
             conn.commit()
             conn.close()
         except Exception as e:
             log.warning(f"Google quota guard mark failed: {e}")
 
+    def _get_cursor(self) -> int:
+        try:
+            conn = _db()
+            row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper = 'google_cursor'").fetchone()
+            conn.close()
+            return int(row[0]) if row else 0
+        except Exception as e:
+            log.warning(f"Google cursor read failed: {e}")
+            return 0
+
+    def _set_cursor(self, value: int) -> None:
+        try:
+            conn = _db()
+            conn.execute("INSERT OR REPLACE INTO scraper_runs VALUES ('google_cursor', ?)", (str(value),))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            log.warning(f"Google cursor write failed: {e}")
+
+    # --- planning ----------------------------------------------------------
+    def plan_queries(self, cursor: int) -> tuple:
+        """Return (list of (q, extra_params), next_cursor)."""
+        budget = max(1, Config.GOOGLE_QUERIES_PER_RUN)
+        plan = [(q, {"dateRestrict": "w2", "sort": "date"}) for q in GLOBAL_QUERIES][:budget]
+        matrix = [f"{kw} {group}" for kw in MATRIX_KEYWORDS for group in SITE_GROUPS]
+        remaining = budget - len(plan)
+        n = len(matrix)
+        for i in range(min(remaining, n)):
+            plan.append((matrix[(cursor + i) % n], {}))
+        next_cursor = (cursor + min(remaining, n)) % n if n else 0
+        return plan, next_cursor
+
+    # --- search ------------------------------------------------------------
     async def search(self) -> list:
         if not self._should_run():
             return []
-
         if not self.api_key or not self.cse_id:
             log.warning("Google API key or CSE ID not set — skipping Google search.")
             return []
 
         results = []
         seen_ids = set()
-
-        # Primary keywords (most specific first to save API quota)
-        primary_keywords = [
-            "Zeta electric violin",
-            "Zeta Strados violin",
-            "Zeta JV44 violin",
-            "Zeta SV24 violin",
-            "Zeta Jazz Fusion violin",
-            "Zeta EV44 violin",
-            "Zeta violin for sale",
-            "Zetta violin for sale",
-            "violino elettrico Zeta",
-            "violon électrique Zeta",
-            "violín eléctrico Zeta",
-            "Zeta Geige kaufen",
-            "Zeta violin achat",
-        ]
+        cursor = self._get_cursor()
+        plan, next_cursor = self.plan_queries(cursor)
+        log.info(f"Google CSE: {len(plan)} queries this run (matrix cursor {cursor} → {next_cursor})")
 
         async with httpx.AsyncClient(timeout=20) as client:
-            # Prioritize groups that include blocked/hard-to-scrape platforms.
-            prioritized_groups = [
-                SITE_GROUPS[1],  # facebook/craigslist/mercari
-                SITE_GROUPS[4],  # kleinanzeigen/leboncoin/subito/wallapop/marktplaats
-                SITE_GROUPS[5],  # willhaben/ricardo/blocket/finn/tori/allegro
-                SITE_GROUPS[0],
-                SITE_GROUPS[2],
-            ]
+            for q, extra in plan:
+                try:
+                    params = {"key": self.api_key, "cx": self.cse_id, "q": q, "num": 10, **extra}
+                    resp = await client.get(GOOGLE_API, params=params)
+                    if resp.status_code in (429, 403):
+                        log.warning(f"Google CSE HTTP {resp.status_code} (quota?) — stopping: {resp.text[:200]!r}")
+                        break
+                    if resp.status_code != 200:
+                        log.warning(f"Google CSE HTTP {resp.status_code} for '{q[:60]}': {resp.text[:200]!r}")
+                        continue
 
-            for kw in primary_keywords:
-                for site_group in prioritized_groups:
-                    try:
-                        query = f"{kw} {site_group}"
-                        params = {
-                            "key": self.api_key,
-                            "cx": self.cse_id,
-                            "q": query,
-                            "num": 10,
-                        }
-                        resp = await client.get(GOOGLE_API, params=params)
-                        if resp.status_code == 429:
-                            log.warning("Google quota exceeded for today.")
-                            return results
-                        if resp.status_code != 200:
+                    items = resp.json().get("items", [])
+                    self.fetched += len(items)
+                    for item in items:
+                        url = item.get("link", "")
+                        unique_id = self._make_id("google", url)
+                        if not url or unique_id in seen_ids:
+                            continue
+                        seen_ids.add(unique_id)
+
+                        title = item.get("title", "")
+                        snippet = item.get("snippet", "")
+                        pagemap = item.get("pagemap", {}) or {}
+
+                        if self._is_excluded(title):
+                            continue
+                        if not self._year_in_range(title + " " + snippet):
                             continue
 
-                        data = resp.json()
-                        items = data.get("items", [])
+                        price = self._extract_price(pagemap, snippet)
+                        if price and not self._price_in_range(price):
+                            continue
+                        location = self._extract_location(snippet)
+                        if self._is_excluded_location(location):
+                            continue
 
-                        for item in items:
-                            url = item.get("link", "")
-                            unique_id = self._make_id("google", url)
+                        image_url = ""
+                        for key in ("cse_image", "cse_thumbnail"):
+                            imgs = pagemap.get(key) or []
+                            if imgs and isinstance(imgs[0], dict) and imgs[0].get("src"):
+                                image_url = imgs[0]["src"]
+                                break
 
-                            if unique_id in seen_ids:
-                                continue
-                            seen_ids.add(unique_id)
+                        results.append({
+                            "id": unique_id,
+                            "platform": self._extract_platform(url),
+                            "title": title,
+                            "price": price or "See listing",
+                            "location": location or "Unknown",
+                            "url": url,
+                            "description": snippet[:300],
+                            "image_url": image_url,
+                            "relevance_score": self._relevance_score(title, snippet),
+                        })
+                except Exception as e:
+                    log.warning(f"Google search '{q[:60]}' error: {e}")
 
-                            title = item.get("title", "")
-                            snippet = item.get("snippet", "")
-                            full_text = title + " " + snippet
-
-                            if self._is_excluded(full_text):
-                                continue
-                            if not self._year_in_range(full_text):
-                                continue
-
-                            # Extract price from snippet if present
-                            price = self._extract_price(snippet)
-                            if price and not self._price_in_range(price):
-                                continue
-
-                            # Extract location from snippet
-                            location = self._extract_location(snippet)
-                            if self._is_excluded_location(location):
-                                continue
-
-                            platform = self._extract_platform(url)
-                            score = self._relevance_score(title, snippet)
-
-                            results.append({
-                                "id": unique_id,
-                                "platform": platform,
-                                "title": title,
-                                "price": price or "See listing",
-                                "location": location or "Unknown",
-                                "url": url,
-                                "description": snippet[:300],
-                                "relevance_score": score,
-                            })
-
-                    except Exception as e:
-                        log.warning(f"Google search '{kw}' error: {e}")
-
+        self._set_cursor(next_cursor)
         self._mark_run()
+        log.info(f"Google CSE: {len(results)} listings found")
         return results
 
-    def _extract_price(self, text: str) -> str:
+    # --- extraction helpers -------------------------------------------------
+    def _extract_price(self, pagemap: dict, text: str) -> str:
         import re
+        for key in ("offer", "product"):
+            for entry in pagemap.get(key) or []:
+                if isinstance(entry, dict) and entry.get("price"):
+                    cur = entry.get("pricecurrency") or entry.get("priceCurrency") or ""
+                    return f"{entry['price']} {cur}".strip()
         patterns = [
             r"[\$€£¥]\s?[\d,]+(?:\.\d{2})?",
-            r"[\d,]+(?:\.\d{2})?\s?(?:USD|EUR|GBP|JPY|CHF|SEK|NOK|PLN)",
+            r"[\d,]+(?:\.\d{2})?\s?(?:USD|EUR|GBP|JPY|CHF|SEK|NOK|PLN|CAD|AUD)\b",
         ]
         for p in patterns:
             m = re.search(p, text, re.IGNORECASE)
@@ -207,17 +255,15 @@ class GoogleScraper(BaseScraper):
         return ""
 
     def _extract_location(self, text: str) -> str:
-        # Simple heuristic — look for country/city mentions
         common = ["USA", "UK", "Germany", "France", "Italy", "Japan", "Australia",
                   "Canada", "Netherlands", "Spain", "Austria", "Switzerland", "Poland"]
+        low = text.lower()
         for loc in common:
-            if loc.lower() in text.lower():
+            if loc.lower() in low:
                 return loc
         return ""
 
     def _extract_platform(self, url: str) -> str:
         import re
         m = re.search(r"(?:https?://)?(?:www\.)?([^/]+)", url)
-        if m:
-            return m.group(1).replace("www.", "")
-        return "Unknown"
+        return m.group(1) if m else "Unknown"

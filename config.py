@@ -1,99 +1,105 @@
 """
 Configuration — all values loaded from environment variables.
-Copy .env.example to .env and fill in your keys.
+Copy env.example to .env and fill in your keys.
 """
 
 import os
+from datetime import datetime
+
+
+def _bool(name: str, default: str) -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 
 class Config:
     # --- Telegram ---
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+    # Send the "no new listings" message after every cycle (true) or never (false)
+    SEND_NO_CHANGES = _bool("SEND_NO_CHANGES", "true")
+    # Attach the listing photo (sendPhoto) when the source provides one
+    SEND_PHOTOS = _bool("SEND_PHOTOS", "true")
 
-    # --- eBay ---
-    EBAY_APP_ID = os.getenv("EBAY_APP_ID", "")
+    # --- HTTP server ---
+    PORT = int(os.getenv("PORT", "8080"))
+    # If set, POST /search requires header X-Search-Token or ?token=
+    SEARCH_TOKEN = os.getenv("SEARCH_TOKEN", "")
+
+    # --- Storage ---
+    # Point at a Railway volume (e.g. /data/zeta_listings.db) to survive deploys.
+    DB_PATH = os.getenv("DB_PATH", "zeta_listings.db")
 
     # --- eBay Browse API (OAuth2) ---
+    EBAY_APP_ID = os.getenv("EBAY_APP_ID", "")
     EBAY_CLIENT_ID = os.getenv("EBAY_CLIENT_ID", os.getenv("EBAY_APP_ID", ""))
     EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "")
 
-    # --- Google Custom Search ---
+    # --- Google Custom Search (retires 2027-01-01) ---
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
     GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
+    # Free quota is 100/day and resets at midnight Pacific; with two runs per
+    # day each run may spend at most this many queries.
+    GOOGLE_QUERIES_PER_RUN = int(os.getenv("GOOGLE_QUERIES_PER_RUN", "48"))
+    # Do not run Google again if the previous run was less than N hours ago
+    # (protects the quota on container restarts).
+    GOOGLE_GUARD_HOURS = int(os.getenv("GOOGLE_GUARD_HOURS", "10"))
 
-    # --- Schedule ---
-    SEARCH_HOUR = int(os.getenv("SEARCH_HOUR", "9"))  # 9:00 UTC = 12:00 Romania
+    # --- Brave Search API (Google replacement; $5 monthly credit ≈ 1000 queries) ---
+    BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
+    # 16 × 2 runs × 30 days ≈ 960 queries/month
+    BRAVE_QUERIES_PER_RUN = int(os.getenv("BRAVE_QUERIES_PER_RUN", "16"))
+    BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "10"))
+
+    # --- US egress proxy (http://user:pass@host:port) for sites that block
+    # European datacenter IPs: Guitar Center, Facebook Marketplace, ... ---
+    US_PROXY_URL = os.getenv("US_PROXY_URL", "")
+
+    # --- Schedule (UTC hours, comma separated). 9 = 12:00 Romania ---
+    SEARCH_HOURS = os.getenv("SEARCH_HOURS", os.getenv("SEARCH_HOUR", "9") + ",21")
 
     # --- Filters ---
     MIN_PRICE = float(os.getenv("MIN_PRICE", "0"))
     MAX_PRICE = float(os.getenv("MAX_PRICE", "99999"))
     CONDITION = os.getenv("CONDITION", "all")  # "new", "used", "all"
 
-    # --- All Zeta keywords ---
-    KEYWORDS = [
-        # Model names
-        "Zeta violin", "Zeta electric violin", "Zeta Strados", "Zeta Jazz Fusion",
-        "Zeta JLP", "Zeta SV24", "Zeta SV25", "Zeta JV44", "Zeta JV45",
-        "Zeta EV25", "Zeta EV44", "Zeta CV44", "Zeta SV43", "Zeta Strados Legacy",
-        "Zeta Jean-Luc Ponty", "Zeta Acoustic-Pro", "Zeta Jazz Classic", "Zeta Jazz Modern",
-        "Zeta MIDI violin", "Zeta Music violin", "ZetaMusic violin",
-        # Misspellings
-        "Zetta violin", "Zeta violine", "Zeta violon", "Zeta violino", "Zeta viool",
-        "Zetta electric violin", "Zeta violijn",
-        # German
-        "Zeta Geige", "elektrische Geige Zeta",
-        # French
-        "violon électrique Zeta",
-        # Italian
-        "violino elettrico Zeta",
-        # Spanish
-        "violín eléctrico Zeta",
-        # Polish
-        "Zeta skrzypce",
-        # Deep search
-        "Strados violin", "Jazz Fusion violin",
-    ]
-
-    # Keywords to exclude (sold/ended listings)
-    EXCLUDE_KEYWORDS = ["SOLD", "ENDED", "EXPIRED", "OUT OF STOCK", "sold out"]
-
-    # Excluded countries/regions
+    # Excluded countries/regions (owner is in Romania, not buying local)
     EXCLUDED_LOCATIONS = ["Romania"]
     EXCLUDED_COUNTRY_CODES = ["RO"]
 
     # --- Year filter ---
-    # MIN_YEAR = manufacture year lower bound (Zeta started ~1987)
-    # MAX_YEAR = upper bound for TEXT mentions — set to current year so a
-    # listing saying "bought in 2022" is NOT dropped by _year_in_range().
-    # Zeta violins were manufactured up to ~2014 but listings appear any year.
+    # MIN_YEAR = manufacture year lower bound (Zeta started ~1987).
+    # MAX_YEAR = upper bound for TEXT mentions. Defaults to NEXT year so that
+    # "bought in 2027" is never dropped once the calendar turns.
     MIN_YEAR = int(os.getenv("MIN_YEAR", "1980"))
-    MAX_YEAR = int(os.getenv("MAX_YEAR", "2026"))
+    MAX_YEAR = int(os.getenv("MAX_YEAR", str(datetime.utcnow().year + 1)))
+
+    # --- Alerts ---
+    # Re-alert a known listing when its price drops by at least this percent
+    PRICE_DROP_PCT = float(os.getenv("PRICE_DROP_PCT", "15"))
+    # Warn on Telegram when a configured scraper fetched 0 items for N cycles in a row
+    WATCHDOG_ZERO_STREAK = int(os.getenv("WATCHDOG_ZERO_STREAK", "3"))
 
     # --- Runtime hardening ---
     SCRAPER_TIMEOUT_SEC = int(os.getenv("SCRAPER_TIMEOUT_SEC", "900"))
     SCRAPER_RETRIES = int(os.getenv("SCRAPER_RETRIES", "1"))
     SCRAPER_CONCURRENCY = int(os.getenv("SCRAPER_CONCURRENCY", "4"))
 
-    # --- Reddit API (praw) ---
+    # --- Reddit API (praw) — optional, scraper skips if unset ---
     REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
     REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
     REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "ZetaViolinHunter/1.0")
 
-    # --- Reverb API token (optional but recommended — Reverb now requires auth) ---
-    # Create a free account at reverb.com → Account Settings → Apps → Personal Access Token
-    # Scope: public. Without this, Reverb API returns 401 and scraper returns 0 results.
+    # --- Reverb API token — OPTIONAL. The API works without it when a browser
+    # User-Agent is sent; a token only raises rate limits. ---
     REVERB_API_TOKEN = os.getenv("REVERB_API_TOKEN", "")
 
-    # --- OpenAI API (kept for reference, AI re-verification removed from pipeline) ---
+    # --- OpenAI API (kept for reference, AI re-verification removed) ---
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-    # --- Yahoo Japan Auctions API (free, required for Yahoo JP scraper) ---
-    # Register at: https://developer.yahoo.co.jp/webapi/auctions/
-    # Free Yahoo Japan account required. Set permitted URL to * or your Railway URL.
-    YAHOO_JP_APP_ID = os.getenv("YAHOO_JP_APP_ID", "")
-
     # --- Craigslist coverage tuning ---
-    CRAIGSLIST_CONCURRENCY = int(os.getenv("CRAIGSLIST_CONCURRENCY", "24"))
-    # 0 means "use all discovered US Craigslist cities"
+    # Internal request concurrency against sapi.craigslist.org (4-16)
+    CRAIGSLIST_CONCURRENCY = int(os.getenv("CRAIGSLIST_CONCURRENCY", "10"))
+    # 0 = all areas of the selected countries (413 US + ~55 CA)
     CRAIGSLIST_MAX_US_CITIES = int(os.getenv("CRAIGSLIST_MAX_US_CITIES", "0"))
+    # Craigslist country codes to crawl (from reference.craigslist.org/Areas)
+    CRAIGSLIST_COUNTRIES = os.getenv("CRAIGSLIST_COUNTRIES", "US,CA")

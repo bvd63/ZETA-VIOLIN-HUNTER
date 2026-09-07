@@ -38,6 +38,9 @@ KEYWORDS = [
 class RedditScraper(BaseScraper):
     name = "Reddit"
 
+    def is_configured(self) -> bool:
+        return bool(Config.REDDIT_CLIENT_ID and Config.REDDIT_CLIENT_SECRET)
+
     async def search(self) -> list:
         results = []
         seen_ids = set()

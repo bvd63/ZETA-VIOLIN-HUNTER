@@ -1,53 +1,63 @@
 """
-Craigslist scraper — HTML + JSON-LD based.
+Craigslist scraper — internal JSON search API ("sapi") across ALL areas.
 
-Craigslist removed RSS feeds ~2020. This scraper fetches standard HTML
-search pages and extracts listings via:
-  1. JSON-LD structured data (<script type="application/ld+json">) — primary
-  2. New 2023 CSS selectors (div.cl-search-result) — fallback
+Why (verified 2026-09-07):
+  * RSS is gone (403 "blocked"), geo.craigslist.org/iso/us lists only "www",
+    search-page HTML is JS-rendered and its JSON-LD items have no URL.
+  * The frontend itself calls
+      https://sapi.craigslist.org/web/v8/postings/search/full
+        ?batch={AreaID}-0-360-0-0&cc=US&lang=en&query=...&searchPath=msa|sss
+    which answers plain JSON, ~15 ms per call, no blocking observed at
+    concurrency 10 (826 calls in 13 s).
+  * Area IDs come from the official list https://reference.craigslist.org/Areas
+    (413 US + 100+ CA areas).
 
-Searches ~400 US cities discovered from geo.craigslist.org.
+Item format (compact arrays):
+  [postingIdOffset, postedOffset, categoryId, price, "locIdx:descIdx:nbIdx~lat~lon",
+   imgKey, [13, token], [4, "3:imgKey", ...], [6, slug], [10, "$price"], title]
+  postingId  = decode.minPostingId  + item[0]
+  posted_ts  = decode.minPostedDate + item[1]
+  canonical URL = https://www.craigslist.org/view/d/{slug}/{token}
 """
 
+import asyncio
 import httpx
 import logging
-import asyncio
-import re
-import json
+from datetime import datetime, timezone
 from bs4 import BeautifulSoup
-from scrapers.base import BaseScraper
+from scrapers.base import BaseScraper, BROWSER_UA
 from config import Config
+from filters import has_zeta_signal
 
 log = logging.getLogger(__name__)
 
-USA_GEO_INDEX = "https://geo.craigslist.org/iso/us"
-STATIC_USA_FALLBACK = [
-    "newyork", "losangeles", "chicago", "sfbay", "seattle",
-    "boston", "miami", "austin", "denver", "portland",
-    "philadelphia", "atlanta", "dallas", "houston", "phoenix",
+SAPI_URL = "https://sapi.craigslist.org/web/v8/postings/search/full"
+AREAS_URL = "https://reference.craigslist.org/Areas"
+
+# (AreaID, hostname, country) fallback if the reference list is unreachable.
+STATIC_AREAS = [
+    (1, "sfbay", "US"), (2, "seattle", "US"), (3, "newyork", "US"), (4, "boston", "US"),
+    (7, "losangeles", "US"), (11, "chicago", "US"), (12, "sacramento", "US"),
+    (43, "fresno", "US"), (96, "modesto", "US"),
 ]
 
-KEYWORDS = [
-    "Zeta violin",
-    "Zeta electric violin",
-    "Zeta Strados",
-    "Zeta JV44",
-    "Zeta SV24",
-    "Zeta EV44",
-    "Zeta JLP",
-    "Zetta violin",
+# (query, searchPath). "msa" = musical instruments (all), "sss" = all for sale.
+# Broad single-word queries + local Zeta-signal filter beat many narrow queries:
+# fewer requests, and titles like "Zeta Strados 5-string" are still caught.
+QUERIES = [
+    ("zeta", "msa"),
+    ("strados", "msa"),
+    ("zeta violin", "sss"),
 ]
 
-SEARCH_CATEGORIES = ["msa", "sss"]
+# Max posting pages fetched per cycle for full descriptions
+MAX_ENRICH = 20
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": BROWSER_UA,
+    "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.craigslist.org/",
 }
 
 
@@ -55,188 +65,171 @@ class CraigslistScraper(BaseScraper):
     name = "Craigslist"
 
     async def search(self) -> list:
-        results = []
+        results: list = []
         seen_ids: set = set()
 
-        async with httpx.AsyncClient(
-            timeout=12, follow_redirects=True, headers=HEADERS
-        ) as client:
-            craigslist_cities = await self._load_usa_city_hosts(client)
-
-            sem_size = max(10, min(40, Config.CRAIGSLIST_CONCURRENCY))
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers=HEADERS) as client:
+            areas = await self._load_areas(client)
             if Config.CRAIGSLIST_MAX_US_CITIES > 0:
-                craigslist_cities = craigslist_cities[:Config.CRAIGSLIST_MAX_US_CITIES]
+                areas = areas[:Config.CRAIGSLIST_MAX_US_CITIES]
 
-            sem = asyncio.Semaphore(sem_size)
-            batch_size = max(50, sem_size * 8)
+            sem = asyncio.Semaphore(max(4, min(16, Config.CRAIGSLIST_CONCURRENCY)))
+            work = [(area, q, path) for area in areas for q, path in QUERIES]
+            log.info(f"Craigslist: {len(areas)} areas × {len(QUERIES)} queries = {len(work)} requests")
 
-            async def fetch_city_keyword(city: str, kw: str, category: str) -> list:
-                city_results = []
-                try:
-                    async with sem:
-                        url = f"https://{city}.craigslist.org/search/{category}"
-                        params = {"query": kw, "sort": "date"}
-                        resp = await client.get(url, params=params)
-                    if resp.status_code != 200:
-                        return city_results
-
-                    for item_url, title, price, description in self._parse_listings(
-                        resp.text, city
-                    ):
-                        unique_id = self._make_id("craigslist", item_url)
-                        if unique_id in seen_ids:
-                            continue
-                        seen_ids.add(unique_id)
-
-                        if self._is_excluded(title):
-                            continue
-                        if price and not self._price_in_range(price):
-                            continue
-                        if not self._year_in_range(title):
-                            continue
-
-                        score = self._relevance_score(title, description)
-                        city_results.append({
-                            "id": unique_id,
-                            "platform": f"Craigslist ({city})",
-                            "title": title,
-                            "price": price or "N/A",
-                            "location": city.title(),
-                            "url": item_url,
-                            "description": description[:300],
-                            "relevance_score": score,
+            async def fetch(area: tuple, query: str, path: str) -> list:
+                area_id, host, country = area
+                async with sem:
+                    try:
+                        resp = await client.get(SAPI_URL, params={
+                            "batch": f"{area_id}-0-360-0-0",
+                            "cc": country,
+                            "lang": "en",
+                            "query": query,
+                            "searchPath": path,
                         })
-                except Exception as e:
-                    log.warning(f"Craigslist {city} '{kw}' error: {e}")
-                return city_results
-
-            work_items = [
-                (city, kw, cat)
-                for city in craigslist_cities
-                for kw in KEYWORDS
-                for cat in SEARCH_CATEGORIES
-            ]
-
-            for i in range(0, len(work_items), batch_size):
-                chunk = work_items[i:i + batch_size]
-                tasks = [
-                    asyncio.create_task(fetch_city_keyword(city, kw, cat))
-                    for city, kw, cat in chunk
-                ]
-                chunk_results = await asyncio.gather(*tasks)
-                for batch in chunk_results:
-                    results.extend(batch)
-
-        return results
-
-    def _parse_listings(self, html: str, city: str) -> list:
-        """Parse listings from a Craigslist search results page.
-        Tries JSON-LD first (stable, structured), falls back to HTML selectors.
-        Returns list of (url, title, price, description) tuples.
-        """
-        parsed = self._parse_jsonld(html)
-        if not parsed:
-            parsed = self._parse_html(html, city)
-        return parsed
-
-    def _parse_jsonld(self, html: str) -> list:
-        """Extract listings from JSON-LD structured data embedded in the page.
-        Craigslist adds schema.org/ItemList or Product objects since 2023.
-        """
-        results = []
-        try:
-            soup = BeautifulSoup(html, "lxml")
-            for script in soup.find_all("script", type="application/ld+json"):
+                    except Exception as e:
+                        log.warning(f"Craigslist {host} '{query}' error: {e}")
+                        return []
+                if resp.status_code != 200:
+                    log.warning(f"Craigslist {host} '{query}' HTTP {resp.status_code}")
+                    return []
                 try:
-                    data = json.loads(script.string or "")
-                    if not isinstance(data, dict):
-                        continue
+                    data = resp.json().get("data", {})
+                except Exception as e:
+                    log.warning(f"Craigslist {host} '{query}' bad JSON: {e}")
+                    return []
+                return self._decode(data if isinstance(data, dict) else {}, host)
 
-                    # Collect candidate items from different schema shapes
-                    candidates = []
-                    dtype = data.get("@type", "")
-                    if dtype == "ItemList":
-                        candidates = data.get("itemListElement", [])
-                    elif dtype in ("Product", "Offer", "ListItem"):
-                        candidates = [data]
-
-                    for entry in candidates:
-                        # entry may be a ListItem wrapping the actual item
-                        item = entry.get("item", entry)
-                        url = item.get("url", "") or entry.get("url", "")
-                        name = item.get("name", "") or entry.get("name", "")
-                        if not url or not name:
+            batch_size = 200
+            for i in range(0, len(work), batch_size):
+                chunk = work[i:i + batch_size]
+                for decoded in await asyncio.gather(*[fetch(a, q, p) for a, q, p in chunk]):
+                    self.fetched += len(decoded)
+                    for item in decoded:
+                        if item["id"] in seen_ids:
                             continue
+                        seen_ids.add(item["id"])
+                        if not has_zeta_signal(item["title"]):
+                            continue
+                        if self._is_excluded(item["title"]):
+                            continue
+                        if item["price"] != "N/A" and not self._price_in_range(item["price"]):
+                            continue
+                        if not self._year_in_range(item["title"]):
+                            continue
+                        results.append(item)
 
-                        # Price from offers block
-                        price = ""
-                        offers = item.get("offers", {})
-                        if isinstance(offers, dict):
-                            p = offers.get("price", "")
-                            curr = offers.get("priceCurrency", "USD")
-                            if p:
-                                price = f"${p}" if curr == "USD" else f"{p} {curr}"
+            # The search API returns titles only. Fetch the posting page for the
+            # few Zeta-signal hits so filters can see the full description.
+            await asyncio.gather(*[self._enrich(client, item) for item in results[:MAX_ENRICH]])
+            for item in results:
+                item["relevance_score"] = self._relevance_score(item["title"], item.get("description", ""))
 
-                        description = item.get("description", "")
-                        results.append((url, name, price, description))
-
-                except (json.JSONDecodeError, AttributeError, TypeError):
-                    continue
-        except Exception as e:
-            log.debug(f"Craigslist JSON-LD parse error: {e}")
+        log.info(f"Craigslist: {len(results)} listings found")
         return results
 
-    def _parse_html(self, html: str, city: str) -> list:
-        """Fallback HTML parser using post-2023 Craigslist CSS selectors.
-        Old selectors (result-title, result-info) broke in the 2023 redesign.
-        New selectors: li.cl-search-result, a.posting-title, span.priceinfo.
-        """
-        results = []
+    async def _enrich(self, client: httpx.AsyncClient, item: dict) -> None:
         try:
-            soup = BeautifulSoup(html, "lxml")
-            items = soup.select("li.cl-search-result, div.cl-search-result")
-
-            for item in items:
-                anchor = item.select_one("a.posting-title, a.cl-app-anchor")
-                if not anchor:
-                    continue
-
-                url = anchor.get("href", "")
-                if not url:
-                    continue
-                if not url.startswith("http"):
-                    url = f"https://{city}.craigslist.org{url}"
-
-                # Title is usually in span.label inside the anchor
-                title_el = anchor.select_one("span.label")
-                title = (
-                    title_el.get_text(strip=True)
-                    if title_el
-                    else anchor.get_text(strip=True)
-                )
-                if not title:
-                    continue
-
-                price_el = item.select_one("span.priceinfo, .price")
-                price = price_el.get_text(strip=True) if price_el else ""
-
-                results.append((url, title, price, ""))
-        except Exception as e:
-            log.debug(f"Craigslist HTML parse error ({city}): {e}")
-        return results
-
-    async def _load_usa_city_hosts(self, client: httpx.AsyncClient) -> list:
-        try:
-            resp = await client.get(USA_GEO_INDEX)
+            resp = await client.get(item["url"], headers={**HEADERS, "Accept": "text/html,*/*;q=0.8"})
             if resp.status_code != 200:
-                return STATIC_USA_FALLBACK
+                return
+            soup = BeautifulSoup(resp.text, "lxml")
+            body = soup.select_one("#postingbody")
+            if body:
+                for junk in body.select(".print-information, .print-qrcode-container"):
+                    junk.decompose()
+                text = body.get_text(" ", strip=True).replace("QR Code Link to This Post", "").strip()
+                item["description"] = text[:300]
+            if not item.get("image_url"):
+                img = soup.select_one(".gallery img, .slide img, #thumbs img")
+                if img and img.get("src"):
+                    item["image_url"] = img["src"]
+        except Exception as e:
+            log.debug(f"Craigslist enrich error for {item.get('url', '')}: {e}")
 
-            hosts = set(re.findall(r"https?://([a-z0-9\-]+)\.craigslist\.org", resp.text))
-            hosts.discard("www")
-            hosts.discard("forums")
-            hosts.discard("blog")
-            if not hosts:
-                return STATIC_USA_FALLBACK
-            return sorted(hosts)
-        except Exception:
-            return STATIC_USA_FALLBACK
+    def _decode(self, data: dict, host: str) -> list:
+        """Turn sapi compact arrays into listing dicts (no filtering)."""
+        out = []
+        decode = data.get("decode")
+        if not isinstance(decode, dict):
+            return out
+        min_posting_id = decode.get("minPostingId", 0) or 0
+        min_posted = decode.get("minPostedDate", 0) or 0
+        locations = decode.get("locations") or []
+        descriptions = decode.get("locationDescriptions") or []
+
+        for it in data.get("items", []) or []:
+            if not isinstance(it, list) or len(it) < 3:
+                continue
+            title = it[-1] if isinstance(it[-1], str) else ""
+            if not title or not isinstance(it[0], int):
+                continue
+            posting_id = min_posting_id + it[0]
+            token = slug = price = image = ""
+            for x in it:
+                if isinstance(x, list) and x:
+                    if x[0] == 13 and len(x) > 1:
+                        token = str(x[1])
+                    elif x[0] == 6 and len(x) > 1:
+                        slug = str(x[1])
+                    elif x[0] == 10 and len(x) > 1:
+                        price = str(x[1])
+                    elif x[0] == 4 and len(x) > 1 and isinstance(x[1], str):
+                        key = x[1].split(":", 1)[-1]
+                        image = f"https://images.craigslist.org/{key}_600x450.jpg"
+            if not price and isinstance(it[3], (int, float)) and it[3]:
+                price = f"${it[3]}"
+
+            if token and slug:
+                url = f"https://www.craigslist.org/view/d/{slug}/{token}"
+            else:
+                continue
+
+            # Location: "locIdx:descIdx:nbIdx~lat~lon"
+            area_host, place = host, ""
+            try:
+                loc_idx, desc_idx = str(it[4]).split("~")[0].split(":")[:2]
+                loc = locations[int(loc_idx)]
+                if isinstance(loc, list) and len(loc) > 1:
+                    area_host = str(loc[1])
+                place = str(descriptions[int(desc_idx)]) if int(desc_idx) < len(descriptions) else ""
+            except Exception:
+                pass
+
+            posted = ""
+            if isinstance(it[1], int) and min_posted:
+                posted = datetime.fromtimestamp(min_posted + it[1], tz=timezone.utc).strftime("%Y-%m-%d")
+
+            out.append({
+                "id": self._make_id("craigslist", str(posting_id)),
+                "platform": f"Craigslist ({area_host})",
+                "title": title,
+                "price": price or "N/A",
+                "location": ", ".join(p for p in [place.title() if place else "", area_host] if p),
+                "url": url,
+                "description": "",
+                "date_posted": posted,
+                "image_url": image,
+                "relevance_score": 1,
+            })
+        return out
+
+    async def _load_areas(self, client: httpx.AsyncClient) -> list:
+        wanted = {c.strip().upper() for c in Config.CRAIGSLIST_COUNTRIES.split(",") if c.strip()}
+        try:
+            resp = await client.get(AREAS_URL)
+            if resp.status_code != 200:
+                log.warning(f"Craigslist areas list HTTP {resp.status_code} — using static fallback")
+                return STATIC_AREAS
+            areas = []
+            for a in resp.json():
+                country = str(a.get("Country", "")).upper()
+                if wanted and country not in wanted:
+                    continue
+                if a.get("AreaID") and a.get("Hostname"):
+                    areas.append((int(a["AreaID"]), str(a["Hostname"]), country))
+            return areas or STATIC_AREAS
+        except Exception as e:
+            log.warning(f"Craigslist areas list error: {e} — using static fallback")
+            return STATIC_AREAS
