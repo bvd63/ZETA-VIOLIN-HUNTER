@@ -136,20 +136,29 @@ class YahooAuctionsJPScraper(BaseScraper):
 
         # Primary: product cards
         for card in soup.select("li.Product, div.Product"):
-            a = card.select_one("a.Product__titleLink, a[href*='/jp/auction/']")
+            # The title link (with text); the image link comes first in the DOM.
+            a = card.select_one("a.Product__titleLink") or next(
+                (x for x in card.select("a[href*='/jp/auction/']") if x.get_text(strip=True)), None)
             if not a:
                 continue
             href = a.get("href", "")
             m = AUCTION_RX.search(href)
-            if not m:
+            auction_id = a.get("data-auction-id") or (m.group(1) if m else "")
+            if not auction_id:
                 continue
-            title = a.get("title") or a.get_text(" ", strip=True)
-            price_el = card.select_one(".Product__priceValue, .Product__price")
-            price = price_el.get_text(" ", strip=True) if price_el else ""
-            price = re.sub(r"\s+", "", price.split("円")[0]) + "円" if "円" in price else price
-            img = card.select_one("img")
-            image = (img.get("src") or img.get("data-src") or "") if img else ""
-            push(m.group(1), title, price, image, href.split("?")[0], card.get_text(" ", strip=True)[:400])
+            title = a.get("data-auction-title") or a.get("title") or a.get_text(" ", strip=True)
+            price = a.get("data-auction-price") or ""
+            if price:
+                price = f"{int(float(price)):,}円" if re.fullmatch(r"[\d.]+", price) else price
+            else:
+                price_el = card.select_one(".Product__priceValue, .Product__price")
+                price = price_el.get_text(" ", strip=True) if price_el else ""
+                price = re.sub(r"\s+", "", price.split("円")[0]) + "円" if "円" in price else price
+            image = a.get("data-auction-img") or ""
+            if not image:
+                img = card.select_one("img")
+                image = (img.get("src") or img.get("data-src") or "") if img else ""
+            push(auction_id, title, price, image, href.split("?")[0], card.get_text(" ", strip=True)[:400])
 
         # Fallback: any auction anchor
         if not out:
@@ -158,7 +167,7 @@ class YahooAuctionsJPScraper(BaseScraper):
                 title = a.get("title") or a.get_text(" ", strip=True)
                 if not m or len(title) < 4:
                     continue
-                parent = a.find_parent(["li", "div"]) or a
+                parent = a.find_parent("li") or a.find_parent("div") or a
                 text = parent.get_text(" ", strip=True)
                 pm = re.search(r"([\d,]+)\s*円", text)
                 img = parent.select_one("img") if parent else None
