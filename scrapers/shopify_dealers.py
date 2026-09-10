@@ -18,11 +18,13 @@ from filters import has_zeta_signal
 
 log = logging.getLogger(__name__)
 
-# (label, base url, country, used-collection handles)
+# (label, base url, country, used-collection handles, default condition)
+# Guitar Chimp sells ONLY used/vintage gear, so its products default to Used;
+# the other two mix new stock (default New) with trade-in collections.
 STORES = [
-    ("Electric Violin Shop (used)", "https://electricviolinshop.com", "USA", ["used"]),
-    ("StringWorks (pre-owned)", "https://www.stringworks.com", "USA", ["outlet-preowned-and-trade-in-deals"]),
-    ("Guitar Chimp", "https://guitarchimp.com", "USA", []),
+    ("Electric Violin Shop (used)", "https://electricviolinshop.com", "USA", ["used"], "New"),
+    ("StringWorks (pre-owned)", "https://www.stringworks.com", "USA", ["outlet-preowned-and-trade-in-deals"], "New"),
+    ("Guitar Chimp", "https://guitarchimp.com", "USA", [], "Used"),
 ]
 SEARCH_TERMS = ["zeta", "strados"]
 USED_RX = re.compile(r"\b(used|pre[\s\-]?owned|consign\w*|trade[\s\-]?in|b[\s\-]?stock|vintage|second[\s\-]?hand)\b", re.I)
@@ -39,7 +41,7 @@ class ShopifyDealersScraper(BaseScraper):
         seen_ids = set()
 
         async with self.make_client(headers=HEADERS) as client:
-            for label, base, country, collections in STORES:
+            for label, base, country, collections, default_condition in STORES:
                 products = []
                 for handle in collections:
                     try:
@@ -91,7 +93,7 @@ class ShopifyDealersScraper(BaseScraper):
                     elif p.get("price"):
                         price = f"{p['price']} USD"
                     used_hint = f"{title} {tags_text} {p.get('_collection', '')}"
-                    condition = "Used" if USED_RX.search(used_hint) else "New"
+                    condition = "Used" if USED_RX.search(used_hint) else default_condition
                     images = p.get("images") or []
                     image_url = ""
                     if images and isinstance(images[0], dict):

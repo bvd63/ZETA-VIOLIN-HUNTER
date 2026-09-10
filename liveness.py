@@ -19,17 +19,18 @@ log = logging.getLogger(__name__)
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-# Phrases that only appear on dead listing pages (multi-language).
+# Phrases that only appear on dead listing pages (multi-language). Generic
+# fragments ("has been sold", "no longer available", "sold out", "page not
+# found") were removed: live shop pages use them in sidebars ("similar items
+# that have been sold"), and a false "dead" verdict is expensive.
 DEAD_MARKERS = [
     # EN
-    "this listing has ended", "listing has ended", "this listing was ended", "listing ended",
-    "this listing is no longer available", "is no longer available", "no longer available",
-    "this item has been sold", "this item is sold", "item has sold", "has been sold",
-    "this ad has expired", "ad has expired", "this ad is no longer", "ad has been removed",
-    "this posting has expired", "posting has expired", "this posting has been deleted",
-    "this posting has been flagged", "page not found", "this page doesn't exist",
-    "we couldn't find that page", "auction has ended", "this auction has ended", "bidding has ended",
-    "this product is no longer available", "sold out",
+    "this listing has ended", "this listing was ended", "this listing is no longer available",
+    "this item has been sold", "this item is sold", "this item is no longer available",
+    "this ad has expired", "this ad is no longer available", "this ad has been removed",
+    "this posting has expired", "this posting has been deleted", "this posting has been flagged",
+    "this auction has ended", "bidding has ended", "this product is no longer available",
+    "this page doesn't exist", "we couldn't find that page",
     # FR
     "cette annonce n'est plus disponible", "n'est plus disponible", "annonce désactivée",
     # DE
@@ -69,20 +70,22 @@ def looks_dead(status_code: int, requested_url: str, final_url: str, text: str) 
     if status_code >= 400:
         return ""  # blocked / rate limited — can't tell, keep the listing
     try:
-        req_path = urlsplit(requested_url).path.rstrip("/")
-        fin_path = urlsplit(final_url).path.rstrip("/")
-        # A listing URL that redirects to the homepage or a search/category
-        # page means the item is gone.
-        if len(req_path) > 8 and (fin_path in ("", "/") or any(
-                seg in fin_path for seg in ("/search", "/marketplace", "/category", "/categories"))):
-            return "redirected away"
+        req_path = urlsplit(requested_url).path.rstrip("/").lower()
+        fin_path = urlsplit(final_url).path.rstrip("/").lower()
+        # Only a CHANGED path counts as a redirect. A listing URL that lands on
+        # the homepage or on a search/category landing page means the item is gone
+        # (facebook.com/marketplace/item/123 is unchanged → alive).
+        if fin_path != req_path and len(req_path) > 8:
+            if fin_path in ("", "/") or fin_path.startswith(("/search", "/category", "/categories")) \
+                    or fin_path in ("/marketplace", "/marketplace/"):
+                return "redirected away"
     except Exception:
         pass
     snippet = text[:200000]
     m = _DEAD_RX.search(snippet)
     if m:
-        if _LIVE_HINTS_RX.search(snippet[:60000]) and m.group(0).lower() in ("sold out", "no longer available"):
-            return ""  # generic phrase on an otherwise live shop page
+        if _LIVE_HINTS_RX.search(snippet[:60000]):
+            return ""  # buy/bid controls present → the page is a live listing
         return f"marker '{m.group(0)[:40]}'"
     return ""
 

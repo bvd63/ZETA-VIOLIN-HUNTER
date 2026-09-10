@@ -109,7 +109,11 @@ class CraigslistScraper(BaseScraper):
             batch_size = 200
             for i in range(0, len(work), batch_size):
                 chunk = work[i:i + batch_size]
-                for decoded in await asyncio.gather(*[fetch(a, q, p) for a, q, p in chunk]):
+                for decoded in await asyncio.gather(*[fetch(a, q, p) for a, q, p in chunk],
+                                                    return_exceptions=True):
+                    if isinstance(decoded, BaseException):
+                        log.warning(f"Craigslist batch item failed: {decoded}")
+                        continue
                     self.fetched += len(decoded)
                     for item in decoded:
                         if item["id"] in seen_ids:
@@ -133,11 +137,12 @@ class CraigslistScraper(BaseScraper):
                 async with enrich_sem:
                     await self._enrich(client, item)
 
-            await asyncio.gather(*[enrich(item) for item in to_enrich])
+            await asyncio.gather(*[enrich(item) for item in to_enrich], return_exceptions=True)
 
-            for item in definite + potential[:max(0, MAX_ENRICH - len(definite))]:
+            definite_ids = {item["id"] for item in definite}
+            for item in to_enrich:
                 text = f"{item['title']} {item.get('description', '')}"
-                if item not in definite and not has_zeta_signal(text):
+                if item["id"] not in definite_ids and not has_zeta_signal(text):
                     continue
                 if self._is_excluded(item["title"]):
                     continue
@@ -163,7 +168,7 @@ class CraigslistScraper(BaseScraper):
         descriptions = decode.get("locationDescriptions") or []
 
         for it in data.get("items", []) or []:
-            if not isinstance(it, list) or len(it) < 3:
+            if not isinstance(it, list) or len(it) < 5:
                 continue
             title = it[-1] if isinstance(it[-1], str) else ""
             if not title or not isinstance(it[0], int):
@@ -181,7 +186,7 @@ class CraigslistScraper(BaseScraper):
                     elif x[0] == 4 and len(x) > 1 and isinstance(x[1], str):
                         key = x[1].split(":", 1)[-1]
                         image = f"https://images.craigslist.org/{key}_600x450.jpg"
-            if not price and isinstance(it[3], (int, float)) and it[3]:
+            if not price and len(it) > 3 and isinstance(it[3], (int, float)) and it[3]:
                 price = f"${it[3]}"
             if not (token and slug):
                 continue

@@ -14,7 +14,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install httpx beautifulsoup4 lxml apscheduler aiohttp python-dotenv
-      - run: python -m py_compile main.py filters.py config.py scrapers/*.py
+      - run: python -m py_compile *.py scrapers/*.py tests/*.py
       - run: python -m tests.test_filters
       - run: python -m tests.test_trackers
       - run: python -m tests.test_dedup
+      - run: python -m tests.test_liveness

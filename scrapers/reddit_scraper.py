@@ -86,8 +86,9 @@ class RedditScraper(BaseScraper):
                                         time_filter="month",
                                         limit=25,
                                     ):
+                                        self.fetched += 1
                                         post_id = str(post.id)
-                                        unique_id = f"reddit_{post_id}"
+                                        unique_id = self._make_id("reddit", post_id)
 
                                         if unique_id in seen_ids:
                                             continue
@@ -98,13 +99,11 @@ class RedditScraper(BaseScraper):
                                         url = f"https://reddit.com{post.permalink}"
                                         flair = post.link_flair_text or ""
 
-                                        # Skip non-sale posts
-                                        full_text = f"{title} {body} {flair}".lower()
-                                        if any(skip in full_text for skip in [
-                                            "sold", "expired", "closed",
-                                            "no longer available",
-                                        ]):
+                                        # Skip posts flaired/titled as closed (whole words only)
+                                        import re as _re
+                                        if _re.search(r"\b(sold|expired|closed)\b", f"{title} {flair}", _re.I):
                                             continue
+                                        full_text = f"{title} {body} {flair}".lower()
 
                                         # Zeta check already done by keyword
                                         # search, but verify in title/body

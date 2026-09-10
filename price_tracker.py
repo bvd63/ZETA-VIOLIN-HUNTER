@@ -24,6 +24,9 @@ CURRENCY_TO_USD = {
     "DKK": 0.145,
     "PLN": 0.25,
     "JPY": 0.0067,
+    "RON": 0.22,
+    "CZK": 0.043,
+    "HUF": 0.0028,
 }
 
 
@@ -51,6 +54,52 @@ def parse_amount(text: str) -> "float | None":
         return float(raw)
     except ValueError:
         return None
+
+
+def detect_currency(price_str: str) -> str:
+    """ISO code guessed from symbols/codes in a price string (default USD)."""
+    upper = (price_str or "").upper()
+    for cur in ("USD", "EUR", "GBP", "CAD", "AUD", "CHF", "SEK", "NOK", "DKK", "PLN", "JPY", "RON", "CZK", "HUF"):
+        if re.search(r"\b" + cur + r"\b", upper):
+            return cur
+    if "€" in price_str:
+        return "EUR"
+    if "£" in price_str:
+        return "GBP"
+    if "¥" in price_str or "￥" in price_str or "円" in price_str:
+        return "JPY"
+    if "ZŁ" in upper or re.search(r"\bZL\b", upper):
+        return "PLN"
+    if "LEI" in upper:
+        return "RON"
+    if "KČ" in upper or "KC" == upper[-2:]:
+        return "CZK"
+    if "FT" == upper[-2:]:
+        return "HUF"
+    if "KR" in upper:
+        return "SEK"  # kr is ambiguous (SEK/NOK/DKK); scrapers pass ISO codes when they know
+    if "C$" in upper or "CA$" in upper:
+        return "CAD"
+    if "A$" in upper or "AU$" in upper:
+        return "AUD"
+    return "USD"
+
+
+def parse_price_usd(price_str: str) -> tuple:
+    """(price_usd, currency) using live rates, or (None, None)."""
+    if not price_str or price_str.strip() in ("N/A", "See post", "See listing", "See Description"):
+        return None, None
+    price_str = price_str.strip()
+    currency = detect_currency(price_str)
+    price_local = parse_amount(price_str)
+    if price_local is None:
+        return None, None
+    try:
+        from fx import to_usd  # live ECB rates, cached; static fallback inside
+        return to_usd(price_local, currency), currency
+    except Exception:
+        rate = CURRENCY_TO_USD.get(currency, 1.0)
+        return round(price_local * rate, 2), currency
 
 
 class PriceTracker:
@@ -87,39 +136,7 @@ class PriceTracker:
     def _parse_price(self, price_str: str) -> tuple:
         """Extract numeric price and currency from price string.
         Returns (price_usd, currency) or (None, None) if unparseable."""
-        if not price_str or price_str in ("N/A", "See post", "See listing"):
-            return None, None
-
-        price_str = price_str.strip()
-
-        currency = "USD"
-        upper = price_str.upper()
-        for cur in CURRENCY_TO_USD:
-            if re.search(r"\b" + cur + r"\b", upper):
-                currency = cur
-                break
-        if "€" in price_str:
-            currency = "EUR"
-        elif "£" in price_str:
-            currency = "GBP"
-        elif "¥" in price_str or "￥" in price_str or "円" in price_str:
-            currency = "JPY"
-        elif "KR" in upper and currency == "USD":
-            currency = "SEK"
-        elif "ZŁ" in upper or "ZL" in upper.replace(".", ""):
-            currency = "PLN"
-        elif "LEI" in upper:
-            currency = "RON"
-
-        price_local = parse_amount(price_str)
-        if price_local is None:
-            return None, None
-        try:
-            from fx import to_usd  # live ECB rates, cached; static fallback inside
-            return to_usd(price_local, currency), currency
-        except Exception:
-            rate = CURRENCY_TO_USD.get(currency, 1.0)
-            return round(price_local * rate, 2), currency
+        return parse_price_usd(price_str)
 
     def record_listing(self, listing: dict) -> dict:
         """Record a NEW listing's price and return price context

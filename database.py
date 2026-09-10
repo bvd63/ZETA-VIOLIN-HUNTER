@@ -1,6 +1,8 @@
 """
-SQLite database — seen listings (dedup), live-listing activity, alert log.
-Path comes from Config.DB_PATH (point it at a Railway volume to survive deploys).
+SQLite database — seen listings (dedup), live-listing activity, alert log,
+liveness cache. Path comes from Config.DB_PATH (point it at a Railway volume
+to survive deploys). WAL mode + busy timeout so the 6 connections the bot
+opens per cycle never raise "database is locked".
 """
 
 import os
@@ -23,6 +25,12 @@ def connect() -> sqlite3.Connection:
     except OSError as e:
         log.warning(f"Could not create DB directory {directory}: {e}")
     conn = sqlite3.connect(DB_PATH, timeout=30)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.DatabaseError as e:
+        log.debug(f"PRAGMA setup skipped: {e}")
     return conn
 
 
@@ -57,7 +65,7 @@ class Database:
                 last_seen TEXT
             )
         """)
-        # Alerts actually sent — used for cross-platform dedup.
+        # Alerts actually DELIVERED — used for cross-platform dedup and price drops.
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
                 id TEXT PRIMARY KEY,
@@ -66,6 +74,15 @@ class Database:
                 price_usd REAL,
                 url TEXT,
                 alerted_at TEXT
+            )
+        """)
+        # Search-engine hits found dead by a page marker: re-checked after a TTL
+        # instead of being buried forever in seen_listings.
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS liveness_cache (
+                id TEXT PRIMARY KEY,
+                reason TEXT,
+                checked_at TEXT
             )
         """)
         self.conn.commit()
@@ -149,6 +166,13 @@ class Database:
         except Exception as e:
             log.warning(f"alert record error: {e}")
 
+    def was_alerted(self, listing_id: str) -> bool:
+        try:
+            return self.conn.execute("SELECT 1 FROM alerts WHERE id = ?", (listing_id,)).fetchone() is not None
+        except Exception as e:
+            log.warning(f"alerted lookup error: {e}")
+            return False
+
     def recent_alerts(self, days: int = 60) -> list:
         since = (datetime.utcnow() - timedelta(days=days)).isoformat()
         try:
@@ -159,6 +183,28 @@ class Database:
             log.warning(f"recent alerts error: {e}")
             return []
         return [dict(zip(("id", "platform", "title", "price_usd", "url"), r)) for r in rows]
+
+    # --- liveness cache ------------------------------------------------------------
+    def dead_recently(self, listing_id: str, ttl_days: int = 7) -> bool:
+        try:
+            row = self.conn.execute("SELECT checked_at FROM liveness_cache WHERE id = ?", (listing_id,)).fetchone()
+        except Exception as e:
+            log.warning(f"liveness cache read error: {e}")
+            return False
+        if not row:
+            return False
+        try:
+            return datetime.utcnow() - datetime.fromisoformat(row[0]) < timedelta(days=ttl_days)
+        except ValueError:
+            return False
+
+    def mark_dead(self, listing_id: str, reason: str) -> None:
+        try:
+            self.conn.execute("INSERT OR REPLACE INTO liveness_cache VALUES (?, ?, ?)",
+                              (listing_id, reason[:120], datetime.utcnow().isoformat()))
+            self.conn.commit()
+        except Exception as e:
+            log.warning(f"liveness cache write error: {e}")
 
     def close(self):
         self.conn.close()

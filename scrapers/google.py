@@ -137,6 +137,39 @@ class GoogleScraper(BaseScraper):
         except Exception as e:
             log.warning(f"Google quota guard mark failed: {e}")
 
+    # --- quota-day accounting (Google resets at midnight Pacific) ---------------
+    @staticmethod
+    def _quota_day() -> str:
+        from datetime import timezone as _tz
+        try:
+            from zoneinfo import ZoneInfo
+            return datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
+        except Exception:
+            return (datetime.now(_tz.utc) - timedelta(hours=7)).strftime("%Y-%m-%d")
+
+    def _quota_used_today(self) -> int:
+        try:
+            conn = _db()
+            row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper = ?",
+                               (f"google_quota:{self._quota_day()}",)).fetchone()
+            conn.close()
+            return int(row[0]) if row else 0
+        except Exception as e:
+            log.warning(f"Google quota read failed: {e}")
+            return 0
+
+    def _add_quota_used(self, n: int) -> None:
+        try:
+            conn = _db()
+            key = f"google_quota:{self._quota_day()}"
+            row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper = ?", (key,)).fetchone()
+            used = (int(row[0]) if row else 0) + n
+            conn.execute("INSERT OR REPLACE INTO scraper_runs VALUES (?, ?)", (key, str(used)))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            log.warning(f"Google quota write failed: {e}")
+
     def _get_cursor(self) -> int:
         try:
             conn = _db()
@@ -157,9 +190,9 @@ class GoogleScraper(BaseScraper):
             log.warning(f"Google cursor write failed: {e}")
 
     # --- planning ----------------------------------------------------------
-    def plan_queries(self, cursor: int) -> tuple:
+    def plan_queries(self, cursor: int, budget: int = None) -> tuple:
         """Return (list of (q, extra_params), next_cursor)."""
-        budget = max(1, Config.GOOGLE_QUERIES_PER_RUN)
+        budget = max(1, budget if budget is not None else Config.GOOGLE_QUERIES_PER_RUN)
         plan = [(q, {"dateRestrict": "w2", "sort": "date"}) for q in GLOBAL_QUERIES][:budget]
         matrix = [f"{kw} {group}" for kw in MATRIX_KEYWORDS for group in SITE_GROUPS]
         remaining = budget - len(plan)
@@ -183,14 +216,25 @@ class GoogleScraper(BaseScraper):
         results = []
         seen_ids = set()
         cursor = self._get_cursor()
-        plan, next_cursor = self.plan_queries(cursor)
-        log.info(f"Google CSE: {len(plan)} queries this run (matrix cursor {cursor} → {next_cursor})")
+        # Never exceed the 100/day free quota even if the container restarts:
+        # spend at most what is left for today's Pacific quota day.
+        used = self._quota_used_today()
+        budget = min(Config.GOOGLE_QUERIES_PER_RUN, max(0, Config.GOOGLE_DAILY_QUOTA - used))
+        if budget <= 0:
+            log.info(f"Google CSE: daily quota already spent ({used}) — skipping")
+            self.skipped = True
+            return []
+        plan, next_cursor = self.plan_queries(cursor, budget)
+        log.info(f"Google CSE: {len(plan)} queries this run (matrix cursor {cursor} → {next_cursor}; "
+                 f"{used} already used today)")
+        spent = 0
 
         async with httpx.AsyncClient(timeout=20) as client:
             for q, extra in plan:
                 try:
                     params = {"key": self.api_key, "cx": self.cse_id, "q": q, "num": 10, **extra}
                     resp = await client.get(GOOGLE_API, params=params)
+                    spent += 1
                     if resp.status_code in (429, 403):
                         log.warning(f"Google CSE HTTP {resp.status_code} (quota?) — stopping: {resp.text[:200]!r}")
                         break
@@ -245,9 +289,10 @@ class GoogleScraper(BaseScraper):
                 except Exception as e:
                     log.warning(f"Google search '{q[:60]}' error: {e}")
 
+        self._add_quota_used(spent)
         self._set_cursor(next_cursor)
         self._mark_run()
-        log.info(f"Google CSE: {len(results)} listings found")
+        log.info(f"Google CSE: {len(results)} listings found ({spent} queries spent)")
         return results
 
     # --- extraction helpers -------------------------------------------------

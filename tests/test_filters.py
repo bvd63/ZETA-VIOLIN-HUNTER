@@ -32,6 +32,10 @@ CONDITION_CASES = [
     ({"title": "Zeta Geige", "condition": "Neu", "url": URL}, "new_stock"),
     ({"title": "Brand New Zeta Strados 5-string", "condition": "", "url": URL}, "new_stock"),
     ({"title": "Zeta Jazz Fusion NIB authorized dealer", "condition": "", "url": URL}, "new_stock"),
+    ({"title": "Zeta violin sealed in original case", "condition": "", "url": URL}, ""),
+    ({"title": "Zeta Strados violin", "condition": "", "url": "https://www.example.com/item/123?q=tracking"}, ""),
+    ({"title": "Zeta Strados violin", "condition": "", "url": "https://www.example.com/search?q=zeta"}, "url"),
+    ({"title": "Zeta Strados violin", "condition": "", "url": "https://www.example.com/"}, "url"),
     ({"title": "ZETA SV24 Strados Modern violin", "condition": "Brand New", "seller": "electricviolinshop", "url": URL}, "new_stock"),
     ({"title": "ZETA SV24 Strados Modern violin", "condition": "Used", "seller": "electricviolinshop", "url": URL}, ""),  # dealer trade-in is fine
     ({"title": "Zeta Strados violin", "condition": "", "url": "https://www.zetaviolins.com/products/strados"}, "new_stock"),
@@ -59,6 +63,24 @@ CASES = [
     ("Violino Zeta Acoustic Pro 5 Corde", "vendo causa inutilizzo", ""),  # the Taranto listing
     ("ZETA SV24 Strados Modern violin, gloss white", "", ""),
     ("ZETA Jazz Fusion 5, Jean-Luc Ponty Signature Model, tobacco burst", "", ""),
+    # --- body text of a real Zeta violin must NOT kill it (Prompt 16)
+    ("Zeta Strados Electric Violin", "Comes with a Boss volume pedal and a hard shell case.", ""),
+    ("Zeta Jazz Fusion 5-string violin", "I can send a copy of the receipt. Nothing broken, perfect working order.", ""),
+    ("ZETA JV44 electric violin", "New string set installed, no sticker residue. Includes padded cover for the case.", ""),
+    ("Zeta Strados violin", "Also selling a cello and a bass separately, ask me.", ""),
+    ("Zeta violin 4 string", "MIDI controller output box included (Synthony NOT included).", "noise"),  # synthony is a homonym-level term
+    ("Zeta Strados electric violin", "ski trip forces sale", ""),
+    ("Electric violin 5 string", "It is a Zeta Strados, comes with a Boss pedal.", "noise"),         # title inconclusive → body rules apply
+    ("Electric violin 5 string", "Zeta Strados, black, plays great.", ""),
+    # sold / ended only when the title says so
+    ("Zeta Strados violin must be sold this week", "", ""),
+    ("SOLD Zeta Strados violin", "", "sold"),
+    ("Zeta Strados violin (sold)", "", "sold"),
+    ("Zeta Strados violin sold as is", "", ""),
+    # bass/guitar in title only matter without a violin word
+    ("Zeta violin + bass amp", "", ""),
+    ("Zeta bass", "", "noise"),
+    ("ZETA Jazz Modern 4-String Electric Viola violin w/MIDI", "", "noise"),   # §1: no violas
     # --- must be DROPPED
     ("Arc'teryx Zeta SL jacket", "", "noise"),
     ("Arcteryx Zeta LT hardshell", "", "noise"),

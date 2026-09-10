@@ -35,6 +35,7 @@ class MercariJPScraper(BaseScraper):
             from mercapi import Mercapi
         except ImportError:
             log.warning("mercapi not installed — skipping Mercari JP")
+            self.skipped = True
             return []
 
         try:

@@ -45,6 +45,7 @@ QUERIES = [
     ("Zetta violin", ""),
     ("zeta", "619"),   # Musical Instruments & Gear — catches titles without "violin"
 ]
+MAX_PAGES = 2  # 100 newest results per query and marketplace
 
 
 class EbayScraper(BaseScraper):
@@ -104,15 +105,32 @@ class EbayScraper(BaseScraper):
                 for kw, category in QUERIES:
                     if not marketplace_ok:
                         break
-                    try:
-                        params = {"q": kw, "limit": 50, "fieldgroups": "EXTENDED",
-                                  "filter": "buyingOptions:{FIXED_PRICE|AUCTION}"}
+                    # Newest first + up to MAX_PAGES pages so a relevant item ranked
+                    # 51st by "best match" is not invisible.
+                    for page in range(MAX_PAGES):
+                        params = {"q": kw, "limit": 50, "offset": page * 50, "fieldgroups": "EXTENDED",
+                                  "sort": "newlyListed", "filter": "buyingOptions:{FIXED_PRICE|AUCTION}"}
                         if category:
                             params["category_ids"] = category
+                        more = await self._page(client, token, marketplace, kw, params, seen_ids, results)
+                        if more is None:          # auth/marketplace problem → stop this marketplace
+                            marketplace_ok = False
+                            break
+                        if not more:
+                            break
+
+        log.info(f"eBay Browse API: {len(results)} listings found across {len(MARKETPLACES)} marketplaces")
+        return results
+
+    async def _page(self, client, token, marketplace, kw, params, seen_ids, results):
+        """Fetch one result page. Returns True if a full page came back (more may
+        follow), False if fewer, None to abandon the marketplace."""
+        for _attempt in range(2):
+                    try:
                         resp = await client.get(
                             BROWSE_URL,
                             headers={
-                                "Authorization": f"Bearer {token}",
+                                "Authorization": f"Bearer {self._token or token}",
                                 "X-EBAY-C-MARKETPLACE-ID": marketplace,
                                 "X-EBAY-C-ENDUSERCTX": "contextualLocation=country=RO",
                             },
@@ -123,18 +141,17 @@ class EbayScraper(BaseScraper):
                             self._token = ""
                             token = await self._get_token(client)
                             if not token:
-                                return results
-                            continue
+                                return None
+                            continue  # retry once with the fresh token
                         if resp.status_code == 429:
                             log.warning(f"eBay rate limit hit on {marketplace}")
-                            break
+                            return None
                         if resp.status_code in (400, 409) and "marketplace" in resp.text.lower():
                             log.info(f"eBay {marketplace}: not supported by Browse API — skipping")
-                            marketplace_ok = False
-                            break
+                            return None
                         if resp.status_code != 200:
                             log.warning(f"eBay {marketplace} '{kw}': HTTP {resp.status_code} — {resp.text[:200]}")
-                            continue
+                            return False
 
                         items = resp.json().get("itemSummaries", []) or []
                         self.fetched += len(items)
@@ -187,8 +204,8 @@ class EbayScraper(BaseScraper):
                                 "relevance_score": self._relevance_score(title, description),
                                 "image_url": image_url,
                             })
+                        return len(items) >= 50
                     except Exception as e:
                         log.warning(f"eBay {marketplace} '{kw}' error: {e}")
-
-        log.info(f"eBay Browse API: {len(results)} listings found across {len(MARKETPLACES)} marketplaces")
-        return results
+                        return False
+        return False

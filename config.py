@@ -47,6 +47,11 @@ class Config:
     # Free quota is 100/day (resets at midnight Pacific). Default budget splits
     # 96 queries across the day's runs: 96 with one run, 48 with two.
     GOOGLE_QUERIES_PER_RUN = int(os.getenv("GOOGLE_QUERIES_PER_RUN", str(max(1, 96 // RUNS_PER_DAY))))
+    # Hard daily ceiling, counted per Pacific quota day in SQLite (restarts included)
+    GOOGLE_DAILY_QUOTA = int(os.getenv("GOOGLE_DAILY_QUOTA", "96"))
+    # Skip the automatic cycle at container start if a cycle already ran less
+    # than N hours ago (CLAUDE.md §7: no re-run on restart). Deploy = restart.
+    STARTUP_RUN_GUARD_HOURS = float(os.getenv("STARTUP_RUN_GUARD_HOURS", "6"))
     # Do not run Google again if the previous run was less than N hours ago
     # (protects the quota on container restarts). 10h: an evening deploy run
     # (e.g. 18:00 UTC) must NOT block the next day's 12:00 Bucharest run

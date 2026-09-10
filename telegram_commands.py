@@ -29,7 +29,32 @@ class TelegramCommands:
         self.status_tracker = status_tracker
         self.database_factory = database_factory
         self.notifier = notifier
-        self.offset = 0
+        self.offset = self._load_offset()
+
+    # Persist the update offset so a restart never re-executes the last command.
+    @staticmethod
+    def _load_offset() -> int:
+        try:
+            from database import connect
+            conn = connect()
+            conn.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
+            row = conn.execute("SELECT value FROM kv WHERE key = 'telegram_offset'").fetchone()
+            conn.close()
+            return int(row[0]) if row else 0
+        except Exception as e:
+            log.debug(f"telegram offset load failed: {e}")
+            return 0
+
+    def _save_offset(self) -> None:
+        try:
+            from database import connect
+            conn = connect()
+            conn.execute("INSERT OR REPLACE INTO kv VALUES ('telegram_offset', ?, ?)",
+                         (str(self.offset), datetime.utcnow().isoformat()))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            log.debug(f"telegram offset save failed: {e}")
 
     async def run(self) -> None:
         if not self.token or not self.chat_id:
@@ -57,8 +82,10 @@ class TelegramCommands:
                         log.warning(f"Telegram getUpdates HTTP {resp.status_code}: {resp.text[:120]}")
                         await asyncio.sleep(15)
                         continue
-                    for update in resp.json().get("result", []):
+                    updates = resp.json().get("result", [])
+                    for update in updates:
                         self.offset = max(self.offset, int(update["update_id"]) + 1)
+                        self._save_offset()
                         await self._handle(update.get("message") or {})
                 except Exception as e:
                     log.warning(f"Telegram polling error: {e}")
@@ -108,8 +135,12 @@ class TelegramCommands:
                          f"{last.get('raw_listings', 0)} articole citite")
         scrapers = st.get("scrapers") or {}
         for name, s in sorted(scrapers.items()):
+            raw = s.get("raw", 0) or 0
+            if raw < 0:
+                lines.append(f"⚪ {html.escape(name)}: sărit (neconfigurat sau cotă)")
+                continue
             flag = "🔴" if s.get("error") else ("🟡" if s.get("zero_streak", 0) >= Config.WATCHDOG_ZERO_STREAK else "🟢")
-            lines.append(f"{flag} {html.escape(name)}: {s.get('raw', 0)} citite, {s.get('new', 0)} noi"
+            lines.append(f"{flag} {html.escape(name)}: {raw} citite, {s.get('new', 0)} noi"
                          + (f", {s.get('zero_streak')} cicluri pe 0" if s.get("zero_streak") else ""))
         lines.append(f"🕒 {datetime.utcnow():%Y-%m-%d %H:%M} UTC")
         return "\n".join(lines)[:3900]

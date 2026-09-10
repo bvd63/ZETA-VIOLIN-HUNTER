@@ -81,6 +81,15 @@ class StatusTracker:
         except Exception as e:
             log.warning(f"Cycle summary record error: {e}")
 
+    def last_cycle_started(self):
+        """datetime of the most recent recorded cycle start, or None."""
+        try:
+            row = self.conn.execute("SELECT run_at FROM cycle_summary ORDER BY id DESC LIMIT 1").fetchone()
+            return datetime.fromisoformat(row[0]) if row and row[0] else None
+        except Exception as e:
+            log.warning(f"last cycle lookup error: {e}")
+            return None
+
     def get_streaks(self, lookback: int = 30) -> dict:
         """For each scraper: number of consecutive most-recent cycles with
         raw_count == 0 ('zero') and with an error ('error')."""

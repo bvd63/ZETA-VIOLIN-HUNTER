@@ -58,7 +58,9 @@ class TelegramNotifier:
         })
 
     # --- high level ----------------------------------------------------------
-    async def send_listings(self, listings: list, header_note: str = ""):
+    async def send_listings(self, listings: list, header_note: str = "") -> list:
+        """Send every listing; return the ones that were DELIVERED (main.py only
+        marks those as seen, so a Telegram hiccup never loses an instrument)."""
         header = (
             f"🎻 <b>ZETA VIOLIN HUNTER</b>\n"
             f"📦 <b>{len(listings)} new listing(s) found!</b>{header_note}\n"
@@ -66,18 +68,30 @@ class TelegramNotifier:
         )
         await self.send(header)
 
+        delivered = []
         for i, listing in enumerate(listings, 1):
             msg = self._format_listing(i, listing)
             image_url = self._normalize_url(str(listing.get("image_url", "") or ""))
             sent = False
-            if Config.SEND_PHOTOS and image_url:
-                sent = await self.send_photo(image_url, msg)
+            try:
+                # A caption longer than the limit would be cut mid-tag → Telegram 400;
+                # long messages go as text (4096 limit) instead.
+                if Config.SEND_PHOTOS and image_url and len(msg) <= CAPTION_LIMIT:
+                    sent = await self.send_photo(image_url, msg)
+                    if not sent:
+                        log.info("sendPhoto failed — falling back to text message")
                 if not sent:
-                    log.info("sendPhoto failed — falling back to text message")
-            if not sent:
-                await self.send(msg)
+                    sent = await self.send(msg)
+            except Exception as e:
+                log.error(f"Telegram delivery error for {listing.get('title', '')[:50]}: {e}")
+                sent = False
+            if sent:
+                delivered.append(listing)
+            else:
+                log.warning(f"NOT delivered (will retry next cycle): {listing.get('title', '')[:60]}")
             if i < len(listings):
                 await asyncio.sleep(1.5)
+        return delivered
 
     async def send_price_drops(self, drops: list):
         """drops: list of (listing, {old_price, new_price, drop_pct})."""
@@ -111,14 +125,21 @@ class TelegramNotifier:
         lines.append(f"🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
         await self.send("\n".join(lines))
 
-    async def send_no_changes(self):
+    async def send_no_changes(self, sources_ok: int = 0, sources_error: int = 0, sources_zero: int = 0):
         if not Config.SEND_NO_CHANGES:
             log.info("SEND_NO_CHANGES=false — not sending the no-changes message")
             return
+        health = f"🔎 {sources_ok} surse au răspuns"
+        if sources_error:
+            health += f", ⚠️ {sources_error} cu eroare"
+        if sources_zero:
+            health += f", {sources_zero} fără rezultate"
+        status_line = "✅ Căutarea s-a terminat cu succes." if not sources_error else "⚠️ Căutare terminată cu erori la unele surse."
         await self.send(
             "🎻 <b>ZETA VIOLIN HUNTER</b>\n"
-            "✅ Căutarea s-a terminat cu succes.\n"
+            f"{status_line}\n"
             "📭 Nu au fost găsite anunțuri noi în acest ciclu.\n"
+            f"{health}\n"
             f"🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
         )
 

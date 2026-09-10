@@ -44,6 +44,16 @@ def main() -> int:
     check(parse_amount("$1,500") == 1500.0, "'$1,500' is 1500")
     check(parse_amount("6,90 €") == 6.9, "'6,90' is 6.9")
     check(parse_amount("See listing") is None, "no number → None")
+    # MIN/MAX_PRICE are USD: a ¥300,000 Zeta must survive MAX_PRICE=99999
+    from scrapers.base import BaseScraper
+    b = BaseScraper()
+    check(b._price_in_range("300,000円"), "¥300,000 (≈ $2000) is in range")
+    check(b._price_in_range("298000 JPY"), "298000 JPY is in range")
+    check(b._price_in_range("1.200.000 HUF"), "1.200.000 HUF is in range")
+    check(not b._price_in_range("250000 USD"), "$250,000 is out of range")
+    from price_tracker import detect_currency
+    check(detect_currency("795.00 CAD") == "CAD" and detect_currency("2000 €") == "EUR" and detect_currency("¥1000") == "JPY"
+          and detect_currency("1 500 SEK") == "SEK" and detect_currency("$1,500") == "USD", "currency detection")
     pt.close()
 
     st = StatusTracker()

@@ -35,6 +35,11 @@ def main() -> int:
     check(looks_dead(200, U, U, "Zeta Strados 5-string. Add to cart. Ships free.") == "", "live shop page passes")
     check(looks_dead(200, U, U, "Great violin, sold as is, no returns. Buy It Now") == "", "'sold as is' is not dead")
     check(looks_dead(200, U, U, "Currently sold out in blue. Add to cart") == "", "'sold out' variant on live page passes")
+    check(looks_dead(200, U, U, "Similar items that has been sold recently. Add to cart") == "", "sidebar 'has been sold' on live page passes")
+    check(looks_dead(200, U, U, "Similar items that has been sold recently. Nice violin.") == "", "generic 'has been sold' alone is not dead")
+    fb = "https://www.facebook.com/marketplace/item/123456789"
+    check(looks_dead(200, fb, fb, "Zeta violin $900 Message seller") == "", "unchanged /marketplace/item URL is alive")
+    check(looks_dead(200, fb, "https://www.facebook.com/marketplace/", "x") != "", "redirect to /marketplace root is dead")
 
     async def live_checks():
         import httpx

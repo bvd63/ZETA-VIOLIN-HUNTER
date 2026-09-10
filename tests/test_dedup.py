@@ -28,9 +28,12 @@ def main() -> int:
     ]
     check(bool(is_duplicate("Zeta Strados 5-string electric violin w/ MIDI", 2700.0, recent)), "same Strados on eBay = duplicate")
     check(not is_duplicate("Zeta Strados 5-string electric violin w/ MIDI", 1500.0, recent), "same title, 45% cheaper = different item")
+    check(not is_duplicate("Zeta Strados 5-string electric violin w/ MIDI", 3000.0, recent), "same title, +9% = different item")
     check(not is_duplicate("Zeta Jazz Modern 4-string violin", 2995.0, recent), "different model = not duplicate")
     check(bool(is_duplicate("Zeta Jazz Fusion 5 Jean Luc Ponty signature tobacco burst", 6000.0, recent)), "JLP relisted = duplicate")
     check(not is_duplicate("Zeta", 100.0, recent), "too few tokens → never duplicate")
+    check(not is_duplicate("Zeta Strados 5-string electric violin w/ MIDI", None, recent), "unknown price → never duplicate")
+    check(not is_duplicate("Zeta Strados Modern Electric Violin", 2749.0, [{"title": "Zeta Strados Modern", "price_usd": 2749.0}]), "<3 tokens → not duplicate")
     print("     tokens:", sorted(tokens("Zeta Strados Electric 5 String Midi Violin")))
 
     eur = to_usd(1000, "EUR")

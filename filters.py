@@ -6,6 +6,11 @@ All Latin-script matching is WORD-BOUNDARY based (regex), never plain
 substring, so that "hard shell case" is not an Arc'teryx jacket, "sold as is"
 is not a sold listing and "no defects" is not a defective instrument.
 Japanese terms are matched as substrings because Japanese has no word spaces.
+
+Precision vs recall (Prompt 16): when the TITLE alone proves a Zeta violin,
+the description is only checked for a short "not actually for sale" list.
+Object-of-sale words (pedal, cover, cello, copy, sticker, broken ...) are
+title-only — sellers mention them in bodies of perfectly good listings.
 """
 
 import re
@@ -69,24 +74,37 @@ VIOLIN_JP = ["バイオリン", "ヴァイオリン", "エレキバイオリン"
 # ---------------------------------------------------------------------------
 # §4.5 BLACKLIST — noise
 # ---------------------------------------------------------------------------
-# Checked in title + description (whole words).
+# Homonyms / non-instrument Zeta products — safe in title AND description.
 NOISE_RX = _rx([
-    # Non-violin Zeta-brand products / homonyms
     "arcteryx", "arc'teryx", "arc teryx", "jacket", "jackets", "hoodie", "pants",
-    "backpack", "snowboard", "ski", "skis",
+    "backpack", "snowboard", "skis",
     "zeta phi beta", "zeta reticuli", "zeta cartridge", "zeta pump", "zeta potential",
-    "zeta-jones", "zeta jones", "dartboard", "zeta drive", "overdrive",
-    # Zeta accessories / non-violin Zeta gear
-    "footswitch", "pedal", "pedals", "midi controller", "midi interface", "synthony",
-    "combo amp", "padded cover", "amp cover", "cover for", "catalog", "catalogue",
-    "brochure", "manual only", "strings only", "string set", "sticker", "decal",
-    # Other instruments (scope = violins only)
-    "cello", "cellos", "mandolin", "upright bass", "bass guitar",
+    "zeta-jones", "zeta jones", "dartboard", "zeta drive",
+    # Zeta non-violin gear that is the OBJECT of the listing when in the title;
+    # these words are common inside violin bodies too, so see NOISE_OBJECT_RX.
+    "synthony",
     # Copies / look-alikes ("Replica del celebre violino Zeta", "Zeta violin copy")
-    "replica", "copia", "copy", "kopie", "kopia", "copie", "clone",
-    "zeta style", "zeta-style", "stile zeta", "style zeta",
+    "replica", "zeta style", "zeta-style", "stile zeta", "style zeta",
     "tipo zeta", "type zeta", "like zeta", "similar to zeta", "inspired by zeta",
 ])
+# Object-of-sale words: drop only when they are in the TITLE (or when the
+# title alone does not prove a Zeta violin and the body must be trusted).
+NOISE_OBJECT_RX = _rx([
+    "ski", "overdrive", "footswitch", "pedal", "pedals", "midi controller", "midi interface",
+    "combo amp", "padded cover", "amp cover", "cover for", "catalog", "catalogue",
+    "brochure", "manual only", "strings only", "string set", "sticker", "decal",
+    "cello", "cellos", "mandolin", "upright bass", "bass guitar",
+    "viola", "violas",  # §1 scope: violins only, even when the title also says "violin"
+    "copia", "copy", "kopie", "kopia", "copie", "clone",
+    "fx", "effects", "effect processor", "preamp only", "pickup system only",
+])
+# Media / other instruments — title only; instrument words only when the
+# title has no violin word ("Zeta violin + bass amp" must pass).
+NOISE_TITLE_MEDIA_RX = _rx([
+    "cd", "cds", "dvd", "vinyl", "lp", "album", "cassette", "book", "poster",
+    "shirt", "t-shirt", "sheet music",
+])
+NOISE_TITLE_INSTRUMENT_RX = _rx(["bass", "guitar"])
 # Japanese noise — substring match (no word spaces in Japanese).
 NOISE_JP = [
     "カタログ",      # catalog
@@ -100,30 +118,29 @@ NOISE_JP = [
     "パンフレット",  # brochure
     "チェロ",        # cello
 ]
-# Checked in TITLE only (would over-trigger in descriptions).
-NOISE_TITLE_RX = _rx([
-    "cd", "cds", "dvd", "vinyl", "lp", "album", "cassette", "book", "poster",
-    "shirt", "t-shirt", "sheet music", "bass", "guitar", "viola", "violas",
-])
 
-# Non-purchase intent — title + description.
+# Non-purchase intent — safe in title AND description.
 INTENT_RX = _rx([
     "wtb", "wanted to buy", "want to buy", "looking to buy", "in search of",
     "parts only", "part only", "for parts", "for parts or repair",
-    "not working", "doesn't work", "does not work", "broken", "defective",
     "case only", "bow only", "bridge only", "pickup only", "gig bag only",
-    "cover only", "bag only",
+    "cover only", "bag only", "not for sale", "no longer for sale",
 ])
-# Title only: "Wanted: Zeta violin", "ISO Zeta Strados", "Gezocht: Zeta viool".
+# Title only: "Wanted: Zeta violin", "ISO Zeta Strados", "Gezocht: Zeta viool",
+# "broken Zeta violin".
 INTENT_TITLE_RX = _rx([
-    "wanted", "iso",
+    "wanted", "iso", "broken", "defective", "not working", "doesn't work", "does not work",
     "gezocht", "gesucht", "suche", "cerco", "recherche", "cherche", "busco",
     "szukam", "kupię", "kupie", "søges", "søkes", "sökes", "etsitään", "compro", "procuro",
 ])
 
-# Sold / ended — title only, and "sold as is" is NOT sold.
+# Sold / ended — title only. "sold as is" is NOT sold, and a mid-sentence
+# "must be sold this week" is not either: only leading/trailing/bracketed SOLD.
 SOLD_RX = re.compile(
-    r"(?<![\w])(?:sold(?![\s\-]*as[\s\-]*is)|ended|expired|sold out|out of stock)(?![\w])",
+    r"(?:^\W*(?:sold|ended|expired|sold out|out of stock)\b(?![\s\-]*as[\s\-]*is))"
+    r"|(?:\b(?:sold|ended|expired|sold out)\W*$)"
+    r"|(?:[\[(*]\s*(?:sold|ended|expired)\s*[\])*])"
+    r"|(?:\bsold\s*[!*]+)",
     re.IGNORECASE,
 )
 
@@ -135,7 +152,7 @@ OTHER_BRAND_RX = _rx([
     "fender", "fv-1", "stagg", "cantini", "cecilio", "kinglos", "glasser", "eco-ion",
     "electric violin lutherie", "evl", "vangoa",
     "jordan", "realist", "barcus berry", "barcus-berry", "skyinbow", "harley benton",
-    "3dvarius", "ted brewer", "wood violins", "gewa", "aurora violin", "eastar", "vangoa",
+    "3dvarius", "ted brewer", "wood violins", "gewa", "aurora violin", "eastar",
 ])
 
 # ---------------------------------------------------------------------------
@@ -143,19 +160,17 @@ OTHER_BRAND_RX = _rx([
 # ---------------------------------------------------------------------------
 # Platform condition labels meaning "new": eBay "New", "New with tags",
 # "New other (see details)", "Open box"; Reverb "Brand New", "B-Stock".
-# "Mint" / "Like New" / "wie neu" are USED and must pass.
+# "Mint" / "Like New" / "wie neu" / "Neuwertig" are USED and must pass.
 NEW_CONDITION_RX = re.compile(
     r"^\s*(?:brand[\s\-]*new\b|new(?:\s*\(|\s+with\b|\s+without\b|\s+other\b|\s*$)|b[\s\-]*stock\b|open[\s\-]*box\b"
     r"|nuovo\b|neuf\b|neu\b|nieuw\b|nuevo\b)(?!\s*(?:wertig|-?ähnlich))",
     re.IGNORECASE,
 )
-# "wie neu", "come nuovo", "comme neuf", "zo goed als nieuw", "como nuevo",
-# "Neuwertig" are USED grades — the ^ anchor and \b keep them out.
 # Title-only shop language for new stock.
 NEW_STOCK_TITLE_RX = _rx([
     "brand new", "brandneu", "nagelneu", "nuovissimo", "new in box", "nib", "bnib",
     "authorized dealer", "authorised dealer", "in stock", "financing", "free financing",
-    "factory sealed", "sealed", "nou nouț", "nou nout",
+    "factory sealed", "nou nouț", "nou nout",
 ])
 
 
@@ -210,17 +225,36 @@ def is_zeta_violin(title: str, description: str = "") -> bool:
     return False
 
 
-def has_noise(title: str, description: str = "") -> bool:
-    text = f"{title} {description}"
-    return (
-        bool(NOISE_RX.search(text))
-        or bool(NOISE_TITLE_RX.search(title))
-        or any(j in text for j in NOISE_JP)
-    )
+def has_noise(title: str, description: str = "", title_conclusive: bool = None) -> bool:
+    """title_conclusive=True → the title alone proves a Zeta violin, so the
+    body is checked only for homonym noise, not for object-of-sale words."""
+    if title_conclusive is None:
+        title_conclusive = is_zeta_violin(title)
+    if NOISE_RX.search(title) or NOISE_OBJECT_RX.search(title) or NOISE_TITLE_MEDIA_RX.search(title):
+        return True
+    if NOISE_TITLE_INSTRUMENT_RX.search(title) and not has_violin_word(title):
+        return True
+    if any(j in title for j in NOISE_JP):
+        return True
+    if not description:
+        return False
+    if NOISE_RX.search(description) or any(j in description for j in NOISE_JP):
+        return True
+    if not title_conclusive and NOISE_OBJECT_RX.search(description):
+        return True
+    return False
 
 
-def is_excluded_intent(title: str, description: str = "") -> bool:
-    return bool(INTENT_RX.search(f"{title} {description}")) or bool(INTENT_TITLE_RX.search(title))
+def is_excluded_intent(title: str, description: str = "", title_conclusive: bool = None) -> bool:
+    if INTENT_RX.search(title) or INTENT_TITLE_RX.search(title):
+        return True
+    if description and INTENT_RX.search(description):
+        return True
+    if title_conclusive is None:
+        title_conclusive = is_zeta_violin(title)
+    if description and not title_conclusive and INTENT_TITLE_RX.search(description):
+        return True
+    return False
 
 
 def is_other_brand(title: str) -> bool:
@@ -259,11 +293,13 @@ def is_valid_listing_url(url: str) -> bool:
     parts = urlsplit(raw)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return False
-    low = raw.lower()
-    # Drop obvious non-listing pages. NOTE: /forum intentionally allowed
-    # (maestronet.com/forum/topic/... are valid classifieds).
-    bad_fragments = ["/search", "?q=", "/category", "/categories", "/help", "/about"]
-    return not any(fragment in low for fragment in bad_fragments)
+    # Only reject pages that are obviously NOT a listing: the site root or a
+    # search/category/help landing page (path starts with it). A "?q=" inside
+    # a real item URL or a tracking parameter is fine.
+    path = parts.path.rstrip("/").lower()
+    if path in ("", "/"):
+        return False
+    return not path.startswith(("/search", "/category", "/categories", "/help", "/about"))
 
 
 def classify(listing: dict) -> str:
@@ -271,17 +307,18 @@ def classify(listing: dict) -> str:
     (used for per-reason counters in main.py)."""
     from config import Config  # local import keeps filters importable in tests
     title, desc = _text(listing)
+    title_conclusive = is_zeta_violin(title)
     if is_other_brand(title):
         return "other_brand"
     if is_new_stock(listing, Config.CONDITION, Config.EXCLUDED_SELLERS):
         return "new_stock"
-    if has_noise(title, desc):
+    if has_noise(title, desc, title_conclusive):
         return "noise"
-    if is_excluded_intent(title, desc):
+    if is_excluded_intent(title, desc, title_conclusive):
         return "intent"
     if is_sold_or_ended(title):
         return "sold"
-    if not is_zeta_violin(title, desc):
+    if not (title_conclusive or is_zeta_violin(title, desc)):
         return "non_zeta"
     if not is_valid_listing_url(str(listing.get("url", ""))):
         return "url"

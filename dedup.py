@@ -1,10 +1,11 @@
 """
 Cross-platform duplicate detection: the same instrument listed on Reverb and
-eBay (or re-listed under a new id) should alert once.
+eBay (or re-listed under a new id) is ANNOTATED (never suppressed).
 
-Two listings are duplicates when their title token sets overlap strongly
-(Jaccard ≥ 0.75 after dropping filler words) and their USD prices are within
-12 %. Compared against alerts from the last 60 days.
+Two listings are flagged when their discriminating title tokens overlap
+strongly (Jaccard ≥ 0.75 after dropping filler words, at least 3 tokens on
+each side) AND both prices are known and within 8 %. Compared against
+alerts delivered in the last 60 days.
 """
 
 import re
@@ -15,11 +16,14 @@ FILLER = {
     "very", "good", "excellent", "condition", "mint", "nice", "great", "case", "bow",
     "black", "white", "red", "blue", "gloss", "satin", "finish", "sale",
 }
+MIN_TOKENS = 3
+PRICE_TOLERANCE = 0.08
 
 
 def tokens(title: str) -> set:
     words = re.findall(r"[a-z0-9]+", (title or "").lower())
-    return {w for w in words if w not in FILLER and len(w) > 1}
+    # single digits ("5" = 5-string) are discriminating, single letters are not
+    return {w for w in words if w not in FILLER and (len(w) > 1 or w.isdigit())}
 
 
 def jaccard(a: set, b: set) -> float:
@@ -30,17 +34,18 @@ def jaccard(a: set, b: set) -> float:
 
 def is_duplicate(title: str, price_usd, recent_alerts: list) -> dict:
     """recent_alerts: iterable of {title, price_usd, platform, url}. Returns the
-    matching earlier alert or {}."""
+    matching earlier alert or {}. Unknown prices never match."""
     t = tokens(title)
-    if len(t) < 2:
+    if len(t) < MIN_TOKENS or not price_usd:
         return {}
     for prev in recent_alerts:
-        sim = jaccard(t, tokens(prev.get("title", "")))
-        if sim < 0.75:
-            continue
         p_prev = prev.get("price_usd")
-        if price_usd and p_prev:
-            if abs(price_usd - p_prev) / max(price_usd, p_prev) > 0.12:
-                continue
+        if not p_prev:
+            continue
+        if abs(price_usd - p_prev) / max(price_usd, p_prev) > PRICE_TOLERANCE:
+            continue
+        pt = tokens(prev.get("title", ""))
+        if len(pt) < MIN_TOKENS or jaccard(t, pt) < 0.75:
+            continue
         return prev
     return {}

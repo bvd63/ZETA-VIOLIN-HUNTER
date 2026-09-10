@@ -105,12 +105,13 @@ class BaseScraper:
         return False
 
     def _price_in_range(self, price_str: str) -> bool:
-        """Extract numeric price (any locale format) and check range."""
-        from price_tracker import parse_amount
-        price = parse_amount(price_str or "")
-        if price is None:
+        """MIN_PRICE/MAX_PRICE are in USD: convert the local amount first
+        (a ¥300,000 Zeta must not be dropped by MAX_PRICE=99999)."""
+        from price_tracker import parse_price_usd
+        price_usd, _ = parse_price_usd(price_str or "")
+        if price_usd is None:
             return True  # Unknown price — include it
-        return Config.MIN_PRICE <= price <= Config.MAX_PRICE
+        return Config.MIN_PRICE <= price_usd <= Config.MAX_PRICE
 
     def _make_id(self, platform: str, url: str) -> str:
         """Generate a stable unique ID for a listing."""
