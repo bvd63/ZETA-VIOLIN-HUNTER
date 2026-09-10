@@ -79,12 +79,12 @@ class Config:
     # --- Filters ---
     MIN_PRICE = float(os.getenv("MIN_PRICE", "0"))
     MAX_PRICE = float(os.getenv("MAX_PRICE", "99999"))
-    # "all" (default since 2026-09-10, owner: "elimină, să văd ce o să fie"):
-    #   no condition filtering — new dealer stock (e.g. JLP signature at $6100)
-    #   is alerted too.
-    # "used": drop listings the platform marks as new / brand new / open box,
-    #   listings from new-stock dealers and titles with shop language.
-    CONDITION = os.getenv("CONDITION", "all").strip().lower()
+    # "used" (default — re-enabled 2026-09-10 after a one-day trial with "all"
+    #   flooded the owner with new dealer stock): drop listings the platform
+    #   marks as new / brand new / open box, listings from new-stock dealers and
+    #   titles with shop language. Any model/year is fine as long as it is second-hand.
+    # "all": no condition filtering.
+    CONDITION = os.getenv("CONDITION", "used").strip().lower()
     # Sellers / shops / domains that sell NEW Zeta stock — never alert their listings
     # (comma separated, matched case-insensitively against seller name, shop slug, URL host).
     # Only the manufacturer by default: dealers such as Electric Violin Shop also
