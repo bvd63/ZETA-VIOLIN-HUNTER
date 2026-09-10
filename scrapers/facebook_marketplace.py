@@ -67,6 +67,7 @@ class FacebookMarketplaceScraper(BaseScraper):
     async def search(self) -> list:
         if not self.is_configured():
             log.info("Facebook Marketplace: no US egress — skipping (login wall for datacenter IPs)")
+            self.skipped = True
             return []
         results = []
         seen_ids: set = set()

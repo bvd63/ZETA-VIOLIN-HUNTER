@@ -59,6 +59,15 @@ def main() -> int:
     check(streaks["eBay"]["error"] == 2, f"eBay error streak = {streaks['eBay']}")
     st.record_scraper("Reverb", raw=12, new=1)
     check(st.get_streaks()["Reverb"]["zero"] == 0, "streak resets after a non-zero cycle")
+    # Guard-skipped cycles (raw = -1) neither count nor reset
+    st.record_scraper("Google Search", raw=120, new=0)
+    for _ in range(3):
+        st.record_scraper("Google Search", raw=-1, new=0)
+    check(st.get_streaks()["Google Search"]["zero"] == 0, "3 skipped cycles after a good one → streak 0")
+    st.record_scraper("Google Search", raw=0, new=0)
+    st.record_scraper("Google Search", raw=-1, new=0)
+    st.record_scraper("Google Search", raw=0, new=0)
+    check(st.get_streaks()["Google Search"]["zero"] == 2, "skips inside a zero streak are transparent")
     st.end_cycle(total_sent=1)
     status = st.get_status()
     check(status.get("last_cycle", {}).get("sent_to_telegram") == 1, "status has last cycle")

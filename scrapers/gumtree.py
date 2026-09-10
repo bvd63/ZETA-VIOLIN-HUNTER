@@ -34,6 +34,11 @@ class GumtreeScraper(BaseScraper):
                 try:
                     resp = await client.get(SEARCH_URL, params={"search_category": "all", "q": kw})
                     if resp.status_code != 200:
+                        # Gumtree's anti-bot answers odd codes (247, 403) intermittently — one retry
+                        import asyncio
+                        await asyncio.sleep(3)
+                        resp = await client.get(SEARCH_URL, params={"search_category": "all", "q": kw})
+                    if resp.status_code != 200:
                         log.warning(f"Gumtree '{kw}' HTTP {resp.status_code}")
                         continue
                     tiles = self._extract(resp.text)

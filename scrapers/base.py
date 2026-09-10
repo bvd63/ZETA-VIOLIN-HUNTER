@@ -32,6 +32,10 @@ class BaseScraper:
     # "the site returned nothing / blocked us". Reset per instance (instances are
     # rebuilt every cycle).
     fetched: int = 0
+    # True when search() returned early WITHOUT querying the source (quota guard,
+    # missing credentials, wrong egress). main.py records such cycles as
+    # "skipped" (raw = -1) so the watchdog neither counts nor resets its streak.
+    skipped: bool = False
 
     def is_configured(self) -> bool:
         """False when required credentials/config are missing and search()

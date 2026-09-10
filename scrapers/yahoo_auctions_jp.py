@@ -66,6 +66,7 @@ class YahooAuctionsJPScraper(BaseScraper):
     async def search(self) -> list:
         if not self.is_configured():
             log.info(f"Yahoo Auctions JP: egress {Config.EGRESS_COUNTRY or '?'} is EEA/UK-blocked — skipping")
+            self.skipped = True
             return []
 
         results = []

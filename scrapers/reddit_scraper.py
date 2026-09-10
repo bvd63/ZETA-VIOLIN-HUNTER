@@ -52,6 +52,7 @@ class RedditScraper(BaseScraper):
         if not client_id or not client_secret:
             log.info("Reddit credentials not set — skipping Reddit. "
                      "Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in env.")
+            self.skipped = True
             return []
 
         try:

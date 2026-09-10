@@ -48,14 +48,16 @@ class Config:
     # 96 queries across the day's runs: 96 with one run, 48 with two.
     GOOGLE_QUERIES_PER_RUN = int(os.getenv("GOOGLE_QUERIES_PER_RUN", str(max(1, 96 // RUNS_PER_DAY))))
     # Do not run Google again if the previous run was less than N hours ago
-    # (protects the quota on container restarts). 20h with one run/day, 10h otherwise.
-    GOOGLE_GUARD_HOURS = int(os.getenv("GOOGLE_GUARD_HOURS", "20" if RUNS_PER_DAY == 1 else "10"))
+    # (protects the quota on container restarts). 10h: an evening deploy run
+    # (e.g. 18:00 UTC) must NOT block the next day's 12:00 Bucharest run
+    # (09:00 UTC, 15h later) — the Google quota day resets at 07:00 UTC anyway.
+    GOOGLE_GUARD_HOURS = int(os.getenv("GOOGLE_GUARD_HOURS", "10"))
 
     # --- Brave Search API (Google replacement; $5 monthly credit ≈ 1000 queries) ---
     BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
     # 32 queries/day × 30 days ≈ 960/month, split across the day's runs
     BRAVE_QUERIES_PER_RUN = int(os.getenv("BRAVE_QUERIES_PER_RUN", str(max(1, 32 // RUNS_PER_DAY))))
-    BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "20" if RUNS_PER_DAY == 1 else "10"))
+    BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "10"))
 
     # --- US egress proxy (http://user:pass@host:port) for sites that block
     # European datacenter IPs: Guitar Center, Facebook Marketplace, ... ---

@@ -78,8 +78,10 @@ class BraveScraper(BaseScraper):
     async def search(self) -> list:
         if not self.is_configured():
             log.info("BRAVE_API_KEY not set — skipping Brave Search.")
+            self.skipped = True
             return []
         if not self._should_run():
+            self.skipped = True
             return []
 
         results = []

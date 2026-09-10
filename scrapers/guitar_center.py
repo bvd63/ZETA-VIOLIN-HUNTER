@@ -56,6 +56,7 @@ class GuitarCenterScraper(BaseScraper):
     async def search(self) -> list:
         if not self.is_configured():
             log.info("Guitar Center: no US egress (US_PROXY_URL unset, container not in US) — skipping")
+            self.skipped = True
             return []
 
         results = []

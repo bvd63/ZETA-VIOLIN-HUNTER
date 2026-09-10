@@ -67,7 +67,7 @@ class StatusTracker:
         if not self._cycle_start:
             return
         duration = (datetime.utcnow() - self._cycle_start).total_seconds()
-        total_raw = sum(s["raw"] for s in self._cycle_stats.values())
+        total_raw = sum(max(0, s["raw"]) for s in self._cycle_stats.values())
         total_new = sum(s["new"] for s in self._cycle_stats.values())
         try:
             self.conn.execute("""
@@ -99,6 +99,8 @@ class StatusTracker:
                     else:
                         break
                 for raw, error in rows:
+                    if raw is not None and raw < 0:
+                        continue  # skipped cycle (quota guard / unconfigured): neither counts nor resets
                     if (raw or 0) == 0:
                         zero += 1
                     else:

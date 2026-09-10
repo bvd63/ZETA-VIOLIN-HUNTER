@@ -72,14 +72,25 @@ DROP_REASON_LABELS = {
     "url": "invalid-url",
     "direct_covered": "search-hit on directly-scraped site",
     "dead_link": "ended/expired page",
-    "duplicate": "same instrument already alerted",
+    "liveness_deferred": "search-hit deferred to next cycle (liveness budget)",
+    "duplicate_flagged": "flagged as possible duplicate (still sent)",
 }
-MAX_LIVENESS_CHECKS = 30  # per scraper per cycle
+MAX_LIVENESS_CHECKS = 60  # per scraper per cycle
 
 
 def _is_direct_host(url: str) -> bool:
-    host = urlsplit(url).netloc.lower()
-    return any(h in host for h in DIRECT_HOSTS)
+    """True for hosts we scrape directly. Exact domain or subdomain match —
+    'gumtree.com' must not swallow gumtree.com.au, 'jp.mercari.com' must not
+    swallow mercari.com (US)."""
+    host = urlsplit(url).netloc.lower().split(":")[0]
+    labels = host.split(".")
+    for d in DIRECT_HOSTS:
+        if d.endswith("."):            # "ebay." → any ebay.<tld> / <sub>.ebay.<tld>
+            if d[:-1] in labels:
+                return True
+        elif host == d or host.endswith("." + d):
+            return True
+    return False
 
 
 def build_scrapers() -> list:
@@ -123,7 +134,11 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                     scraper.search(), timeout=max(1, Config.SCRAPER_TIMEOUT_SEC)
                 )
                 fetched = max(int(getattr(scraper, "fetched", 0) or 0), len(listings))
-                log.info(f"   Found {len(listings)} candidate listings from {scraper.name} ({fetched} items fetched)")
+                if getattr(scraper, "skipped", False) and not listings:
+                    fetched = -1  # skipped (guard/unconfigured): ignored by the watchdog
+                    log.info(f"   {scraper.name}: skipped this cycle")
+                else:
+                    log.info(f"   Found {len(listings)} candidate listings from {scraper.name} ({fetched} items fetched)")
 
                 new_listings, drops, dropped = [], [], {}
                 checks_left = MAX_LIVENESS_CHECKS
@@ -149,24 +164,29 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                                 dropped["direct_covered"] = dropped.get("direct_covered", 0) + 1
                                 db.mark_seen(listing["id"], listing)
                                 continue
-                            if checks_left > 0:
-                                checks_left -= 1
-                                alive, why = await is_live(listing.get("url", ""), http)
-                                if not alive:
-                                    dropped["dead_link"] = dropped.get("dead_link", 0) + 1
-                                    log.info(f"   dead link ({why}): {listing.get('title', '')[:60]} {listing.get('url', '')[:80]}")
-                                    db.mark_seen(listing["id"], listing)  # never re-check
-                                    continue
-                                listing["liveness"] = why
+                            if checks_left <= 0:
+                                # Budget exhausted: leave it UNSEEN so the next cycle verifies it,
+                                # never alert an unverified search hit.
+                                dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
+                                continue
+                            checks_left -= 1
+                            alive, why = await is_live(listing.get("url", ""), http)
+                            if not alive:
+                                dropped["dead_link"] = dropped.get("dead_link", 0) + 1
+                                log.info(f"   dead link ({why}): {listing.get('title', '')[:60]} {listing.get('url', '')[:80]}")
+                                db.mark_seen(listing["id"], listing)  # never re-check
+                                continue
+                            listing["liveness"] = why
                         # Same instrument already alerted from another platform / relisted?
+                        # Two sellers can list the same model at similar prices, so NEVER
+                        # suppress — annotate the alert instead.
                         price_usd, _ = price_tracker._parse_price(listing.get("price", ""))
                         dup = is_duplicate(listing.get("title", ""), price_usd, recent_alerts)
                         if dup:
-                            dropped["duplicate"] = dropped.get("duplicate", 0) + 1
-                            log.info(f"   duplicate of [{dup.get('platform')}] {dup.get('title', '')[:50]}: "
+                            dropped["duplicate_flagged"] = dropped.get("duplicate_flagged", 0) + 1
+                            listing["duplicate_of"] = dup
+                            log.info(f"   possible duplicate of [{dup.get('platform')}] {dup.get('title', '')[:50]}: "
                                      f"{listing.get('title', '')[:50]}")
-                            db.mark_seen(listing["id"], listing)
-                            continue
                         db.mark_seen(listing["id"], listing)
                         db.record_alert(listing, price_usd)
                         recent_alerts.append({"title": listing.get("title", ""), "price_usd": price_usd,

@@ -145,9 +145,12 @@ OTHER_BRAND_RX = _rx([
 # "New other (see details)", "Open box"; Reverb "Brand New", "B-Stock".
 # "Mint" / "Like New" / "wie neu" are USED and must pass.
 NEW_CONDITION_RX = re.compile(
-    r"^\s*(?:brand[\s\-]*new|new(?:\s*\(|\s+with|\s+without|\s+other|\s*$)|b[\s\-]*stock|open[\s\-]*box|nuovo|neuf|neu|nieuw|nuevo)",
+    r"^\s*(?:brand[\s\-]*new\b|new(?:\s*\(|\s+with\b|\s+without\b|\s+other\b|\s*$)|b[\s\-]*stock\b|open[\s\-]*box\b"
+    r"|nuovo\b|neuf\b|neu\b|nieuw\b|nuevo\b)(?!\s*(?:wertig|-?ähnlich))",
     re.IGNORECASE,
 )
+# "wie neu", "come nuovo", "comme neuf", "zo goed als nieuw", "como nuevo",
+# "Neuwertig" are USED grades — the ^ anchor and \b keep them out.
 # Title-only shop language for new stock.
 NEW_STOCK_TITLE_RX = _rx([
     "brand new", "brandneu", "nagelneu", "nuovissimo", "new in box", "nib", "bnib",

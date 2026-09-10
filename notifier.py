@@ -142,6 +142,10 @@ class TelegramNotifier:
         rare = self._rare_flags(title, description)
         if rare:
             lines.append(f"🔥 <b>Rar:</b> {html.escape(', '.join(rare))}")
+        dup = listing.get("duplicate_of") or {}
+        if dup:
+            lines.append(f"♻️ Posibil același instrument ca [{html.escape(str(dup.get('platform', '')))}] "
+                         f"{html.escape(str(dup.get('title', ''))[:50])}")
 
         if price_context.get("avg_price"):
             avg = price_context["avg_price"]

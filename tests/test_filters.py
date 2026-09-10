@@ -25,6 +25,11 @@ CONDITION_CASES = [
     ({"title": "Zeta Strados Electric Violin", "condition": "Very Good", "url": URL}, ""),
     ({"title": "Zeta Strados like new", "condition": "Excellent", "url": URL}, ""),
     ({"title": "Zeta Geige wie neu", "condition": "", "url": URL}, ""),
+    ({"title": "Zeta Geige", "condition": "Neuwertig", "url": URL}, ""),               # DE "like new" = used
+    ({"title": "Zeta Geige", "condition": "Wie neu", "url": URL}, ""),
+    ({"title": "Zeta violino", "condition": "Come nuovo", "url": URL}, ""),
+    ({"title": "Zeta violino", "condition": "Nuovo", "url": URL}, "new_stock"),
+    ({"title": "Zeta Geige", "condition": "Neu", "url": URL}, "new_stock"),
     ({"title": "Brand New Zeta Strados 5-string", "condition": "", "url": URL}, "new_stock"),
     ({"title": "Zeta Jazz Fusion NIB authorized dealer", "condition": "", "url": URL}, "new_stock"),
     ({"title": "ZETA SV24 Strados Modern violin", "condition": "Brand New", "seller": "electricviolinshop", "url": URL}, "new_stock"),

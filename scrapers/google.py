@@ -173,9 +173,11 @@ class GoogleScraper(BaseScraper):
     # --- search ------------------------------------------------------------
     async def search(self) -> list:
         if not self._should_run():
+            self.skipped = True
             return []
         if not self.api_key or not self.cse_id:
             log.warning("Google API key or CSE ID not set — skipping Google search.")
+            self.skipped = True
             return []
 
         results = []
