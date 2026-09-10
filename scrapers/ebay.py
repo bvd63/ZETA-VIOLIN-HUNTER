@@ -90,6 +90,7 @@ class EbayScraper(BaseScraper):
     async def search(self) -> list:
         if not self.is_configured():
             log.warning("eBay CLIENT_ID or CLIENT_SECRET not set — skipping eBay.")
+            self.skipped = True
             return []
 
         results = []
