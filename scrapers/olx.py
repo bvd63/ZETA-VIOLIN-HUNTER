@@ -7,6 +7,8 @@ used by its frontend, reachable from EU datacenter IPs:
   GET https://www.olx.pl/api/v1/offers/?offset=0&limit=40&query=...
 """
 
+from keywords import market_queries
+
 import logging
 from scrapers.base import BaseScraper, BROWSER_UA
 from filters import has_zeta_signal
@@ -15,10 +17,10 @@ log = logging.getLogger(__name__)
 
 # (platform label, host, country, keywords)
 SITES = [
-    ("OLX PL", "www.olx.pl", "Poland", ["zeta skrzypce", "zeta violin", "skrzypce elektryczne zeta", "zeta strados"]),
-    ("OLX PT", "www.olx.pt", "Portugal", ["zeta violino", "zeta violin", "violino elétrico zeta"]),
-    ("OLX BG", "www.olx.bg", "Bulgaria", ["zeta цигулка", "zeta violin", "електрическа цигулка zeta"]),
-    ("OLX UA", "www.olx.ua", "Ukraine", ["zeta скрипка", "zeta violin", "електроскрипка zeta"]),
+    ('OLX PL', 'www.olx.pl', 'Poland', 'pl'),
+    ('OLX PT', 'www.olx.pt', 'Portugal', 'pt'),
+    ('OLX BG', 'www.olx.bg', 'Bulgaria', 'bg'),
+    ('OLX UA', 'www.olx.ua', 'Ukraine', 'uk'),
 ]
 
 HEADERS = {
@@ -36,8 +38,8 @@ class OlxScraper(BaseScraper):
         seen_ids = set()
 
         async with self.make_client(headers=HEADERS) as client:
-            for label, host, country, keywords in SITES:
-                for kw in keywords:
+            for label, host, country, language in SITES:
+                for kw in market_queries(language, broad=True):
                     try:
                         resp = await client.get(
                             f"https://{host}/api/v1/offers/",

@@ -9,17 +9,33 @@
 
 A Python bot that:
 - Runs on Railway.app (container, always-on, restart policy "always")
-- Scrapes global online marketplaces once per day at 09:00 UTC (12:00 Romania)
+- Scrapes global online marketplaces twice daily at 10:00 and 22:00 Europe/Bucharest (DST automatic)
 - Detects NEW Zeta electric violin listings (dedup via SQLite)
 - Sends Telegram alerts to a single user (Vlad, owner)
 - Also exposes HTTP endpoints: `POST /search` (manual trigger), `GET /health`, `GET /status` (dashboard)
 
 Non-goals: web UI, multi-user, real-time, mobile app, other instruments (no 
-violas, cellos, basses, mandolins — violins only).
+standalone violas, cellos, basses, mandolins — violins only; explicit mixed auction lots containing violins are allowed).
 
 ---
 
-## 2. CURRENT STATE (last verified 2026-09-07 — Prompt 13 audit/rewrite + Prompt 14 coverage expansion)
+## 2. CURRENT STATE (2026-10-05 code audit; historical notes follow)
+
+### October coverage and reliability update
+- Owner approved two runs at **10:00 and 22:00 Europe/Bucharest**, with no new paid services and a $5/month Railway budget. Use `SEARCH_HOURS=10,22`; legacy `SEARCH_HOUR` is ignored.
+- Railway service/volume inspected: `DB_PATH=/data/zeta_listings.db` is persistent. Historical cost estimates below are not current billing evidence. Existing `MAX_YEAR=2014` was still set: `FILTER_TEXT_YEARS=false` now ignores unreliable posting/purchase/auction years by default; used-only condition filtering remains.
+- `keywords.py` supplies bounded runtime query rotation to every adapter, including dormant ones, with brand misspellings, multilingual violin words, model codes and artists. Craigslist keeps four queries/area via its documented OR operator.
+- GovDeals and AllSurplus have public anonymous API adapters (max two pages/query, 30 asset-detail requests/cycle). The frontend public configuration is read dynamically; no API key is committed. HiBid and ShopGoodwill complete four direct auction platforms.
+- Google/Brave prioritize five auction groups every cycle, including houses with verified historical Zeta lots: Gardiner Houlgate, Tarisio and Heritage. See `docs/auction-sources.md`; broader discovery covers 22 distinct domains. History selects sources, not alertable inventory.
+- `offer_verifier.py` verifies purchase evidence, primary Product offers and auction status. It rejects editorial pages and closed result archives; blocked dedicated item URLs are labelled unknown. GovDeals/AllSurplus and Reverb use their public item APIs. Public URL/DNS checks cover user-supplied links and redirects.
+- Search-engine fallback results on directly scraped hosts are retained and URL-deduplicated. Verified search results refresh `/active`. Mixed lots with explicit violin counts are allowed; standalone violas remain rejected. Magazines, reviews, print ads and concerts are rejected.
+- Durable SQLite queues preserve failed listing and price-drop notifications. Seen/alerted status is set only after Telegram delivery; missing Telegram configuration is not success. Weekly digest is marked sent only after successful delivery.
+- API reservations happen BEFORE HTTP: Google <=96/Pacific day; Brave <=32/UTC day and <=960/calendar month by default. Cursor progress reflects actual attempts. No paid AI, browser service or proxy added. Google CSE retirement on 2027-01-01 remains a migration concern.
+- Scraper HTTP health tracks response errors separately from valid empty searches; `/status` includes reasons and filter counts. New `/verifica URL` diagnoses today's availability/filtering/delivery history, not past discovery.
+- Mercari numeric prices retain JPY before range checks. Asking-price comparisons require at least five observations of the same model/string group in 180 days; exclude auctions and mixed lots. They are not valuations or sold prices.
+- Validation: existing offline suites plus `tests.test_reliability`; CI compiles all modules and runs all five suites. Optional historical live URL probes require `RUN_LIVE_TESTS=1`.
+
+### Historical state (September 2026; superseded where noted)
 
 ### Infrastructure
 - Deployment status: Active
@@ -517,6 +533,8 @@ Bot is operational. See Section 2 "What is broken" for remaining known issues.
 |---|---|---|
 | 2026-09-07 | **One search per day at 12:00 Europe/Bucharest** (`SEARCH_HOURS=12`, `SEARCH_TIMEZONE`), Google 96 queries/run, Brave 32/run, guards 20h | Owner request. Scheduler timezone is Bucharest so the hour survives DST; budgets scale automatically if more hours are added. Startup run on deploy still happens (guards protect quotas). |
 | 2026-09-07 | **Search-engine hits are verified before alerting** (`liveness.py`): (1) hits on hosts we scrape directly (Reverb, eBay, Craigslist, Subito, Marktplaats, Kijiji, Willhaben, HiBid, ShopGoodwill, OLX, Nordics, Gumtree, Mercari JP) are dropped — those sites are removed from the Google/Brave site groups too; (2) every other new hit is fetched once: 404/410, redirect to home/search, or a multilingual "listing has ended / posting expired / non più disponibile" marker = dead → marked seen, never alerted; Reverb URLs are checked via the API `state`; (3) matrix queries limited to the past year (`dateRestrict=y1`, `freshness=py`). Max 30 checks per scraper per cycle; network errors keep the listing | Owner received Brave/Google alerts for Reverb/eBay pages ended in 2008–2013. Direct scrapers only return live inventory, so search engines are useful only for sites we cannot reach, and only after a liveness check. |
+| 2026-10-05 | Shared bounded keyword rotation, 10:00/22:00 local schedule, direct GovDeals/AllSurplus and auction groups prioritised by verified past Zeta sales | Owner requests worldwide model-based discovery and auctions beyond GovDeals, within $5 Railway budget; no new paid service. |
+| 2026-10-05 | Disable text-year filtering by default, allow explicit violin-containing mixed lots, verify sale evidence, durable delivery queue and comparable asking prices | Production MAX_YEAR=2014 still excluded modern date mentions; GovDeals mixed lot was wrongly rejected for viola. HTTP 200 and a global price average were unreliable evidence. |
 | 2026-09-10 | **Condition filter back ON by default** (`CONDITION=used`) after a one-run trial with `all` | Owner tried `all` ("elimină, să văd ce o să fie după") and rejected it the same day: "îmi tot dă viori modele noi". Second-hand only is the settled rule; new signature models from dealers are NOT wanted. |
 | 2026-09-07 | **Second-hand only, any model/year** (`CONDITION=used` default): drop platform conditions New/Brand New/Open box/B-Stock, new-stock dealers (`EXCLUDED_SELLERS`: electricviolinshop, zetaviolins, …) and shop language in titles (brand new, NIB, authorized dealer, in stock). MIN_YEAR/MAX_YEAR kept only as a loose text guard | Owner: "modele noi sunt OK dacă sunt second-hand, nu nou-nouțe". The text year filter cannot tell manufacture year (sellers write purchase years), so MAX_YEAR=2014 would again drop vintage listings; condition + seller are the reliable signals. Verified live: the 2 Electric Violin Shop "Brand New" Zetas are dropped, the 3 used ones pass. |
 | 2026-09-07 | Prompt 14: watchdog on `fetched` (pre-filter count) instead of on filtered results | Broad-query scrapers (Craigslist, ShopGoodwill, HiBid, OLX) legitimately return 0 Zeta candidates most cycles; only "source returned nothing" is a failure signal. Unconfigured scrapers (`is_configured()` False) are excluded. |

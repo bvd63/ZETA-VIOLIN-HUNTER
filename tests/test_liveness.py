@@ -52,10 +52,11 @@ def main() -> int:
             alive, why = await is_live("https://reverb.com/item/2673122-zeta-strados-electric-5-string-midi-violin", c)
             print(f"     reverb live listing → alive={alive} ({why})")
             check(alive is True, "live Reverb listing detected as live")
-    try:
-        asyncio.run(live_checks())
-    except Exception as e:
-        print(f"skip live checks (network): {e}")
+    if os.getenv("RUN_LIVE_TESTS") == "1":
+        try:
+            asyncio.run(live_checks())
+        except Exception as e:
+            print(f"skip live checks (network): {type(e).__name__}")
 
     print(f"\n{'ALL OK' if not failures else str(failures) + ' FAILED'}")
     return 1 if failures else 0

@@ -7,6 +7,8 @@ without login and is not heavily protected.
 Search URL: guitarcenter.com/search#q=QUERY&t=used
 """
 
+from keywords import market_queries
+
 import httpx
 import logging
 import re
@@ -19,14 +21,6 @@ log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.guitarcenter.com/search"
 
-KEYWORDS = [
-    "zeta violin",
-    "zeta electric violin",
-    "zeta strados",
-    "zeta jv44",
-    "zeta sv24",
-    "zetta violin",
-]
 
 HEADERS = {
     "User-Agent": (
@@ -63,7 +57,7 @@ class GuitarCenterScraper(BaseScraper):
         seen_ids: set = set()
 
         async with self.make_client(us_proxy=True, timeout=20, headers=HEADERS) as client:
-            for kw in KEYWORDS:
+            for kw in market_queries("en", broad=True, limit=8):
                 try:
                     # Guitar Center search with used filter
                     params = {"q": kw, "t": "used"}

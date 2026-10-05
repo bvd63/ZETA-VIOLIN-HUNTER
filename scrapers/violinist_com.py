@@ -3,6 +3,8 @@ Violinist.com scraper — discussion forum and marketplace.
 Large violin community. Simple httpx + BeautifulSoup.
 """
 
+from keywords import market_queries
+
 import httpx
 import logging
 from bs4 import BeautifulSoup
@@ -32,12 +34,11 @@ class ViolinistComScraper(BaseScraper):
                           "Chrome/131.0.0.0 Safari/537.36",
         }
 
-        keywords = ["zeta violin", "zeta electric violin", "zeta strados"]
 
-        async with httpx.AsyncClient(
+        async with self.make_client(
             timeout=15, follow_redirects=True, headers=headers
         ) as client:
-            for kw in keywords:
+            for kw in market_queries("en", broad=True, limit=8):
                 try:
                     resp = await client.get(
                         SEARCH_URL, params={"terms": kw}

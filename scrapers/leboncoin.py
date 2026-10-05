@@ -3,6 +3,8 @@ Leboncoin.fr scraper — France's largest classifieds.
 Uses Playwright to bypass anti-bot, then extracts __NEXT_DATA__ JSON.
 """
 
+from keywords import market_queries
+
 import asyncio
 import json
 import logging
@@ -10,12 +12,6 @@ from scrapers.base import BaseScraper
 
 log = logging.getLogger(__name__)
 
-KEYWORDS = [
-    "Zeta violon",
-    "Zeta violin",
-    "Zeta Strados",
-    "violon electrique Zeta",
-]
 
 ZETA_SIGNALS = [
     "zeta", "zetta", "strados", "jv44", "jv45",
@@ -55,7 +51,7 @@ class LeboncoinScraper(BaseScraper):
                 )
                 page = await context.new_page()
 
-                for kw in KEYWORDS:
+                for kw in market_queries("fr", broad=True, limit=8):
                     try:
                         url = SEARCH_URL.format(keyword=kw.replace(" ", "+"))
                         await page.goto(url, wait_until="networkidle", timeout=30000)

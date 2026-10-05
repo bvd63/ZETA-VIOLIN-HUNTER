@@ -29,7 +29,7 @@ class TelegramNotifier:
         if not self.token or not self.chat_id:
             log.warning("Telegram not configured — skipping notification.")
             log.info(f"[ALERT PREVIEW {method}]\n{payload.get('caption') or payload.get('text')}")
-            return True
+            return False
         url = TELEGRAM_API.format(token=self.token, method=method)
         payload = {"chat_id": self.chat_id, **payload}
         async with httpx.AsyncClient(timeout=20) as client:
@@ -66,7 +66,10 @@ class TelegramNotifier:
             f"📦 <b>{len(listings)} new listing(s) found!</b>{header_note}\n"
             f"{'─' * 30}"
         )
-        await self.send(header)
+        try:
+            await self.send(header)
+        except Exception as exc:
+            log.warning("Telegram header failed (%s); continuing with queued listings", type(exc).__name__)
 
         delivered = []
         for i, listing in enumerate(listings, 1):
@@ -96,11 +99,12 @@ class TelegramNotifier:
     async def send_price_drops(self, drops: list):
         """drops: list of (listing, {old_price, new_price, drop_pct})."""
         if not drops:
-            return
-        await self.send(
-            f"📉 <b>ZETA VIOLIN HUNTER — PRICE DROP</b>\n"
-            f"{len(drops)} known listing(s) got cheaper\n{'─' * 30}"
-        )
+            return []
+        try:
+            await self.send(f"📉 <b>ZETA VIOLIN HUNTER — PRICE DROP</b>\n{len(drops)} known listing(s) got cheaper\n{'─' * 30}")
+        except Exception as exc:
+            log.warning("Price-drop header failed (%s)", type(exc).__name__)
+        delivered = []
         for i, (listing, info) in enumerate(drops, 1):
             title = html.escape(str(listing.get("title", "")))
             url = self._normalize_url(listing.get("url", ""))
@@ -113,8 +117,13 @@ class TelegramNotifier:
             if url:
                 lines.append(f"🔗 <a href=\"{html.escape(url, quote=True)}\">View Listing</a>")
                 lines.append(url)
-            await self.send("\n".join(lines))
+            try:
+                if await self.send("\n".join(lines)):
+                    delivered.append((listing, info))
+            except Exception as exc:
+                log.warning("Price-drop delivery failed (%s)", type(exc).__name__)
             await asyncio.sleep(1.5)
+        return delivered
 
     async def send_watchdog(self, alerts: list):
         if not alerts:
@@ -160,6 +169,21 @@ class TelegramNotifier:
             f"🎻 <b>#{idx} — {html.escape(title)}</b>",
             f"💰 <b>Price:</b> {html.escape(price)}{self._eur_hint(price_context)}",
         ]
+        if listing.get("verification") == "unknown":
+            lines.append("⚠️ Disponibilitate neverificată; verifică pagina înainte de a cumpăra.")
+        if listing.get("auction") or "bid)" in price.lower():
+            lines.append("🔨 Licitație — suma afișată poate fi oferta curentă, fără comisioane.")
+        if listing.get("auction_end"):
+            try:
+                from zoneinfo import ZoneInfo
+                end = datetime.fromisoformat(str(listing["auction_end"]).replace("Z", "+00:00"))
+                lines.append(f"⏳ Închidere: {end.astimezone(ZoneInfo(Config.SEARCH_TIMEZONE)):%d.%m.%Y %H:%M %Z}")
+            except ValueError:
+                pass
+        if listing.get("pickup_only"):
+            lines.append("📦 Ridicare personală; vânzătorul nu expediază.")
+        if listing.get("mixed_lot"):
+            lines.append("🎻 Lot mixt: include viori Zeta și alte instrumente.")
         rare = self._rare_flags(title, description)
         if rare:
             lines.append(f"🔥 <b>Rar:</b> {html.escape(', '.join(rare))}")
@@ -173,9 +197,9 @@ class TelegramNotifier:
             deal_pct = price_context.get("deal_pct", 0) or 0
             total = price_context.get("total_seen", 0)
             if price_context.get("is_deal"):
-                lines.append(f"🔥 <b>DEAL!</b> {abs(deal_pct):.0f}% below avg (${avg:.0f}, {total} seen)")
+                lines.append(f"📊 {abs(deal_pct):.0f}% sub mediana prețurilor cerute comparabile (${avg:.0f}, {total} anunțuri)")
             else:
-                lines.append(f"📊 Avg: ${avg:.0f} ({total} seen)")
+                lines.append(f"📊 Mediană cerută comparabilă: ${avg:.0f} ({total} anunțuri)")
 
         lines.append(f"📍 <b>Location:</b> {html.escape(location)}")
         ships = listing.get("ships_to_ro")
@@ -231,14 +255,14 @@ class TelegramNotifier:
         for r in active[:20]:
             lines.append(f"• {html.escape(r['title'][:55])} — {html.escape(r['price'])} [{html.escape(r['platform'][:18])}]\n  {html.escape(r['url'])}")
         if gone:
-            lines.append("\n<b>Dispărute (probabil vândute):</b>")
+            lines.append("\n<b>Nerevăzute recent (disponibilitate necunoscută):</b>")
             for r in gone[:10]:
                 lines.append(f"• {html.escape(r['title'][:55])} — {html.escape(r['price'])} [{html.escape(r['platform'][:18])}]")
         if price_stats and price_stats.get("total_tracked"):
             lines.append(f"\n📊 Prețuri urmărite: {price_stats['total_tracked']} · medie ${price_stats.get('avg_usd', 0):,.0f} "
                          f"· min ${price_stats.get('min_usd', 0):,.0f} · max ${price_stats.get('max_usd', 0):,.0f}")
         lines.append(f"🕒 {datetime.utcnow():%Y-%m-%d %H:%M} UTC")
-        await self.send("\n".join(lines)[:3900])
+        return await self.send("\n".join(lines)[:3900])
 
     def _normalize_url(self, raw_url: str) -> str:
         if not raw_url:

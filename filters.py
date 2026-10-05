@@ -15,6 +15,7 @@ title-only — sellers mention them in bodies of perfectly good listings.
 
 import re
 from urllib.parse import urlsplit
+from keywords import MODEL_CODES, MODEL_NAMES, ARTISTS
 
 
 def _rx(terms: list) -> "re.Pattern":
@@ -36,22 +37,17 @@ ZETA_BRAND_JP = ["ゼータ"]
 
 # Unique Zeta model codes, optional hyphen (SV-24). Yamaha SV-200/SV-250/EV-205
 # do NOT match because the digits must end at a word boundary.
-MODEL_CODE_RX = re.compile(r"(?<![\w])(?:jv[\s\-]?4[45]|sv[\s\-]?2[45]|sv[\s\-]?43|cv[\s\-]?44|ev[\s\-]?25|ev[\s\-]?44)(?![\w])", re.IGNORECASE)
+MODEL_CODE_RX = re.compile(r"(?<![\w])(?:" + "|".join(
+    r"[\s\-]?".join(re.escape(part) for part in re.findall(r"[A-Za-z]+|\d+", code)) for code in MODEL_CODES
+) + r")(?![\w])", re.IGNORECASE)
 
-ZETA_ONLY_ARTIST_RX = _rx(["jean-luc ponty", "jean luc ponty", "jlp", "jlp5", "boyd tinsley", "eileen ivers"])
+ZETA_ONLY_ARTIST_RX = _rx([*ARTISTS, "jlp"])
 
 # ---------------------------------------------------------------------------
 # §4.2 CLASS B — model names
 # ---------------------------------------------------------------------------
 STRADOS_RX = _rx(["strados"])  # alone is OK
-MODEL_NAME_RX = _rx([
-    "jazz fusion", "jazz standard", "jazz modern", "jazz classic", "jazz acoustic pro",
-    "jazz fusion legacy", "fusion legacy", "jazz legacy",
-    "strados modern", "strados fusion", "strados acoustic pro", "strados standard", "strados legacy",
-    "e-fusion", "e-modern", "ev acoustic pro", "acoustic pro", "acoustic-pro",
-    "educator",  # Zeta Educator student series (requires Zeta context)
-    "vanessa-mae", "vanessa mae",
-])
+MODEL_NAME_RX = _rx(list(MODEL_NAMES))
 
 # ---------------------------------------------------------------------------
 # §4.3 CLASS C — violin words, multi-language
@@ -94,7 +90,6 @@ NOISE_OBJECT_RX = _rx([
     "combo amp", "padded cover", "amp cover", "cover for", "catalog", "catalogue",
     "brochure", "manual only", "strings only", "string set", "sticker", "decal",
     "cello", "cellos", "mandolin", "upright bass", "bass guitar",
-    "viola", "violas",  # §1 scope: violins only, even when the title also says "violin"
     "copia", "copy", "kopie", "kopia", "copie", "clone",
     "fx", "effects", "effect processor", "preamp only", "pickup system only",
 ])
@@ -102,8 +97,11 @@ NOISE_OBJECT_RX = _rx([
 # title has no violin word ("Zeta violin + bass amp" must pass).
 NOISE_TITLE_MEDIA_RX = _rx([
     "cd", "cds", "dvd", "vinyl", "lp", "album", "cassette", "book", "poster",
-    "shirt", "t-shirt", "sheet music",
+    "shirt", "t-shirt", "sheet music", "magazine", "magazines", "review", "interview",
+    "press release", "advertisement", "print ad", "magazine ad", "article clipping",
+    "newspaper", "pamphlet", "revista", "revue", "zeitschrift", "concert", "tickets", "ticket",
 ])
+OTHER_INSTRUMENT_RX = _rx(["viola", "violas"])
 NOISE_TITLE_INSTRUMENT_RX = _rx(["bass", "guitar"])
 # Japanese noise — substring match (no word spaces in Japanese).
 NOISE_JP = [
@@ -232,6 +230,8 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None) 
         title_conclusive = is_zeta_violin(title)
     if NOISE_RX.search(title) or NOISE_OBJECT_RX.search(title) or NOISE_TITLE_MEDIA_RX.search(title):
         return True
+    if OTHER_INSTRUMENT_RX.search(title) and not mixed_lot_includes_violin(title):
+        return True
     if NOISE_TITLE_INSTRUMENT_RX.search(title) and not has_violin_word(title):
         return True
     if any(j in title for j in NOISE_JP):
@@ -240,9 +240,21 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None) 
         return False
     if NOISE_RX.search(description) or any(j in description for j in NOISE_JP):
         return True
-    if not title_conclusive and NOISE_OBJECT_RX.search(description):
+    if not title_conclusive and (NOISE_OBJECT_RX.search(description) or OTHER_INSTRUMENT_RX.search(description)):
         return True
     return False
+
+
+def mixed_lot_includes_violin(title: str) -> bool:
+    """Explicit bundle with a violin; 'violin/viola' alone is ambiguous."""
+    if not is_zeta_violin(title) or not has_violin_word(title):
+        return False
+    return bool(re.search(r"\bviolins?\s*\(\s*[1-9]\d*\s*\)|\b(?:lot|bundle|collection)\b", title, re.I))
+
+
+def is_editorial_url(url: str) -> bool:
+    path = urlsplit(url).path.lower()
+    return bool(re.search(r"/(?:blog|blogs|news|article|articles|magazine|magazines|reviews?|press)(?:/|$)", path))
 
 
 def is_excluded_intent(title: str, description: str = "", title_conclusive: bool = None) -> bool:
@@ -299,7 +311,7 @@ def is_valid_listing_url(url: str) -> bool:
     path = parts.path.rstrip("/").lower()
     if path in ("", "/"):
         return False
-    return not path.startswith(("/search", "/category", "/categories", "/help", "/about"))
+    return not re.match(r"^/(?:[a-z]{2}/)?(?:search|category|categories|help|about)(?:/|$)", path)
 
 
 def classify(listing: dict) -> str:
@@ -307,6 +319,8 @@ def classify(listing: dict) -> str:
     (used for per-reason counters in main.py)."""
     from config import Config  # local import keeps filters importable in tests
     title, desc = _text(listing)
+    if listing.get("source") == "search" and is_editorial_url(str(listing.get("url", ""))):
+        return "non_sale"
     title_conclusive = is_zeta_violin(title)
     if is_other_brand(title):
         return "other_brand"

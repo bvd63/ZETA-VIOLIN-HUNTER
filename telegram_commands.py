@@ -108,14 +108,52 @@ class TelegramCommands:
             await self.notifier.send(self._status_text())
         elif cmd in ("/active", "/activ", "/live"):
             await self.notifier.send(self._active_text())
+        elif cmd in ("/verifica", "/verify"):
+            parts = text.split(maxsplit=1)
+            if len(parts) < 2:
+                await self.notifier.send("Trimite /verifica urmat de linkul anunțului.")
+            else:
+                await self._verify_url(parts[1].strip())
         else:
             await self.notifier.send(
                 "🎻 <b>Comenzi</b>\n"
                 "/cauta — pornește o căutare acum\n"
                 "/status — starea surselor și ultimul ciclu\n"
                 "/active — viorile Zeta văzute live în ultimele 3 zile\n"
+                "/verifica LINK — verifică un anunț și istoricul notificării\n"
                 "/help — acest mesaj"
             )
+
+    async def _verify_url(self, url: str) -> None:
+        from offer_verifier import verify_offer, public_url
+        from filters import classify
+        if not public_url(url):
+            await self.notifier.send("Linkul trebuie să fie o pagină publică HTTP/HTTPS.")
+            return
+        listing = {"url": url, "title": "", "description": "", "source": "search"}
+        async with httpx.AsyncClient(timeout=20) as client:
+            state, why = await verify_offer(listing, client)
+        labels = {"live": "Ofertă verificată", "unknown": "Disponibilitate neverificată",
+                  "dead": "Anunț / licitație încheiată", "non_sale": "Fără ofertă de vânzare"}
+        lines = [f"🔎 <b>{labels.get(state, state)}</b>", html.escape(why)]
+        if listing.get("title"):
+            lines.append(html.escape(listing["title"][:250]))
+            reason = classify(listing)
+            if reason:
+                reasons = {"noise": "publicație, accesoriu sau alt instrument", "intent": "nu este un anunț de vânzare",
+                           "new_stock": "instrument nou", "other_brand": "altă marcă", "non_zeta": "nu pot identifica o vioară Zeta",
+                           "sold": "vândut / încheiat", "non_sale": "articol / recenzie"}
+                lines.append("Filtru: " + reasons.get(reason, reason))
+            else:
+                lines.append("🎻 Recunoscut ca vioară Zeta; trece filtrele.")
+        db = self.database_factory()
+        try:
+            notified = db.was_url_alerted(url)
+        finally:
+            db.close()
+        lines.append("📬 Apare în istoricul notificărilor." if notified else "📭 Nu apare în istoricul notificărilor păstrat.")
+        lines.append("Verificarea arată starea actuală; nu reconstituie o căutare din trecut.")
+        await self.notifier.send("\n".join(lines))
 
     async def _search_and_report(self) -> None:
         try:
@@ -129,6 +167,8 @@ class TelegramCommands:
         st = self.status_tracker.get_status()
         last = st.get("last_cycle") or {}
         lines = ["📊 <b>Status</b>"]
+        hours = ", ".join(f"{int(h.strip()):02d}:00" for h in Config.SEARCH_HOURS.split(",") if h.strip().isdigit())
+        lines.append(f"🕒 Program: {hours} · {html.escape(Config.SEARCH_TIMEZONE)}")
         if last:
             lines.append(f"Ultimul ciclu: {html.escape(str(last.get('run_at', ''))[:16])} UTC, "
                          f"{last.get('duration_seconds', 0)}s, {last.get('new_listings', 0)} noi, "
@@ -139,9 +179,14 @@ class TelegramCommands:
             if raw < 0:
                 lines.append(f"⚪ {html.escape(name)}: sărit (neconfigurat sau cotă)")
                 continue
-            flag = "🔴" if s.get("error") else ("🟡" if s.get("zero_streak", 0) >= Config.WATCHDOG_ZERO_STREAK else "🟢")
+            flag = "🔴" if s.get("error") else ("🟡" if raw == 0 and not (s.get("details") or {}).get("requests_ok") else "🟢")
             lines.append(f"{flag} {html.escape(name)}: {raw} citite, {s.get('new', 0)} noi"
                          + (f", {s.get('zero_streak')} cicluri pe 0" if s.get("zero_streak") else ""))
+            if s.get("error"):
+                lines.append("  " + html.escape(str(s["error"])[:100]))
+            rejected = (s.get("details") or {}).get("rejected") or {}
+            if rejected:
+                lines.append("  Filtre: " + html.escape(", ".join(f"{reason}={count}" for reason, count in rejected.items()))[:180])
         lines.append(f"🕒 {datetime.utcnow():%Y-%m-%d %H:%M} UTC")
         return "\n".join(lines)[:3900]
 

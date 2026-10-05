@@ -3,8 +3,8 @@ Google Custom Search scraper — catches listings on every platform we cannot
 reach directly (anti-bot / geo-blocked from a European datacenter: Facebook
 Marketplace, OfferUp, Mercari US, Etsy, Guitar Center, Kleinanzeigen, ...).
 
-Quota: 100 queries/day, reset at midnight Pacific. Both scheduled runs
-(09:00 + 21:00 UTC) fall in the same quota day, so each run spends at most
+Quota: 96 queries/day, reset at midnight Pacific. Scheduled runs are
+10:00 and 22:00 Europe/Bucharest; each run spends at most
 Config.GOOGLE_QUERIES_PER_RUN (default 48).
 
 Per run:
@@ -12,7 +12,7 @@ Per run:
     anything fresh anywhere on the web.
   * a rotating slice of the (keyword × site-group) MATRIX; a cursor stored in
     SQLite makes consecutive runs continue where the previous stopped, so the
-    whole matrix is covered every ~2 runs.
+    whole matrix is covered over successive runs within the quota.
 
 NOTE: Google retires this API on 2027-01-01 (already closed to new customers).
 """
@@ -23,35 +23,28 @@ from datetime import datetime, timedelta
 from scrapers.base import BaseScraper
 from config import Config
 from database import connect
+from keywords import WEB_KEYWORDS, MODEL_CODES
+from search_budget import reserve_request
 
 log = logging.getLogger(__name__)
 
 GOOGLE_API = "https://www.googleapis.com/customsearch/v1"
 
-GLOBAL_QUERIES = [
-    "Zeta electric violin",
-    "Zeta Strados violin",
-    "Zeta violin for sale",
-    "Zeta Jazz Fusion violin",
-    "violino elettrico Zeta OR violon électrique Zeta OR violín eléctrico Zeta OR Zeta Geige OR Zeta viool",
-    "Zetta violin OR Zeta JV44 OR Zeta SV24 OR Zeta JLP violin",
-    "ゼータ バイオリン OR ゼータ エレキバイオリン OR ZETA エレクトリックヴァイオリン",
-    "Zeta скрипка OR Zeta электроскрипка OR Zeta цигулка OR Zeta skrzypce OR Zeta hegedű",
+AUCTION_GROUPS = [
+    # Confirmed Zeta auction history: Gardiner Houlgate, Tarisio, Heritage,
+    # and the owner's mixed GovDeals lot. See docs/auction-sources.md.
+    "site:gardinerhoulgate.co.uk OR site:musicalinstrument-auctions.co.uk OR site:tarisio.com OR site:ha.com OR site:govdeals.com",
+    "site:govdeals.com OR site:allsurplus.com OR site:publicsurplus.com OR site:hibid.com OR site:shopgoodwill.com",
+    "site:proxibid.com OR site:liveauctioneers.com OR site:invaluable.com OR site:the-saleroom.com OR site:auctionzip.com",
+    "site:catawiki.com OR site:tarisio.com OR site:bonhams.com OR site:bidspotter.com OR site:easyliveauction.com",
+    "site:interencheres.com OR site:drouot.com OR site:lot-tissimo.com OR site:ha.com OR site:dorotheum.com",
 ]
+AUCTION_SIGNALS = 'Zeta OR Strados OR ' + ' OR '.join(MODEL_CODES) + ' OR "Jean-Luc Ponty"'
+PRIORITY_QUERIES = [f"({group}) ({AUCTION_SIGNALS})" for group in AUCTION_GROUPS]
+GLOBAL_QUERIES = PRIORITY_QUERIES + WEB_KEYWORDS[:2]
+MATRIX_KEYWORDS = WEB_KEYWORDS
 
-MATRIX_KEYWORDS = [
-    "Zeta violin",
-    "Zeta electric violin",
-    "Zeta Strados",
-    "Zeta Jazz Fusion",
-    "Zeta JV44 OR Zeta SV24 OR Zeta JLP",
-    "Zetta violin OR Zeta violino OR Zeta violon OR Zeta Geige OR Zeta viool",
-]
-
-# Sites we scrape DIRECTLY are deliberately absent: search engines return their
-# stale, years-old "ended" pages, while the direct scrapers see live inventory.
-# (Reverb, eBay, Craigslist, ShopGoodwill, HiBid, Kijiji, Marktplaats/2dehands,
-# Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX PL/PT/BG/UA, Subito, Mercari JP)
+# Search-engine results back up direct scrapers; main verifies each item page.
 SITE_GROUPS = [
     # USA — consumer marketplaces blocked from datacenter IPs
     "site:offerup.com OR site:mercari.com OR site:facebook.com/marketplace OR site:etsy.com "
@@ -61,7 +54,11 @@ SITE_GROUPS = [
     "OR site:chicagomusicexchange.com OR site:elderly.com OR site:musiciansfriend.com OR site:zzounds.com",
     # Auctions & estate sales (the ones we cannot reach directly)
     "site:liveauctioneers.com OR site:invaluable.com OR site:proxibid.com OR site:estatesales.net "
-    "OR site:catawiki.com OR site:tarisio.com OR site:bonhams.com OR site:the-saleroom.com",
+    "OR site:catawiki.com OR site:tarisio.com OR site:bonhams.com OR site:the-saleroom.com "
+    "OR site:govdeals.com OR site:allsurplus.com OR site:publicsurplus.com OR site:auctionzip.com",
+    # Backup coverage: verified item pages survive even when direct search fails.
+    "site:reverb.com OR site:ebay.com OR site:craigslist.org OR site:subito.it "
+    "OR site:marktplaats.nl OR site:jp.mercari.com",
     # UK / IE / AU / NZ / SEA
     "site:gumtree.com.au OR site:preloved.co.uk OR site:carousell.com OR site:trademe.co.nz "
     "OR site:donedeal.ie OR site:adverts.ie OR site:shpock.com OR site:depop.com",
@@ -87,14 +84,6 @@ SITE_GROUPS = [
     "site:mercadolibre.com.ar OR site:mercadolibre.com.mx OR site:mercadolivre.com.br "
     "OR site:olx.com.br OR site:gumtree.co.za OR site:mudah.my OR site:olx.in OR site:yapo.cl",
 ]
-
-# Hosts covered by direct scrapers — search-engine hits on them are dropped in main.py.
-DIRECT_HOSTS = (
-    "reverb.com", "ebay.", "craigslist.org", "shopgoodwill.com", "hibid.com", "kijiji.ca",
-    "marktplaats.nl", "2dehands.be", "willhaben.at", "finn.no", "tori.fi", "dba.dk", "blocket.se",
-    "gumtree.com", "olx.pl", "olx.pt", "olx.bg", "olx.ua", "subito.it", "jp.mercari.com",
-)
-
 
 def _db():
     conn = connect()
@@ -193,13 +182,14 @@ class GoogleScraper(BaseScraper):
     def plan_queries(self, cursor: int, budget: int = None) -> tuple:
         """Return (list of (q, extra_params), next_cursor)."""
         budget = max(1, budget if budget is not None else Config.GOOGLE_QUERIES_PER_RUN)
-        plan = [(q, {"dateRestrict": "w2", "sort": "date"}) for q in GLOBAL_QUERIES][:budget]
+        plan = [(q, {} if q in PRIORITY_QUERIES else {"dateRestrict": "w2", "sort": "date"}) for q in GLOBAL_QUERIES][:budget]
         matrix = [f"{kw} {group}" for kw in MATRIX_KEYWORDS for group in SITE_GROUPS]
         remaining = budget - len(plan)
         n = len(matrix)
         for i in range(min(remaining, n)):
             # pages indexed within the last year — older hits are almost always ended
-            plan.append((matrix[(cursor + i) % n], {"dateRestrict": "y1"}))
+            plan.append((f"({MATRIX_KEYWORDS[((cursor + i) % n) // len(SITE_GROUPS)]}) "
+                         f"({SITE_GROUPS[(cursor + i) % len(SITE_GROUPS)]})", {"dateRestrict": "y1"}))
         next_cursor = (cursor + min(remaining, n)) % n if n else 0
         return plan, next_cursor
 
@@ -229,12 +219,15 @@ class GoogleScraper(BaseScraper):
                  f"{used} already used today)")
         spent = 0
 
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with self.make_client(timeout=20) as client:
             for q, extra in plan:
                 try:
+                    if not reserve_request("google", min(96, Config.GOOGLE_DAILY_QUOTA)):
+                        log.info("Google daily budget exhausted — no further HTTP requests")
+                        break
+                    spent += 1
                     params = {"key": self.api_key, "cx": self.cse_id, "q": q, "num": 10, **extra}
                     resp = await client.get(GOOGLE_API, params=params)
-                    spent += 1
                     if resp.status_code in (429, 403):
                         log.warning(f"Google CSE HTTP {resp.status_code} (quota?) — stopping: {resp.text[:200]!r}")
                         break
@@ -281,7 +274,7 @@ class GoogleScraper(BaseScraper):
                             "price": price or "See listing",
                             "location": location or "Unknown",
                             "url": url,
-                            "description": snippet[:300],
+                            "description": snippet[:1000],
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, snippet),
                             "source": "search",  # main.py verifies the page is still live
@@ -289,8 +282,8 @@ class GoogleScraper(BaseScraper):
                 except Exception as e:
                     log.warning(f"Google search '{q[:60]}' error: {e}")
 
-        self._add_quota_used(spent)
-        self._set_cursor(next_cursor)
+        consumed_matrix = max(0, spent - min(len(GLOBAL_QUERIES), len(plan)))
+        self._set_cursor((cursor + consumed_matrix) % (len(MATRIX_KEYWORDS) * len(SITE_GROUPS)))
         self._mark_run()
         log.info(f"Google CSE: {len(results)} listings found ({spent} queries spent)")
         return results

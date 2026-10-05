@@ -7,6 +7,8 @@ WITHOUT any token. REVERB_API_TOKEN is therefore optional; if set it is sent
 as X-Auth-Token (raises rate limits).
 """
 
+from keywords import market_queries
+
 import httpx
 import logging
 import re
@@ -17,21 +19,6 @@ log = logging.getLogger(__name__)
 
 REVERB_API = "https://api.reverb.com/api/listings"
 
-KEYWORDS = [
-    "Zeta violin",
-    "Zeta electric violin",
-    "Zeta Strados",
-    "Zeta Jazz Fusion",
-    "Zeta Jazz Modern",
-    "Zeta Acoustic Pro",
-    "Zeta JV44",
-    "Zeta SV24",
-    "Zeta JLP",
-    "Zetta violin",
-    "Strados violin",
-    "Jean-Luc Ponty violin",
-    "electric violin 5 string MIDI",
-]
 MAX_PAGES = 2
 TAG_RX = re.compile(r"<[^>]+>")
 
@@ -57,9 +44,9 @@ class ReverbScraper(BaseScraper):
 
         # Keyword searches plus Reverb's structured brand filter (make=Zeta),
         # which catches odd titles like "Very fine rare 5 strings Zeta Midi".
-        searches = [{"query": kw} for kw in KEYWORDS] + [{"make": "Zeta"}]
+        searches = [{"query": kw} for kw in market_queries(broad=True, limit=10)] + [{"make": "Zeta"}]
 
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        async with self.make_client(timeout=15, follow_redirects=True) as client:
             for base_params in searches:
                 kw = base_params.get("query") or f"make={base_params.get('make')}"
                 for page in range(1, MAX_PAGES + 1):

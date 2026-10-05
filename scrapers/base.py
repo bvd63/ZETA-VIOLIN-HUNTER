@@ -37,6 +37,11 @@ class BaseScraper:
     # "skipped" (raw = -1) so the watchdog neither counts nor resets its streak.
     skipped: bool = False
 
+    def reset_health(self) -> None:
+        self.requests_attempted = 0
+        self.requests_ok = 0
+        self.failures = []
+
     def is_configured(self) -> bool:
         """False when required credentials/config are missing and search()
         will skip. The watchdog ignores unconfigured scrapers."""
@@ -47,9 +52,28 @@ class BaseScraper:
         Config.US_PROXY_URL when set (for sites that block EU datacenter IPs)."""
         kwargs.setdefault("timeout", 20)
         kwargs.setdefault("follow_redirects", True)
+        if not hasattr(self, "failures"):
+            self.reset_health()
+        async def requested(request: httpx.Request) -> None:
+            self.requests_attempted += 1
+        async def responded(response: httpx.Response) -> None:
+            if response.status_code < 400:
+                self.requests_ok += 1
+            else:
+                self.failures.append(f"HTTP {response.status_code}")
+        hooks = kwargs.setdefault("event_hooks", {})
+        hooks.setdefault("request", []).append(requested)
+        hooks.setdefault("response", []).append(responded)
         if us_proxy and Config.US_PROXY_URL:
             kwargs["proxy"] = Config.US_PROXY_URL
         return httpx.AsyncClient(**kwargs)
+
+    def health_error(self) -> str:
+        errors = list(getattr(self, "failures", []))
+        missing = getattr(self, "requests_attempted", 0) - getattr(self, "requests_ok", 0) - len(errors)
+        if missing > 0:
+            errors.append(f"{missing} request(s) without response")
+        return ", ".join(dict.fromkeys(errors))[:160]
 
     async def get_retry(self, client: httpx.AsyncClient, url: str, retries: int = 1, **kwargs) -> httpx.Response:
         """GET with one retry on 5xx / transport errors (Reverb answers 502 now and then)."""
@@ -96,6 +120,8 @@ class BaseScraper:
         MAX_YEAR defaults to next year (config.py), so listing/purchase years
         never cause drops.
         """
+        if not Config.FILTER_TEXT_YEARS:
+            return True
         years_found = re.findall(r"\b(19[5-9]\d|20[0-9]\d)\b", text or "")
         if not years_found:
             return True

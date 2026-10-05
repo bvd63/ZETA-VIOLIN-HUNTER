@@ -3,6 +3,8 @@ Wallapop scraper — Spain's largest classifieds.
 Uses Wallapop's web search endpoint with browser-like headers.
 """
 
+from keywords import market_queries
+
 import httpx
 import logging
 from scrapers.base import BaseScraper
@@ -11,12 +13,6 @@ log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://api.wallapop.com/api/v3/general/search"
 
-KEYWORDS = [
-    "Zeta violin",
-    "Zeta Strados",
-    "Zeta Jazz Fusion",
-    "violín eléctrico Zeta",
-]
 
 DEFAULT_LAT = 40.4168
 DEFAULT_LNG = -3.7038
@@ -40,12 +36,12 @@ class WallapopScraper(BaseScraper):
             "X-DeviceOS": "0",
         }
 
-        async with httpx.AsyncClient(
+        async with self.make_client(
             timeout=15,
             follow_redirects=True,
             headers=headers,
         ) as client:
-            for kw in KEYWORDS:
+            for kw in market_queries("es", broad=True, limit=8):
                 try:
                     params = {
                         "keywords": kw,

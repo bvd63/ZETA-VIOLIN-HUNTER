@@ -13,9 +13,10 @@ import httpx
 import logging
 from datetime import datetime, timedelta
 from scrapers.base import BaseScraper
-from scrapers.google import GLOBAL_QUERIES, MATRIX_KEYWORDS, SITE_GROUPS
+from scrapers.google import GLOBAL_QUERIES, MATRIX_KEYWORDS, SITE_GROUPS, PRIORITY_QUERIES
 from config import Config
 from database import connect
+from search_budget import reserve_request
 
 log = logging.getLogger(__name__)
 
@@ -65,14 +66,15 @@ class BraveScraper(BaseScraper):
         """(list of (q, params), next_cursor). Global fresh queries first,
         then a rotating slice of the site matrix."""
         budget = max(1, Config.BRAVE_QUERIES_PER_RUN)
-        plan = [(q, {"freshness": "pm"}) for q in GLOBAL_QUERIES][:budget]
+        plan = [(q, {} if q in PRIORITY_QUERIES else {"freshness": "pm"}) for q in GLOBAL_QUERIES][:budget]
         matrix = [f"{kw} {group}" for kw in MATRIX_KEYWORDS for group in SITE_GROUPS]
         remaining = budget - len(plan)
         n = len(matrix)
         take = min(remaining, n)
         for i in range(take):
             # past year only — older indexed pages are almost always ended listings
-            plan.append((matrix[(cursor + i) % n], {"freshness": "py"}))
+            plan.append((f"({MATRIX_KEYWORDS[((cursor + i) % n) // len(SITE_GROUPS)]}) "
+                         f"({SITE_GROUPS[(cursor + i) % len(SITE_GROUPS)]})", {"freshness": "py"}))
         return plan, ((cursor + take) % n if n else 0)
 
     async def search(self) -> list:
@@ -88,6 +90,7 @@ class BraveScraper(BaseScraper):
         seen_ids = set()
         cursor = int(self._kv_get("brave_cursor") or 0)
         plan, next_cursor = self.plan_queries(cursor)
+        spent = 0
         log.info(f"Brave: {len(plan)} queries this run (matrix cursor {cursor} → {next_cursor})")
 
         headers = {
@@ -95,9 +98,14 @@ class BraveScraper(BaseScraper):
             "Accept-Encoding": "gzip",
             "X-Subscription-Token": Config.BRAVE_API_KEY,
         }
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with self.make_client(timeout=20) as client:
             for q, extra in plan:
                 try:
+                    if not reserve_request("brave", Config.BRAVE_MONTHLY_QUOTA):
+                        log.info("Brave monthly budget exhausted — no further HTTP requests")
+                        self.skipped = not results
+                        break
+                    spent += 1
                     params = {"q": q, "count": 20, "text_decorations": "false", "safesearch": "off", **extra}
                     resp = await client.get(BRAVE_API, headers=headers, params=params)
                     if resp.status_code in (401, 402, 403, 429):
@@ -131,7 +139,7 @@ class BraveScraper(BaseScraper):
                             "price": "See listing",
                             "location": "Unknown",
                             "url": url,
-                            "description": snippet[:300],
+                            "description": snippet[:1000],
                             "date_posted": str(item.get("page_age") or item.get("age") or "")[:10],
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, snippet),
@@ -142,7 +150,8 @@ class BraveScraper(BaseScraper):
                 # free/credit tier is 1 request per second
                 await asyncio.sleep(1.1)
 
-        self._kv_set("brave_cursor", str(next_cursor))
+        consumed_matrix = max(0, spent - min(len(GLOBAL_QUERIES), len(plan)))
+        self._kv_set("brave_cursor", str((cursor + consumed_matrix) % (len(MATRIX_KEYWORDS) * len(SITE_GROUPS))))
         self._kv_set("brave", datetime.utcnow().isoformat())
         log.info(f"Brave: {len(results)} listings found")
         return results

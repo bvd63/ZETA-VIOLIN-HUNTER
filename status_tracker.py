@@ -4,6 +4,7 @@ dashboard endpoint and for the watchdog (consecutive zero/error streaks).
 """
 
 import logging
+import json
 from datetime import datetime
 from database import connect
 
@@ -45,20 +46,24 @@ class StatusTracker:
             )
         """)
         self.conn.commit()
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(scraper_stats)")}
+        if "details" not in columns:
+            self.conn.execute("ALTER TABLE scraper_stats ADD COLUMN details TEXT DEFAULT '{}'")
+            self.conn.commit()
 
     def start_cycle(self):
         self._cycle_start = datetime.utcnow()
         self._cycle_stats = {}
 
     def record_scraper(self, name: str, raw: int, new: int,
-                       error: str = "", duration: float = 0):
+                       error: str = "", duration: float = 0, details: dict = None):
         self._cycle_stats[name] = {"raw": raw, "new": new, "error": error, "duration": duration}
         try:
             self.conn.execute("""
                 INSERT INTO scraper_stats
-                (scraper, raw_count, new_count, error, duration_sec, run_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (name, raw, new, error, duration, datetime.utcnow().isoformat()))
+                (scraper, raw_count, new_count, error, duration_sec, run_at, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (name, raw, new, error, duration, datetime.utcnow().isoformat(), json.dumps(details or {})))
             self.conn.commit()
         except Exception as e:
             log.warning(f"Status record error: {e}")
@@ -98,18 +103,20 @@ class StatusTracker:
             names = [r[0] for r in self.conn.execute("SELECT DISTINCT scraper FROM scraper_stats")]
             for name in names:
                 rows = self.conn.execute("""
-                    SELECT raw_count, error FROM scraper_stats
+                    SELECT raw_count, error, details FROM scraper_stats
                     WHERE scraper = ? ORDER BY id DESC LIMIT ?
                 """, (name, lookback)).fetchall()
                 zero = err = 0
-                for raw, error in rows:
+                for raw, error, details in rows:
                     if error:
                         err += 1
                     else:
                         break
-                for raw, error in rows:
+                for raw, error, details in rows:
                     if raw is not None and raw < 0:
                         continue  # skipped cycle (quota guard / unconfigured): neither counts nor resets
+                    if json.loads(details or "{}").get("requests_ok", 0) > 0 and not error:
+                        break
                     if (raw or 0) == 0:
                         zero += 1
                     else:
@@ -144,7 +151,7 @@ class StatusTracker:
                 }
 
             cur = self.conn.execute("""
-                SELECT scraper, raw_count, new_count, error, duration_sec, run_at
+                SELECT scraper, raw_count, new_count, error, duration_sec, run_at, details
                 FROM scraper_stats
                 WHERE id IN (SELECT MAX(id) FROM scraper_stats GROUP BY scraper)
                 ORDER BY scraper
@@ -160,8 +167,12 @@ class StatusTracker:
                     "last_run": row[5],
                     "zero_streak": streaks.get(row[0], {}).get("zero", 0),
                     "error_streak": streaks.get(row[0], {}).get("error", 0),
+                    "details": json.loads(row[6] or "{}"),
                 }
             status["scrapers"] = scrapers
+            from config import Config
+            status["schedule"] = {"hours": Config.SEARCH_HOURS, "timezone": Config.SEARCH_TIMEZONE}
+            status["budgets"] = {"google_per_day": min(96, Config.GOOGLE_DAILY_QUOTA), "brave_per_month": Config.BRAVE_MONTHLY_QUOTA}
 
             row = self.conn.execute("""
                 SELECT COUNT(*), SUM(total_raw), SUM(total_sent) FROM cycle_summary

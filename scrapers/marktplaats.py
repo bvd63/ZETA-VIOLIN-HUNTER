@@ -7,6 +7,8 @@ their own frontend, reachable from EU datacenter IPs without auth:
   GET https://www.2dehands.be/lrp/api/search?query=...&limit=30
 """
 
+from keywords import market_queries
+
 import logging
 from scrapers.base import BaseScraper, BROWSER_UA
 from filters import has_zeta_signal
@@ -20,14 +22,6 @@ SITES = [
 
 # (keyword, l1CategoryId or None). 728 = Muziek en Instrumenten — lets the bare
 # brand query skip the "Linea Zeta" shoes.
-KEYWORDS = [
-    ("zeta", 728),
-    ("strados", 728),
-    ("zeta viool", None),
-    ("zeta violin", None),
-    ("elektrische viool zeta", None),
-    ("zeta jazz fusion", None),
-]
 
 DUTCH_MONTHS = {"jan": 1, "feb": 2, "mrt": 3, "maa": 3, "apr": 4, "mei": 5, "jun": 6, "jul": 7,
                 "aug": 8, "sep": 9, "okt": 10, "nov": 11, "dec": 12,
@@ -49,7 +43,7 @@ class MarktplaatsScraper(BaseScraper):
 
         async with self.make_client(headers=HEADERS) as client:
             for site_name, base, country in SITES:
-                for kw, category in KEYWORDS:
+                for kw, category in [(q, 728 if q.lower() in ("zeta", "strados") else None) for q in market_queries("nl", broad=True)]:
                     try:
                         params = {"query": kw, "limit": 30, "offset": 0}
                         if category:
