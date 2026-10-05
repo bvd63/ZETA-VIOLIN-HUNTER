@@ -21,6 +21,13 @@ standalone violas, cellos, basses, mandolins — violins only; explicit mixed au
 
 ## 2. CURRENT STATE (2026-10-05 code audit; historical notes follow)
 
+### Facebook case / Synthony correction (October 5, after the 22:00 run)
+- The owner received item `1807659550262086`, a standalone ZETA/SKB violin case. The initial verification report incorrectly attributed the alert to violin `736411569566188`; aggregate logs did not identify the accepted item. Both original detail records report live=true, sold=false, pending=false, hidden=false.
+- Shared filters now reject standalone case titles without requiring "case only", preserve explicit violin/case bundles, and reject descriptions stating that the instrument is not included. Synthony is accessory object language, not homonym noise: MIDI compatibility in the description of a conclusively identified violin no longer rejects it; controller listings remain excluded.
+- Apify rechecks queued candidates before buying details and reclassifies all fresh verified cached records using current rules. Main's persistent Telegram delivery dedup still controls alerts; previously rejected cached violins can become eligible at the next regular cycle. Per-item IDs and filter/availability outcomes are logged so eligibility is traceable, without claiming that an eligible candidate was delivered.
+- Regression fixtures use only minimal public listing fields/excerpts from the actual 22:00 detail dataset. Verification is offline with Telegram disabled; no extra paid run or live test alert.
+- Railway runs the filter and Apify offline suites before its existing private-task API check, failing deployment if either suite fails. Tests use temporary SQLite databases and mock HTTP, without touching the production volume or Telegram. This verifies the incident fixes on Railway's Python runtime independently of GitHub runner availability.
+
 ### Apify Facebook integration (October 5)
 - Owner explicitly authorized connecting the existing Apify Free account to the Railway bot; total target budget is now $25/month. No paid plan or US proxy was purchased.
 - `scrapers/apify_facebook.py` replaces the US-egress-dependent Facebook collector when `APIFY_TOKEN` is set. It uses the two private console task IDs as templates and overrides inputs and API run caps; it is invoked by the existing 10:00/22:00 Europe/Bucharest scheduler, with no separate Apify schedule.

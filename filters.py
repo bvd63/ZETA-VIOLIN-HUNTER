@@ -77,9 +77,6 @@ NOISE_RX = _rx([
     "backpack", "snowboard", "skis",
     "zeta phi beta", "zeta reticuli", "zeta cartridge", "zeta pump", "zeta potential",
     "zeta-jones", "zeta jones", "dartboard", "zeta drive",
-    # Zeta non-violin gear that is the OBJECT of the listing when in the title;
-    # these words are common inside violin bodies too, so see NOISE_OBJECT_RX.
-    "synthony",
     # Copies / look-alikes ("Replica del celebre violino Zeta", "Zeta violin copy")
     "replica", "zeta style", "zeta-style", "stile zeta", "style zeta",
     "tipo zeta", "type zeta", "like zeta", "similar to zeta", "inspired by zeta",
@@ -87,12 +84,23 @@ NOISE_RX = _rx([
 # Object-of-sale words: drop only when they are in the TITLE (or when the
 # title alone does not prove a Zeta violin and the body must be trusted).
 NOISE_OBJECT_RX = _rx([
-    "ski", "overdrive", "footswitch", "pedal", "pedals", "midi controller", "midi interface",
+    "synthony", "ski", "overdrive", "footswitch", "pedal", "pedals", "midi controller", "midi interface",
     "combo amp", "padded cover", "amp cover", "cover for", "catalog", "catalogue",
     "brochure", "manual only", "strings only", "string set", "sticker", "decal",
     "cello", "cellos", "mandolin", "upright bass", "bass guitar",
     "copia", "copy", "kopie", "kopia", "copie", "clone",
     "fx", "effects", "effect processor", "preamp only", "pickup system only",
+])
+# A case listing can contain both "Zeta" and "violin" without selling a violin.
+# Require explicit bundle language to treat a case in the title as included gear.
+CASE_RX = _rx(["case", "cases", "hardcase", "gig bag", "gigbag", "etui", "étui",
+               "geigenkoffer", "geigenkasten", "cutie"])
+CASE_BUNDLE_RX = re.compile(
+    r"\b(?:with|includes?|including|plus|and|in|mit|avec|con|cu|met)\b|\bw/|[+&]", re.I)
+INSTRUMENT_ABSENT_RX = _rx([
+    "instrument not included", "instrument is not included", "instruments not included",
+    "violin not included", "violin is not included", "no violin included",
+    "instrument shown not included", "violin shown not included",
 ])
 # Media / other instruments — title only; instrument words only when the
 # title has no violin word ("Zeta violin + bass amp" must pass).
@@ -245,6 +253,10 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None) 
         return True
     if any(j in title for j in NOISE_JP):
         return True
+    if not INTENT_RX.search(title) and is_standalone_case(title):
+        return True
+    if INSTRUMENT_ABSENT_RX.search(description):
+        return True
     if not description:
         return False
     if NOISE_RX.search(description) or any(j in description for j in NOISE_JP):
@@ -252,6 +264,24 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None) 
     if not title_conclusive and (NOISE_OBJECT_RX.search(description) or OTHER_INSTRUMENT_RX.search(description)):
         return True
     return False
+
+
+def is_standalone_case(title: str) -> bool:
+    """Keep 'Zeta violin with case', reject 'Zeta violin case' / 'case for Zeta'."""
+    case = CASE_RX.search(title)
+    if not case:
+        return False
+    before, after = title[:case.start()], title[case.end():]
+    # The instrument must be identified independently of the accessory phrase.
+    for bundle in CASE_BUNDLE_RX.finditer(before):
+        if is_zeta_violin(before[:bundle.start()]):
+            return False
+    if is_zeta_violin(before) and re.match(r"\s+(?:included|inclus|inclusa|incluso)\b", after, re.I):
+        return False
+    # Reverse-order explicit bundles are also real offers of an instrument.
+    if re.match(r"\s+(?:with|including|plus|and)\b|\s*[+&]", after, re.I) and is_zeta_violin(after):
+        return False
+    return True
 
 
 def mixed_lot_includes_violin(title: str) -> bool:
