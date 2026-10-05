@@ -206,11 +206,11 @@ def has_zeta_signal(text: str) -> bool:
 def is_zeta_violin(title: str, description: str = "") -> bool:
     """CLASS A / B acceptance (positive side of §5)."""
     text = f"{title} {description}"
-    if MODEL_CODE_RX.search(text):
+    # JV44 is also a Luftwaffe unit used in aircraft-kit titles, and artist
+    # names identify albums too. A discovery signal is not proof of a violin.
+    if (MODEL_CODE_RX.search(text) or ZETA_ONLY_ARTIST_RX.search(text)) and has_violin_word(title):
         return True
-    if ZETA_ONLY_ARTIST_RX.search(text):
-        return True
-    if STRADOS_RX.search(text):
+    if STRADOS_RX.search(text) and (has_violin_word(title) or has_zeta_brand(text)):
         return True
     has_zeta = has_zeta_brand(text)
     has_violin = has_violin_word(text)

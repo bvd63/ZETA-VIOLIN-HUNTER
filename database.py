@@ -173,7 +173,13 @@ class Database:
         except Exception as e:
             log.warning(f"active listings error: {e}")
             return []
-        return [dict(zip(("id", "platform", "title", "price", "url", "first_seen", "last_seen"), r)) for r in rows]
+        result = [dict(zip(("id", "platform", "title", "price", "url", "first_seen", "last_seen"), r)) for r in rows]
+        from filters import classify
+        for listing in result:
+            stored = self.conn.execute("SELECT data FROM seen_listings WHERE id = ?", (listing['id'],)).fetchone()
+            if stored and stored[0]:
+                listing['description'] = json.loads(stored[0]).get('description', '')
+        return [listing for listing in result if not classify(listing)]
 
     def gone_since(self, days_active: int = 3, days_gone: int = 14) -> list:
         """Listings that were active recently but have not been seen for `days_active`
@@ -188,7 +194,9 @@ class Database:
         except Exception as e:
             log.warning(f"gone listings error: {e}")
             return []
-        return [dict(zip(("platform", "title", "price", "url", "last_seen"), r)) for r in rows]
+        from filters import classify
+        result = [dict(zip(("platform", "title", "price", "url", "last_seen"), r)) for r in rows]
+        return [listing for listing in result if not classify(listing)]
 
     # --- alerts ------------------------------------------------------------------
     def record_alert(self, listing: dict, price_usd) -> None:

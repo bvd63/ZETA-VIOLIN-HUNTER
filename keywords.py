@@ -32,7 +32,7 @@ def market_queries(language: str = "en", *, broad: bool = False, limit: int = 8,
     if language == "ja":
         core += ["ゼータ バイオリン", "ゼータ エレキバイオリン"]
     core = list(dict.fromkeys(core))
-    pool = [f"Zetta {word}", *MODEL_CODES, *ARTISTS]
+    pool = [f"Zetta {word}", *MODEL_CODES, *[f"{artist} {word}" for artist in ARTISTS]]
     pool += [f"{model} {word}" for model in MODEL_NAMES if model != "educator"]
     local = now or datetime.now(ZoneInfo("Europe/Bucharest"))
     slots = max(1, limit - len(core))

@@ -35,6 +35,17 @@ standalone violas, cellos, basses, mandolins — violins only; explicit mixed au
 - Mercari numeric prices retain JPY before range checks. Asking-price comparisons require at least five observations of the same model/string group in 180 days; exclude auctions and mixed lots. They are not valuations or sold prices.
 - Validation: existing offline suites plus `tests.test_reliability`; CI compiles all modules and runs all five suites. Optional historical live URL probes require `RUN_LIVE_TESTS=1`.
 
+### Live-probe correction (2026-10-05)
+The first broadened production probe exposed pre-existing false assumptions:
+JV44 also identifies aircraft kits; artist names identify records; Strados may be
+used in a misspelled model-car title. Some incorrect alerts were sent during that
+probe; the cycle had completed by the time the correction was prepared. Codes/artists now require a violin word in the title;
+Strados requires a violin title or Zeta brand. Artist discovery queries include the
+local violin word. Current filters also apply when reading active/history lists,
+retrying queues and choosing price comparables, without deleting delivered history.
+Real probe titles are regression fixtures. Do not restore unconditional code/artist
+acceptance from historical §4–5 notes below.
+
 ### Historical state (September 2026; superseded where noted)
 
 ### Infrastructure

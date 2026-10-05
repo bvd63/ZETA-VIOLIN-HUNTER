@@ -20,7 +20,9 @@ def comparison_group(listing: dict) -> str:
     price = str(listing.get("price", "")).lower()
     if listing.get("auction") or listing.get("mixed_lot") or "bid" in price or re.search(r"\b(?:lot|bundle|violins)\b", title):
         return ""
-    from filters import MODEL_CODE_RX
+    from filters import MODEL_CODE_RX, is_zeta_violin, has_noise
+    if not is_zeta_violin(title) or has_noise(title):
+        return ""
     code = MODEL_CODE_RX.search(title)
     family, strings = "", ""
     if code:
@@ -208,9 +210,11 @@ class PriceTracker:
         try:
             from datetime import timedelta
             rows = self.conn.execute("""
-                SELECT price_usd FROM price_history WHERE comparison_group = ? AND comparison_group != ''
+                SELECT price_usd, title FROM price_history WHERE comparison_group = ? AND comparison_group != ''
                 AND listing_id != ? AND recorded_at >= ? AND price_usd > 50 AND price_usd < 50000
             """, (group, listing.get("id", ""), (datetime.utcnow() - timedelta(days=180)).isoformat())).fetchall()
+            from filters import is_zeta_violin, has_noise
+            rows = [row for row in rows if is_zeta_violin(row[1]) and not has_noise(row[1])]
             if len(rows) >= 5:
                 avg = round(median(row[0] for row in rows), 2)
                 context["avg_price"] = avg
