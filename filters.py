@@ -291,6 +291,33 @@ def mixed_lot_includes_violin(title: str) -> bool:
     return bool(re.search(r"\bviolins?\s*\(\s*[1-9]\d*\s*\)|\b(?:lot|bundle|collection)\b", title, re.I))
 
 
+def estate_violin_evidence(title: str, description: str) -> str:
+    """A coherent inventory entry, not 'Zeta jacket, violin' across items.
+
+    Estate listings sell many unrelated goods. Only an explicit Zeta instrument
+    entry can narrow body noise; the full listing's intent remains checked.
+    """
+    if not re.search(r"\b(?:estate|garage|yard|moving|rummage)\s+sales?\b", title, re.I):
+        return ""
+    brand = r"(?:zeta|zetta|zetamusic|zeta\s+music(?:\s+systems)?|strados|jazz\s+fusion|jv[ -]?4[45]|sv[ -]?2[45]|cv[ -]?44|ev[ -]?(?:25|44))"
+    qualifier = r"(?:electric(?:al)?|midi|jazz|fusion|strados|acoustic|pro|classic|modern|standard|legacy|vintage|[45]|four|five|strings?|jv44|jv45|sv24|sv25|cv44|ev25|ev44)"
+    instrument = re.compile(r"\b" + brand + r"\s+(?:" + qualifier + r"[\s-]+){0,6}(?:violins?|fiddles?)\b|"
+                            r"\b(?:violins?|fiddles?)\s+(?:(?:by|made\s+by)\s+)?" + brand + r"\b", re.I)
+    for entry in re.split(r"[,;\n•]", description):
+        entry = entry.strip()
+        match = instrument.search(entry)
+        if not match:
+            continue
+        accessory = re.compile(r"\b(?:manual|catalogue?|brochure|poster|sticker|bow|pickup)\b", re.I)
+        prefix, suffix = entry[:match.start()], entry[match.end():]
+        object_after = accessory.search(suffix)
+        if accessory.search(prefix) or (object_after and not CASE_BUNDLE_RX.search(suffix[:object_after.start()])):
+            continue
+        if (is_zeta_violin(entry) and not has_noise(entry) and not is_excluded_intent(entry)):
+            return entry
+    return ""
+
+
 def is_editorial_url(url: str) -> bool:
     path = urlsplit(url).path.lower()
     return bool(re.search(r"/(?:blog|blogs|news|article|articles|magazine|magazines|reviews?|press)(?:/|$)", path))
@@ -365,13 +392,18 @@ def classify(listing: dict) -> str:
         return "other_brand"
     if is_new_stock(listing, Config.CONDITION, Config.EXCLUDED_SELLERS):
         return "new_stock"
-    if has_noise(title, desc, title_conclusive):
+    inventory_evidence = estate_violin_evidence(title, desc)
+    body_for_noise = inventory_evidence or desc
+    if INSTRUMENT_ABSENT_RX.search(desc) or has_noise(title, body_for_noise, title_conclusive):
         return "noise"
     if is_excluded_intent(title, desc, title_conclusive):
         return "intent"
     if is_sold_or_ended(title):
         return "sold"
-    if not (title_conclusive or is_zeta_violin(title, desc)):
+    if (not title_conclusive and re.search(r"\b(?:estate|garage|yard|moving|rummage)\s+sales?\b", title, re.I)
+            and not inventory_evidence):
+        return "non_zeta"
+    if not (title_conclusive or is_zeta_violin(title, body_for_noise)):
         return "non_zeta"
     if not is_valid_listing_url(str(listing.get("url", ""))):
         return "url"

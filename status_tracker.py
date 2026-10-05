@@ -80,7 +80,7 @@ class StatusTracker:
                 (total_scrapers, total_raw, total_new, total_sent,
                  total_ai_rejected, duration_sec, run_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (len(self._cycle_stats), total_raw, total_new,
+            """, (sum(s["raw"] >= 0 for s in self._cycle_stats.values()), total_raw, total_new,
                   total_sent, total_ai_rejected, duration, self._cycle_start.isoformat()))
             self.conn.commit()
         except Exception as e:
@@ -163,6 +163,9 @@ class StatusTracker:
                     "raw": row[1],
                     "new": row[2],
                     "error": row[3] or None,
+                    "coverage_state": ("skipped" if row[1] is not None and row[1] < 0 else
+                                       "partial" if row[3] and (row[1] or 0) > 0 else
+                                       "error" if row[3] else "ok"),
                     "duration_sec": round(row[4], 1) if row[4] else 0,
                     "last_run": row[5],
                     "zero_streak": streaks.get(row[0], {}).get("zero", 0),

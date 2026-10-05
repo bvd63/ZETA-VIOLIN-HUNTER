@@ -70,6 +70,22 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     if ARCHIVE_PATH.search(urlsplit(final_url).path):
         return "dead", "arhivă cu licitații încheiate"
     soup = BeautifulSoup(text[:500000], "lxml")
+    host = (urlsplit(final_url).hostname or "").lower()
+    if host == "craigslist.org" or host.endswith(".craigslist.org"):
+        # Estate/garage events can end while the posting still returns HTTP 200.
+        from scrapers.craigslist import CraigslistScraper, SALE_EVENT_RX
+        if SALE_EVENT_RX.search(str(listing.get("title", ""))):
+            dates = CraigslistScraper._sale_dates(soup)
+            if not dates:
+                return "unknown", "Craigslist: data vânzării nu poate fi verificată"
+            if max(dates) < CraigslistScraper._local_today(soup):
+                return "dead", "Craigslist: vânzare locală încheiată"
+            body = soup.select_one("#postingbody")
+            if body:
+                listing["description"] = body.get_text(" \n", strip=True)
+                listing["estate_sale"] = True
+                listing["sale_end"] = max(dates).isoformat()
+                return "live", "Craigslist: inventar și dată de vânzare verificate"
     products, editorial = [], False
     for tag in soup.find_all("script", type="application/ld+json"):
         try:

@@ -40,7 +40,15 @@ AUCTION_GROUPS = [
     "site:interencheres.com OR site:drouot.com OR site:lot-tissimo.com OR site:ha.com OR site:dorotheum.com",
 ]
 AUCTION_SIGNALS = 'Zeta OR Strados OR ' + ' OR '.join(MODEL_CODES) + ' OR "Jean-Luc Ponty"'
-PRIORITY_QUERIES = [f"({group}) ({AUCTION_SIGNALS})" for group in AUCTION_GROUPS]
+US_MARKET_GROUPS = [
+    "site:craigslist.org OR site:offerup.com OR site:mercari.com OR site:facebook.com/marketplace",
+    "site:musicgoround.com OR site:guitarcenter.com OR site:elderly.com OR site:chicagomusicexchange.com OR site:sweetwater.com/used",
+    "site:estatesales.net OR site:estatesales.org OR site:auctionninja.com OR site:maxsold.com",
+]
+US_PRIORITY_QUERIES = [f'({group}) (Zeta OR Zetta OR Strados) (violin OR fiddle OR "Jazz Fusion")'
+                       for group in US_MARKET_GROUPS]
+PRIORITY_QUERIES = ([f"({group}) ({AUCTION_SIGNALS})" for group in AUCTION_GROUPS]
+                    + US_PRIORITY_QUERIES)
 GLOBAL_QUERIES = PRIORITY_QUERIES + WEB_KEYWORDS[:2]
 MATRIX_KEYWORDS = WEB_KEYWORDS
 
@@ -182,7 +190,9 @@ class GoogleScraper(BaseScraper):
     def plan_queries(self, cursor: int, budget: int = None) -> tuple:
         """Return (list of (q, extra_params), next_cursor)."""
         budget = max(1, budget if budget is not None else Config.GOOGLE_QUERIES_PER_RUN)
-        plan = [(q, {} if q in PRIORITY_QUERIES else {"dateRestrict": "w2", "sort": "date"}) for q in GLOBAL_QUERIES][:budget]
+        plan = [(q, {"gl": "us"} if q in US_PRIORITY_QUERIES else
+                 {} if q in PRIORITY_QUERIES else {"dateRestrict": "w2", "sort": "date"})
+                for q in GLOBAL_QUERIES][:budget]
         matrix = [f"{kw} {group}" for kw in MATRIX_KEYWORDS for group in SITE_GROUPS]
         remaining = budget - len(plan)
         n = len(matrix)

@@ -349,6 +349,22 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(scraper.requests_ok,0)
         self.assertIn('HTTP 403',scraper.health_error())
 
+    def test_skipped_sources_are_not_reported_as_searched(self):
+        from status_tracker import StatusTracker
+        tracker = StatusTracker()
+        try:
+            tracker.start_cycle()
+            tracker.record_scraper("Checked fixture", 0, 0, details={"requests_ok": 1})
+            tracker.record_scraper("Guard fixture", -1, 0)
+            tracker.record_scraper("Partial fixture", 2, 0, error="HTTP 403")
+            tracker.end_cycle(total_sent=0)
+            status = tracker.get_status()
+            self.assertEqual(status["last_cycle"]["scrapers_ran"], 2)
+            self.assertEqual(status["scrapers"]["Guard fixture"]["coverage_state"], "skipped")
+            self.assertEqual(status["scrapers"]["Partial fixture"]["coverage_state"], "partial")
+        finally:
+            tracker.close()
+
     def test_price_comparison_excludes_different_models_and_bids(self):
         pt=PriceTracker()
         try:
