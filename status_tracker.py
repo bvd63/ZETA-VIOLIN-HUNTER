@@ -184,16 +184,16 @@ class StatusTracker:
                     "total_sent": row[2] or 0,
                 }
 
-            row = self.conn.execute("""
-                SELECT COUNT(*), AVG(price_usd), MIN(price_usd), MAX(price_usd)
-                FROM price_history WHERE price_usd > 50
-            """).fetchone()
-            if row and row[0]:
+            from filters import is_zeta_violin, has_noise
+            prices = [price for price, title in self.conn.execute(
+                "SELECT price_usd, title FROM price_history WHERE price_usd > 50 AND comparison_group != ''")
+                if is_zeta_violin(title) and not has_noise(title)]
+            if prices:
                 status["price_stats"] = {
-                    "total_tracked": row[0],
-                    "avg_usd": round(row[1], 2) if row[1] else 0,
-                    "min_usd": round(row[2], 2) if row[2] else 0,
-                    "max_usd": round(row[3], 2) if row[3] else 0,
+                    "total_tracked": len(prices),
+                    "avg_usd": round(sum(prices) / len(prices), 2),
+                    "min_usd": round(min(prices), 2),
+                    "max_usd": round(max(prices), 2),
                 }
         except Exception as e:
             status["error"] = str(e)

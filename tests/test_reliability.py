@@ -91,6 +91,33 @@ class RegressionTests(unittest.TestCase):
         self.assertFalse(self.db.was_url_alerted(listing['url'],'2026-11-10T20:00:00+00:00'))
         self.assertTrue(self.db.was_url_alerted(listing['url']))
 
+    def test_live_probe_aircraft_kits_and_music_records_are_rejected(self):
+        examples=[
+            ('タミヤ 1/48 フォッケウルフ Fw190 D-9 JV44 プラモデル', ''),
+            ('JV44: The Galland Circus', ''),
+            ('Lancia Strados scala 1:24 da restauro', ''),
+            ('Jean-Luc Ponty — The Jean-Luc Ponty Experience', ''),
+            ('Jean-Luc Ponty — A Taste For Passion', 'electric violin performed by Jean-Luc Ponty'),
+            ('patti smith gone again', 'Jean-Luc Ponty played violin'),
+            ('Mahavishnu Orchestra - Apocalypse', 'Jean-Luc Ponty violin'),
+        ]
+        for title,description in examples:
+            with self.subTest(title=title):
+                self.assertNotEqual(classify(self.listing(title=title,description=description)), '')
+
+    def test_old_false_positive_does_not_reappear_in_active_list(self):
+        invalid=self.listing(title='Fw190 D-9 JV44 1/72 scale')
+        self.db.mark_seen(invalid['id'],invalid)
+        self.db.touch_active(invalid)
+        self.assertEqual(self.db.active_listings(),[])
+
+    def test_artist_discovery_queries_include_local_violin_word(self):
+        found=set()
+        for day in range(1,29):
+            found.update(market_queries('nl',broad=True,now=datetime(2026,10,day,10)))
+        self.assertNotIn('Jean-Luc Ponty',found)
+        self.assertIn('Jean-Luc Ponty viool',found)
+
     def test_price_drop_queue_survives_restart_independently(self):
         listing=self.listing()
         info={'old_price':2000,'new_price':1500,'drop_pct':25}

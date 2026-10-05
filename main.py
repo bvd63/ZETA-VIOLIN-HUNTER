@@ -365,6 +365,9 @@ async def run_search_cycle():
 
         try:
             for listing, info in db.pending_price_drops():
+                if classify(listing):
+                    db.finish_price_drop(listing.get("url", ""))
+                    continue
                 async with httpx.AsyncClient(timeout=15) as http:
                     state, _ = await verify_offer(listing, http)
                 if state in ("dead", "non_sale"):
@@ -376,6 +379,9 @@ async def run_search_cycle():
             if pending:
                 async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
                     for listing in pending:
+                        if classify(listing):
+                            db.discard_pending(listing.get("url", ""))
+                            continue
                         state, why = await verify_offer(listing, http)
                         if state in ("dead", "non_sale") or classify(listing):
                             db.discard_pending(listing.get("url", ""))

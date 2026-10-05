@@ -67,3 +67,5 @@ Indexarea motoarelor și blocările site-urilor limitează acoperirea; nu este p
 detectarea fiecărei licitații. Arhivele documentează alegerea surselor și nu generează
 alerte de vânzare activă. Testele sunt offline; probele live opționale din liveness
 se activează separat prin `RUN_LIVE_TESTS=1`.
+
+Codurile și artiștii sunt indicii de căutare, nu dovadă suficientă de vioară: `JV44` apare și pe machete, iar Jean-Luc Ponty pe discuri. Filtrul cere context de vioară în titlu pentru aceste potriviri; exemplele din proba live sunt teste de regresie.
