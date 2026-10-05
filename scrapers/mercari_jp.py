@@ -6,22 +6,13 @@ end up in Japan due to the strong collector market.
 Library: pip install mercapi (already in requirements.txt)
 """
 
+from keywords import market_queries
+
 import logging
 from scrapers.base import BaseScraper
 from filters import has_zeta_signal
 
 log = logging.getLogger(__name__)
-
-KEYWORDS = [
-    "Zeta violin",
-    "Zeta electric violin",
-    "Zeta Strados",
-    "Zeta Jazz Fusion",
-    "ゼータ バイオリン",
-    "ゼータ エレキバイオリン",
-    "ZETA エレキバイオリン",
-    "electric violin Zeta",
-]
 
 
 class MercariJPScraper(BaseScraper):
@@ -40,7 +31,7 @@ class MercariJPScraper(BaseScraper):
 
         try:
             m = Mercapi()
-            for kw in KEYWORDS:
+            for kw in market_queries("ja", broad=True, limit=8):
                 try:
                     search_results = await m.search(kw)
                     if not search_results or not search_results.items:
@@ -78,7 +69,7 @@ class MercariJPScraper(BaseScraper):
 
                         if self._is_excluded(name):
                             continue
-                        if not self._price_in_range(str(price_val)):
+                        if not self._price_in_range(price):
                             continue
                         if not self._year_in_range(name):
                             continue

@@ -7,6 +7,8 @@ result set in __NEXT_DATA__ → pageProps.searchResult.advertSummaryList
 PRICE_FOR_DISPLAY, LOCATION, SEO_URL, PUBLISHED_String, ALL_IMAGE_URLS).
 """
 
+from keywords import market_queries
+
 import json
 import logging
 from bs4 import BeautifulSoup
@@ -20,14 +22,6 @@ SEARCH_URL = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz"
 CATEGORY_URL = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/musikinstrumente-2001"
 
 # (keyword, category-scoped)
-KEYWORDS = [
-    ("zeta", True),
-    ("strados", True),
-    ("zeta geige", False),
-    ("zeta violine", False),
-    ("zeta violin", False),
-    ("e-geige zeta", False),
-]
 
 
 class WillhabenScraper(BaseScraper):
@@ -39,7 +33,7 @@ class WillhabenScraper(BaseScraper):
         headers = {**BROWSER_HEADERS, "Accept-Language": "de-AT,de;q=0.9,en;q=0.8"}
 
         async with self.make_client(headers=headers) as client:
-            for kw, in_category in KEYWORDS:
+            for kw, in_category in [(q, q.lower() in ("zeta", "strados")) for q in market_queries("de", broad=True)]:
                 try:
                     resp = await client.get(CATEGORY_URL if in_category else SEARCH_URL, params={"keyword": kw})
                     if resp.status_code != 200:

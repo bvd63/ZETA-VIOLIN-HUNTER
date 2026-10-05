@@ -7,6 +7,8 @@ queries from EU IPs (the HTML search page is a JS shell). Lot URL:
 https://hibid.com/lot/{id}
 """
 
+from keywords import market_queries
+
 import logging
 from scrapers.base import BaseScraper, BROWSER_UA
 from filters import has_zeta_signal
@@ -16,7 +18,6 @@ log = logging.getLogger(__name__)
 GRAPHQL_URL = "https://hibid.com/graphql"
 
 # Broad queries; description search + local Zeta-signal filter do the work.
-QUERIES = ["zeta violin", "zeta", "electric violin", "strados"]
 PAGE_LENGTH = 100
 
 QUERY = """
@@ -51,7 +52,7 @@ class HiBidScraper(BaseScraper):
         seen_ids = set()
 
         async with self.make_client(headers=HEADERS) as client:
-            for q in QUERIES:
+            for q in market_queries("en", broad=True, limit=8, extra=("electric violin",)):
                 try:
                     resp = await client.post(GRAPHQL_URL, json={
                         "query": QUERY, "variables": {"text": q, "pageLength": PAGE_LENGTH},
@@ -61,6 +62,7 @@ class HiBidScraper(BaseScraper):
                         continue
                     data = resp.json()
                     if data.get("errors"):
+                        self.failures.append("HiBid GraphQL error")
                         log.warning(f"HiBid '{q}' GraphQL errors: {str(data['errors'])[:200]}")
                         continue
                     lots = (((data.get("data") or {}).get("lotSearch") or {}).get("pagedResults") or {}).get("results") or []
@@ -102,6 +104,7 @@ class HiBidScraper(BaseScraper):
 
                         results.append({
                             "id": unique_id,
+                            "auction": True,
                             "platform": f"HiBid ({house.get('name', 'auction')})"[:60],
                             "title": title,
                             "price": price,

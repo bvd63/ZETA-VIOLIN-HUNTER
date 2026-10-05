@@ -7,6 +7,8 @@ list as schema.org JSON-LD (ItemList of Product with name, description, url,
 image, offers.price/priceCurrency), so one parser covers all of them.
 """
 
+from keywords import market_queries
+
 import json
 import logging
 from bs4 import BeautifulSoup
@@ -17,14 +19,10 @@ log = logging.getLogger(__name__)
 
 # (label, search url, query param, country, currency, keywords)
 SITES = [
-    ("FINN", "https://www.finn.no/recommerce/forsale/search", "q", "Norway", "NOK",
-     ["zeta fiolin", "zeta violin", "elektrisk fiolin zeta", "zeta strados"]),
-    ("Tori", "https://www.tori.fi/recommerce/forsale/search", "q", "Finland", "EUR",
-     ["zeta viulu", "zeta violin", "sähköviulu zeta", "zeta strados"]),
-    ("DBA", "https://www.dba.dk/soeg/", "soeg", "Denmark", "DKK",
-     ["zeta violin", "elektrisk violin zeta", "zeta strados"]),
-    ("Blocket", "https://www.blocket.se/annonser/hela_sverige", "q", "Sweden", "SEK",
-     ["zeta fiol", "zeta violin", "elfiol zeta", "zeta strados"]),
+    ('FINN', 'https://www.finn.no/recommerce/forsale/search', 'q', 'Norway', 'NOK', 'no'),
+    ('Tori', 'https://www.tori.fi/recommerce/forsale/search', 'q', 'Finland', 'EUR', 'fi'),
+    ('DBA', 'https://www.dba.dk/soeg/', 'soeg', 'Denmark', 'DKK', 'da'),
+    ('Blocket', 'https://www.blocket.se/annonser/hela_sverige', 'q', 'Sweden', 'SEK', 'sv'),
 ]
 
 
@@ -36,8 +34,8 @@ class SchibstedScraper(BaseScraper):
         seen_ids = set()
 
         async with self.make_client(headers=BROWSER_HEADERS) as client:
-            for label, url, param, country, currency, keywords in SITES:
-                for kw in keywords:
+            for label, url, param, country, currency, language in SITES:
+                for kw in market_queries(language, broad=True):
                     try:
                         resp = await client.get(url, params={param: kw})
                         if resp.status_code != 200:

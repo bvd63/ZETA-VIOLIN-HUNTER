@@ -21,11 +21,11 @@ from database import Database, connect  # noqa: E402
 from notifier import TelegramNotifier  # noqa: E402
 from filters import classify  # noqa: E402
 from liveness import is_live  # noqa: E402
+from offer_verifier import verify_offer, ITEM_PATH, GOVDEALS_RX  # noqa: E402
 from dedup import is_duplicate  # noqa: E402
 from fx import refresh_rates  # noqa: E402
 from diagnostics import run_reachability  # noqa: E402
 from telegram_commands import TelegramCommands  # noqa: E402
-from scrapers.google import DIRECT_HOSTS  # noqa: E402
 
 from scrapers.reverb import ReverbScraper  # noqa: E402
 from scrapers.ebay import EbayScraper  # noqa: E402
@@ -34,6 +34,7 @@ from scrapers.brave import BraveScraper  # noqa: E402
 from scrapers.craigslist import CraigslistScraper  # noqa: E402
 from scrapers.shopgoodwill import ShopGoodwillScraper  # noqa: E402
 from scrapers.hibid import HiBidScraper  # noqa: E402
+from scrapers.govdeals import GovDealsScraper, AllSurplusScraper  # noqa: E402
 from scrapers.kijiji import KijijiScraper  # noqa: E402
 from scrapers.marktplaats import MarktplaatsScraper  # noqa: E402
 from scrapers.willhaben import WillhabenScraper  # noqa: E402
@@ -71,7 +72,9 @@ DROP_REASON_LABELS = {
     "sold": "sold/ended",
     "non_zeta": "non-Zeta-violin",
     "url": "invalid-url",
-    "direct_covered": "search-hit on directly-scraped site",
+    "non_sale": "article/review without an instrument for sale",
+    "unverified": "offer availability could not be verified",
+    "already_alerted": "same URL already delivered",
     "dead_link": "ended/expired page",
     "dead_cached": "known dead page (re-check after 7 days)",
     "liveness_deferred": "search-hit deferred to next cycle (liveness budget)",
@@ -83,21 +86,6 @@ LIVENESS_TIMEOUT_SEC = 180
 DEAD_CACHE_DAYS = 7
 
 
-def _is_direct_host(url: str) -> bool:
-    """True for hosts we scrape directly. Exact domain or subdomain match —
-    'gumtree.com' must not swallow gumtree.com.au, 'jp.mercari.com' must not
-    swallow mercari.com (US)."""
-    host = urlsplit(url).netloc.lower().split(":")[0]
-    labels = host.split(".")
-    for d in DIRECT_HOSTS:
-        if d.endswith("."):            # "ebay." → any ebay.<tld> / <sub>.ebay.<tld>
-            if d[:-1] in labels:
-                return True
-        elif host == d or host.endswith("." + d):
-            return True
-    return False
-
-
 def build_scrapers() -> list:
     return [
         ReverbScraper(),
@@ -107,6 +95,8 @@ def build_scrapers() -> list:
         CraigslistScraper(),
         ShopGoodwillScraper(),
         HiBidScraper(),
+        GovDealsScraper(),
+        AllSurplusScraper(),
         KijijiScraper(),
         MarktplaatsScraper(),
         WillhabenScraper(),
@@ -134,7 +124,7 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
 
     async def check(listing: dict):
         async with sem:
-            return listing, await is_live(listing.get("url", ""), http)
+            return listing, await verify_offer(listing, http)
 
     try:
         outcomes = await asyncio.wait_for(
@@ -148,13 +138,31 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
         if isinstance(outcome, BaseException):
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
-        listing, (alive, why) = outcome
-        if alive:
+        listing, (state, why) = outcome
+        if state == "live" or (state == "unknown" and (ITEM_PATH.search(urlsplit(listing.get("url", "")).path) or GOVDEALS_RX.search(listing.get("url", "")))):
+            reason = classify(listing)
+            if reason:
+                dropped[reason] = dropped.get(reason, 0) + 1
+                continue
             listing["liveness"] = why
-            alive_listings.append(listing)
+            listing["verification"] = state
+            if state == "live":
+                db.touch_active(listing)
+            else:
+                dropped["unverified"] = dropped.get("unverified", 0) + 1
+            if not db.was_url_alerted(listing.get("url", ""), listing.get("auction_end", "")):
+                alive_listings.append(listing)
+            continue
+        if state == "unknown":
+            dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
+            continue
+        if state == "non_sale":
+            dropped["non_sale"] = dropped.get("non_sale", 0) + 1
+            db.mark_dead(listing["id"], why)
             continue
         dropped["dead_link"] = dropped.get("dead_link", 0) + 1
         log.info(f"   dead link ({why}): {listing.get('title', '')[:60]} {listing.get('url', '')[:80]}")
+        db.mark_dead(listing["id"], why)
         permanent = why.startswith("http 4") or why.startswith("reverb")
         if permanent:
             db.mark_seen(listing["id"], listing)
@@ -174,6 +182,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
             started = datetime.utcnow()
             scraper.fetched = 0
             scraper.skipped = False
+            scraper.reset_health()
             try:
                 log.info(f"🔍 Searching: {scraper.name} (attempt {attempt}/{retries + 1})")
                 listings = await asyncio.wait_for(
@@ -197,23 +206,28 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                         dropped[reason] = dropped.get(reason, 0) + 1
                         log.debug(f"   drop[{reason}] {listing.get('title', '')[:70]}")
                         continue
+                    if listing.get("source") == "search" and db.dead_recently(listing["id"], DEAD_CACHE_DAYS):
+                        dropped["dead_cached"] = dropped.get("dead_cached", 0) + 1
+                        continue
                     if listing["id"] in seen_in_run:
                         continue
                     seen_in_run.add(listing["id"])
                     if listing.get("source") != "search":
                         db.touch_active(listing)  # still live on its platform this cycle
-                    if db.is_seen(listing["id"]):
+                    url_delivered = db.was_url_alerted(listing.get("url", ""), listing.get("auction_end", ""))
+                    new_auction = bool(listing.get("auction_end")) and not url_delivered
+                    if (db.is_seen(listing["id"]) and not new_auction) or url_delivered:
+                        if listing.get("source") == "search":
+                            to_verify.append(listing)
+                            continue
                         # Price-drop re-alerts only for instruments the owner actually received
                         if db.was_alerted(listing["id"]):
                             info = price_tracker.update_price(listing)
                             if info:
+                                db.enqueue_price_drop(listing, info)
                                 drops.append((listing, info))
                         continue
                     if listing.get("source") == "search":
-                        if _is_direct_host(listing.get("url", "")):
-                            dropped["direct_covered"] = dropped.get("direct_covered", 0) + 1
-                            db.mark_seen(listing["id"], listing)
-                            continue
                         if db.dead_recently(listing["id"], DEAD_CACHE_DAYS):
                             dropped["dead_cached"] = dropped.get("dead_cached", 0) + 1
                             continue
@@ -224,6 +238,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                 if to_verify:
                     # Random order so a permanently long tail cannot starve the same hits every day
                     random.shuffle(to_verify)
+                    to_verify.sort(key=lambda item: db.was_url_alerted(item.get("url", ""), item.get("auction_end", "")))
                     if len(to_verify) > MAX_LIVENESS_CHECKS:
                         dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + len(to_verify) - MAX_LIVENESS_CHECKS
                         to_verify = to_verify[:MAX_LIVENESS_CHECKS]
@@ -253,6 +268,9 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                     "name": scraper.name, "new": new_listings, "drops": drops,
                     "status": len(new_listings), "raw": fetched,
                     "duration": (datetime.utcnow() - started).total_seconds(),
+                    "error": scraper.health_error(),
+                    "details": {"requests_ok": scraper.requests_ok, "requests_attempted": scraper.requests_attempted,
+                                "rejected": dropped},
                 }
 
             except asyncio.TimeoutError:
@@ -297,14 +315,26 @@ async def _watchdog(scrapers: list, notifier: TelegramNotifier) -> None:
 
 async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: PriceTracker, listings: list) -> int:
     """Send listings; mark as seen/alerted ONLY the delivered ones."""
+    unique, urls = [], set()
+    from database import canonical_url
     for listing in listings:
+        url = canonical_url(listing.get("url", ""))
+        if url in urls or db.was_url_alerted(listing.get("url", ""), listing.get("auction_end", "")):
+            if db.was_url_alerted(listing.get("url", ""), listing.get("auction_end", "")):
+                db.discard_pending(listing.get("url", ""))
+            continue
+        urls.add(url)
+        db.enqueue(listing)
         listing["price_context"] = price_tracker.record_listing(listing)
-    delivered = await notifier.send_listings(listings)
+        unique.append(listing)
+    if not unique:
+        return 0
+    delivered = await notifier.send_listings(unique)
     for listing in delivered:
         db.mark_seen(listing["id"], listing)
         db.record_alert(listing, listing.get("price_usd"))
-    if len(delivered) < len(listings):
-        log.warning(f"   {len(listings) - len(delivered)} listing(s) not delivered — kept unseen for the next cycle")
+    if len(delivered) < len(unique):
+        log.warning(f"   {len(unique) - len(delivered)} listing(s) not delivered — kept unseen for the next cycle")
     return len(delivered)
 
 
@@ -334,6 +364,25 @@ async def run_search_cycle():
         sources_ok = sources_error = sources_zero = 0
 
         try:
+            for listing, info in db.pending_price_drops():
+                async with httpx.AsyncClient(timeout=15) as http:
+                    state, _ = await verify_offer(listing, http)
+                if state in ("dead", "non_sale"):
+                    db.finish_price_drop(listing.get("url", ""))
+                else:
+                    all_drops.append((listing, info))
+            # Retry durable messages even if their source disappears this cycle.
+            pending = db.pending()
+            if pending:
+                async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
+                    for listing in pending:
+                        state, why = await verify_offer(listing, http)
+                        if state in ("dead", "non_sale") or classify(listing):
+                            db.discard_pending(listing.get("url", ""))
+                            continue
+                        listing["verification"] = state
+                        listing["liveness"] = why
+                        total_sent += await _deliver(notifier, db, price_tracker, [listing])
             semaphore = asyncio.Semaphore(max(1, Config.SCRAPER_CONCURRENCY))
             tasks = [
                 asyncio.create_task(_run_scraper_with_resilience(scraper, db, price_tracker, semaphore))
@@ -345,7 +394,7 @@ async def run_search_cycle():
                 name, new_listings, drops, status = result["name"], result["new"], result["drops"], result["status"]
                 all_drops.extend(drops)
                 platform_stats[name] = status
-                if status == "ERROR":
+                if status == "ERROR" or result.get("error"):
                     sources_error += 1
                 elif result["raw"] == 0:
                     sources_zero += 1
@@ -356,8 +405,9 @@ async def run_search_cycle():
                     name,
                     raw=result["raw"],
                     new=len(new_listings),
-                    error="ERROR" if status == "ERROR" else "",
+                    error="ERROR" if status == "ERROR" else result.get("error", ""),
                     duration=result["duration"],
+                    details=result.get("details", {}),
                 )
 
                 # Send immediately per-platform so results are not lost on container restarts.
@@ -370,7 +420,13 @@ async def run_search_cycle():
 
             if all_drops:
                 try:
-                    await notifier.send_price_drops(all_drops)
+                    unique_drops = {item[0].get("url", ""): item for item in all_drops}
+                    all_drops = list(unique_drops.values())
+                    for listing, info in all_drops:
+                        db.enqueue_price_drop(listing, info)
+                    delivered_drops = await notifier.send_price_drops(all_drops)
+                    for listing, info in delivered_drops:
+                        db.finish_price_drop(listing.get("url", ""))
                 except Exception as e:
                     log.error(f"Telegram price-drop send error: {e}")
 
@@ -424,11 +480,15 @@ async def _maybe_weekly_digest(notifier: TelegramNotifier) -> None:
         row = conn.execute("SELECT value FROM kv WHERE key = 'digest_sent'").fetchone()
         if row and row[0] == today:
             return
-        conn.execute("INSERT OR REPLACE INTO kv VALUES ('digest_sent', ?, ?)", (today, datetime.utcnow().isoformat()))
-        conn.commit()
     finally:
         conn.close()
-    await send_weekly_digest(notifier)
+    if await send_weekly_digest(notifier):
+        conn = connect()
+        try:
+            conn.execute("INSERT OR REPLACE INTO kv VALUES ('digest_sent', ?, ?)", (today, datetime.utcnow().isoformat()))
+            conn.commit()
+        finally:
+            conn.close()
 
 
 async def send_weekly_digest(notifier: TelegramNotifier = None):
@@ -442,7 +502,7 @@ async def send_weekly_digest(notifier: TelegramNotifier = None):
         db.close()
     stats = status_tracker.get_status().get("price_stats") or {}
     log.info(f"📰 Weekly digest: {len(active)} active, {len(gone)} gone")
-    await notifier.send_digest(active, gone, stats)
+    return await notifier.send_digest(active, gone, stats)
 
 
 def _authorized(request) -> bool:

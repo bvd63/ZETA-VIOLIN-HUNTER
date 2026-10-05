@@ -15,6 +15,7 @@ import logging
 import re
 from scrapers.base import BaseScraper, BROWSER_UA
 from filters import has_zeta_signal
+from keywords import market_queries
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +27,6 @@ STORES = [
     ("StringWorks (pre-owned)", "https://www.stringworks.com", "USA", ["outlet-preowned-and-trade-in-deals"], "New"),
     ("Guitar Chimp", "https://guitarchimp.com", "USA", [], "Used"),
 ]
-SEARCH_TERMS = ["zeta", "strados"]
 USED_RX = re.compile(r"\b(used|pre[\s\-]?owned|consign\w*|trade[\s\-]?in|b[\s\-]?stock|vintage|second[\s\-]?hand)\b", re.I)
 TAG_RX = re.compile(r"<[^>]+>")
 
@@ -54,7 +54,7 @@ class ShopifyDealersScraper(BaseScraper):
                             log.warning(f"{label} collection '{handle}' HTTP {resp.status_code}")
                     except Exception as e:
                         log.warning(f"{label} collection '{handle}' error: {e}")
-                for term in SEARCH_TERMS:
+                for term in market_queries(broad=True, limit=6):
                     try:
                         resp = await client.get(f"{base}/search/suggest.json", params={
                             "q": term, "resources[type]": "product", "resources[limit]": 10,

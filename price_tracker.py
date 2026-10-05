@@ -6,11 +6,40 @@ on listings we have already alerted.
 
 import logging
 import re
+from statistics import median
 from datetime import datetime
 from config import Config
 from database import connect
 
 log = logging.getLogger(__name__)
+
+
+def comparison_group(listing: dict) -> str:
+    """Comparable asking prices only; never auction bids or multi-instrument lots."""
+    title = str(listing.get("title", "")).lower()
+    price = str(listing.get("price", "")).lower()
+    if listing.get("auction") or listing.get("mixed_lot") or "bid" in price or re.search(r"\b(?:lot|bundle|violins)\b", title):
+        return ""
+    from filters import MODEL_CODE_RX
+    code = MODEL_CODE_RX.search(title)
+    family, strings = "", ""
+    if code:
+        normalized = re.sub(r"[\s-]", "", code.group(0)).upper()
+        families = {"JV44": "jazz fusion", "JV45": "jazz fusion", "SV24": "strados", "SV25": "strados",
+                    "SV43": "jazz modern", "CV44": "jazz classic", "EV25": "acoustic pro", "EV44": "acoustic pro"}
+        family = families.get(normalized, "")
+        strings = "4" if normalized == "SV43" else normalized[-1]
+    else:
+        for model in ("jazz fusion", "jazz modern", "jazz classic", "strados", "acoustic pro", "educator"):
+            if model in title:
+                family = model
+                break
+        match = re.search(r"\b([456])[\s-]*(?:strings?|corzi|saiten|cordes|corde)\b", title)
+        strings = match.group(1) if match else ""
+    if not family or not strings:
+        return ""
+    grade = str(listing.get("condition", "") or "unspecified").strip().lower()
+    return f"{family}:{strings}:{grade}"
 
 CURRENCY_TO_USD = {
     "USD": 1.0,
@@ -132,6 +161,10 @@ class PriceTracker:
             )
         """)
         self.conn.commit()
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(price_history)")}
+        if "comparison_group" not in columns:
+            self.conn.execute("ALTER TABLE price_history ADD COLUMN comparison_group TEXT DEFAULT ''")
+            self.conn.commit()
 
     def _parse_price(self, price_str: str) -> tuple:
         """Extract numeric price and currency from price string.
@@ -142,6 +175,7 @@ class PriceTracker:
         """Record a NEW listing's price and return price context
         (price_usd, avg_price, deal_pct, is_deal, total_seen)."""
         price_usd, currency = self._parse_price(listing.get("price", ""))
+        group = comparison_group(listing)
 
         context = {
             "price_usd": price_usd,
@@ -157,11 +191,11 @@ class PriceTracker:
             now = datetime.utcnow().isoformat()
             self.conn.execute("""
                 INSERT OR IGNORE INTO price_history
-                (listing_id, platform, title, price_raw, price_usd, currency, url, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (listing_id, platform, title, price_raw, price_usd, currency, url, recorded_at, comparison_group)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 listing.get("id", ""), listing.get("platform", ""), listing.get("title", ""),
-                listing.get("price", ""), price_usd, currency, listing.get("url", ""), now,
+                listing.get("price", ""), price_usd, currency, listing.get("url", ""), now, group,
             ))
             self.conn.execute("""
                 INSERT OR REPLACE INTO last_prices (listing_id, price_raw, price_usd, updated_at)
@@ -172,15 +206,15 @@ class PriceTracker:
             log.warning(f"Price record error: {e}")
 
         try:
-            cur = self.conn.execute("""
-                SELECT AVG(price_usd), COUNT(*) FROM price_history
-                WHERE price_usd > 50 AND price_usd < 50000
-            """)
-            row = cur.fetchone()
-            if row and row[0] and row[1] >= 3:
-                avg = round(row[0], 2)
+            from datetime import timedelta
+            rows = self.conn.execute("""
+                SELECT price_usd FROM price_history WHERE comparison_group = ? AND comparison_group != ''
+                AND listing_id != ? AND recorded_at >= ? AND price_usd > 50 AND price_usd < 50000
+            """, (group, listing.get("id", ""), (datetime.utcnow() - timedelta(days=180)).isoformat())).fetchall()
+            if len(rows) >= 5:
+                avg = round(median(row[0] for row in rows), 2)
                 context["avg_price"] = avg
-                context["total_seen"] = row[1]
+                context["total_seen"] = len(rows)
                 deal_pct = round((1 - price_usd / avg) * 100, 1)
                 context["deal_pct"] = deal_pct
                 if deal_pct >= 30:
@@ -201,6 +235,8 @@ class PriceTracker:
         Config.PRICE_DROP_PCT. Always stores the new price."""
         price_usd, _ = self._parse_price(listing.get("price", ""))
         if price_usd is None:
+            return {}
+        if listing.get("auction") or "bid" in str(listing.get("price", "")).lower():
             return {}
         listing_id = listing.get("id", "")
         try:

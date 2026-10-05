@@ -11,10 +11,33 @@ import json
 import logging
 from datetime import datetime, timedelta
 from config import Config
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 log = logging.getLogger(__name__)
 
 DB_PATH = Config.DB_PATH
+
+
+def canonical_url(url: str) -> str:
+    """Remove tracking, fragments and marketplace locale aliases, not item IDs."""
+    parts = urlsplit(url or "")
+    host = (parts.hostname or "").lower().removeprefix("www.")
+    path = parts.path.rstrip("/")
+    if host == "reverb.com":
+        import re
+        match = re.search(r"/(?:[a-z]{2}/)?item/(\d+)", path)
+        if match:
+            path = f"/item/{match.group(1)}"
+    if host in ("govdeals.com", "allsurplus.com"):
+        path = path.removeprefix("/en")
+    if host.startswith("ebay."):
+        import re
+        match = re.search(r"/itm/(?:[^/]+/)?(\d+)", path)
+        if match:
+            host, path = "ebay.com", f"/itm/{match.group(1)}"
+    query = [(k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith("utm_")
+             and k.lower() not in ("fbclid", "gclid", "ref", "referrer", "source", "campaign", "srsltid")]
+    return urlunsplit(("https", host, path, urlencode(sorted(query)), ""))
 
 
 def connect() -> sqlite3.Connection:
@@ -85,6 +108,19 @@ class Database:
                 checked_at TEXT
             )
         """)
+        self.conn.commit()
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS delivered_urls (
+            url TEXT PRIMARY KEY, listing_id TEXT, delivered_at TEXT)""")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS pending_alerts (
+            url TEXT PRIMARY KEY, payload TEXT NOT NULL, queued_at TEXT NOT NULL)""")
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(delivered_urls)")}
+        if "auction_end" not in columns:
+            self.conn.execute("ALTER TABLE delivered_urls ADD COLUMN auction_end TEXT DEFAULT ''")
+        # Upgrade existing alert records without resetting dedup history.
+        for listing_id, url, at in self.conn.execute("SELECT id, url, alerted_at FROM alerts"):
+            if url:
+                self.conn.execute("INSERT OR IGNORE INTO delivered_urls (url, listing_id, delivered_at) VALUES (?, ?, ?)",
+                                  (canonical_url(url), listing_id, at))
         self.conn.commit()
 
     # --- dedup ---------------------------------------------------------------
@@ -163,6 +199,11 @@ class Database:
             """, (listing.get("id", ""), listing.get("platform", ""), listing.get("title", ""),
                   price_usd, listing.get("url", ""), datetime.utcnow().isoformat()))
             self.conn.commit()
+            url = canonical_url(listing.get("url", ""))
+            self.conn.execute("INSERT OR REPLACE INTO delivered_urls (url, listing_id, delivered_at, auction_end) VALUES (?, ?, ?, ?)",
+                              (url, listing.get("id", ""), datetime.utcnow().isoformat(), listing.get("auction_end", "")))
+            self.conn.execute("DELETE FROM pending_alerts WHERE url = ?", (url,))
+            self.conn.commit()
         except Exception as e:
             log.warning(f"alert record error: {e}")
 
@@ -172,6 +213,43 @@ class Database:
         except Exception as e:
             log.warning(f"alerted lookup error: {e}")
             return False
+
+    def was_url_alerted(self, url: str, auction_end: str = "") -> bool:
+        row = self.conn.execute("SELECT auction_end FROM delivered_urls WHERE url = ?", (canonical_url(url),)).fetchone()
+        if not row:
+            return False
+        # The same asset URL can be used for a fresh auction. Allow a new alert
+        # when both verified deadlines exist and differ; no arbitrary title reset.
+        return not (auction_end and row[0] and auction_end != row[0])
+
+    def enqueue(self, listing: dict) -> None:
+        self.conn.execute("""INSERT INTO pending_alerts VALUES (?, ?, ?)
+            ON CONFLICT(url) DO UPDATE SET payload = excluded.payload""",
+            (canonical_url(listing.get("url", "")), json.dumps(listing, ensure_ascii=False, default=str), datetime.utcnow().isoformat()))
+        self.conn.commit()
+
+    def pending(self, limit: int = 30) -> list:
+        rows = self.conn.execute("SELECT payload FROM pending_alerts WHERE url NOT LIKE 'drop:%' ORDER BY queued_at LIMIT ?", (limit,)).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def enqueue_price_drop(self, listing: dict, info: dict) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO pending_alerts VALUES (?, ?, ?)",
+            ("drop:" + canonical_url(listing.get("url", "")),
+             json.dumps({"listing": listing, "info": info}, ensure_ascii=False, default=str), datetime.utcnow().isoformat()))
+        self.conn.commit()
+
+    def pending_price_drops(self, limit: int = 30) -> list:
+        rows = self.conn.execute("SELECT payload FROM pending_alerts WHERE url LIKE 'drop:%' ORDER BY queued_at LIMIT ?", (limit,)).fetchall()
+        data = [json.loads(row[0]) for row in rows]
+        return [(entry["listing"], entry["info"]) for entry in data]
+
+    def finish_price_drop(self, url: str) -> None:
+        self.conn.execute("DELETE FROM pending_alerts WHERE url = ?", ("drop:" + canonical_url(url),))
+        self.conn.commit()
+
+    def discard_pending(self, url: str) -> None:
+        self.conn.execute("DELETE FROM pending_alerts WHERE url = ?", (canonical_url(url),))
+        self.conn.commit()
 
     def recent_alerts(self, days: int = 60) -> list:
         since = (datetime.utcnow() - timedelta(days=days)).isoformat()

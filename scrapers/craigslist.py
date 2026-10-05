@@ -24,6 +24,8 @@ Item format (compact arrays):
   canonical URL = https://www.craigslist.org/view/d/{slug}/{token}
 """
 
+from keywords import MODEL_CODES, ARTISTS
+
 import asyncio
 import httpx
 import logging
@@ -46,12 +48,6 @@ STATIC_AREAS = [
 ]
 
 # (query, searchPath). "msa" = musical instruments (all), "sss" = all for sale.
-QUERIES = [
-    ("zeta", "msa"),
-    ("strados", "msa"),
-    ("zeta violin", "sss"),
-    ("electric violin", "msa"),   # unbranded titles — body is checked for Zeta
-]
 
 # Max posting pages fetched per cycle (full descriptions)
 MAX_ENRICH = 150
@@ -73,14 +69,19 @@ class CraigslistScraper(BaseScraper):
         definite: list = []    # Zeta signal already in the title
         potential: list = []   # violin in the title, no brand — body must be checked
 
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers=HEADERS) as client:
+        async with self.make_client(timeout=15, follow_redirects=True, headers=HEADERS) as client:
             areas = await self._load_areas(client)
             if Config.CRAIGSLIST_MAX_US_CITIES > 0:
                 areas = areas[:Config.CRAIGSLIST_MAX_US_CITIES]
 
             sem = asyncio.Semaphore(max(4, min(16, Config.CRAIGSLIST_CONCURRENCY)))
-            work = [(area, q, path) for area in areas for q, path in QUERIES]
-            log.info(f"Craigslist: {len(areas)} areas × {len(QUERIES)} queries = {len(work)} requests")
+            # Craigslist documents the '|' OR operator: all codes in one query,
+            # keeping exactly four requests per area rather than multiplying traffic.
+            aliases = [*MODEL_CODES, *[f'"{artist}"' for artist in ARTISTS]]
+            queries = [("zeta | zetta", "msa"), ("strados", "msa"),
+                       ("electric violin", "msa"), (" | ".join(aliases), "msa")]
+            work = [(area, q, path) for area in areas for q, path in queries]
+            log.info(f"Craigslist: {len(areas)} areas × {len(queries)} queries = {len(work)} requests")
 
             async def fetch(area: tuple, query: str, path: str) -> list:
                 area_id, host, country = area

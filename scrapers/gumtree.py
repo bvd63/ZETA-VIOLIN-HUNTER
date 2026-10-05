@@ -6,6 +6,8 @@ Verified 2026-09-07: reachable from EU IPs; results are
 title/description/location/price as text.
 """
 
+from keywords import market_queries
+
 import logging
 import re
 from bs4 import BeautifulSoup
@@ -17,7 +19,6 @@ log = logging.getLogger(__name__)
 SEARCH_URL = "https://www.gumtree.com/search"
 # "electric violin" is broad on purpose: it always returns tiles (so the
 # watchdog sees the site alive) and the Zeta-signal filter picks any Zeta.
-KEYWORDS = ["electric violin", "zeta violin", "zeta strados"]
 PRICE_RX = re.compile(r"£\s?[\d,]+(?:\.\d{2})?")
 
 
@@ -30,7 +31,7 @@ class GumtreeScraper(BaseScraper):
         headers = {**BROWSER_HEADERS, "Accept-Language": "en-GB,en;q=0.9"}
 
         async with self.make_client(headers=headers) as client:
-            for kw in KEYWORDS:
+            for kw in market_queries("en", broad=True, limit=8, extra=("electric violin",)):
                 try:
                     resp = await client.get(SEARCH_URL, params={"search_category": "all", "q": kw})
                     if resp.status_code != 200:

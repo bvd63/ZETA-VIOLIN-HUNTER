@@ -3,19 +3,14 @@ Kleinanzeigen.de scraper — Playwright headless Chromium.
 Germany's largest classifieds. No login required.
 """
 
+from keywords import market_queries
+
 import asyncio
 import logging
 from scrapers.base import BaseScraper
 
 log = logging.getLogger(__name__)
 
-KEYWORDS = [
-    "Zeta Violine",
-    "Zeta Geige",
-    "Zeta Strados",
-    "Zeta electric violin",
-    "Zeta Jazz Fusion",
-]
 
 SEARCH_URL = "https://www.kleinanzeigen.de/s-{keyword}/k0"
 
@@ -49,7 +44,7 @@ class KleinanzeigenScraper(BaseScraper):
                 )
                 page = await context.new_page()
 
-                for kw in KEYWORDS:
+                for kw in market_queries("de", broad=True, limit=8):
                     try:
                         url = SEARCH_URL.format(keyword=kw.replace(" ", "-"))
                         await page.goto(url, wait_until="networkidle", timeout=30000)

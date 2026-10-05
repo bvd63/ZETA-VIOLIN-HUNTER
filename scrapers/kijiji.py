@@ -7,6 +7,8 @@ Apollo cache in __NEXT_DATA__ (props.pageProps.__APOLLO_STATE__) with
 location, activationDate.
 """
 
+from keywords import market_queries
+
 import json
 import logging
 import re
@@ -21,13 +23,6 @@ SEARCH_URL = "https://www.kijiji.ca/b-canada/{slug}/k0l0"
 CATEGORY_URL = "https://www.kijiji.ca/b-musical-instruments/canada/{slug}/k0c17l0"
 
 # (keyword, category-scoped)
-KEYWORDS = [
-    ("zeta", True),
-    ("strados", True),
-    ("zeta violin", False),
-    ("zeta electric violin", False),
-    ("violon zeta", False),
-]
 
 
 class KijijiScraper(BaseScraper):
@@ -38,7 +33,7 @@ class KijijiScraper(BaseScraper):
         seen_ids = set()
 
         async with self.make_client(headers=BROWSER_HEADERS) as client:
-            for kw, in_category in KEYWORDS:
+            for kw, in_category in [(q, q.lower() in ("zeta", "strados")) for q in market_queries("fr", broad=True)]:
                 slug = re.sub(r"[^a-z0-9]+", "-", kw.lower()).strip("-")
                 try:
                     resp = await client.get((CATEGORY_URL if in_category else SEARCH_URL).format(slug=slug))

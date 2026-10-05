@@ -7,6 +7,8 @@ Verified 2026-09-07: the buyer API answers without authentication:
 Item URL: https://shopgoodwill.com/item/{itemId}
 """
 
+from keywords import market_queries
+
 import httpx
 import logging
 from scrapers.base import BaseScraper, BROWSER_UA
@@ -17,7 +19,6 @@ log = logging.getLogger(__name__)
 API_URL = "https://buyerapi.shopgoodwill.com/api/Search/ItemListing"
 
 # Broad queries; the Zeta-signal filter on title + description does the work.
-QUERIES = ["zeta violin", "zeta strados", "zeta", "electric violin"]
 PAGE_SIZE = 40
 MAX_PAGES = 3
 
@@ -53,8 +54,8 @@ class ShopGoodwillScraper(BaseScraper):
         results = []
         seen_ids = set()
 
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=HEADERS) as client:
-            for q in QUERIES:
+        async with self.make_client(timeout=20, follow_redirects=True, headers=HEADERS) as client:
+            for q in market_queries("en", broad=True, limit=8, extra=("electric violin",)):
                 for page in range(1, MAX_PAGES + 1):
                     try:
                         resp = await client.post(API_URL, json=_body(q, page))
@@ -91,7 +92,7 @@ class ShopGoodwillScraper(BaseScraper):
 
                             results.append({
                                 "id": unique_id,
-                                "platform": "ShopGoodwill",
+                                "platform": "ShopGoodwill", "auction": True,
                                 "title": title,
                                 "price": price,
                                 "location": "USA",

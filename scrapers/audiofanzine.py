@@ -3,6 +3,8 @@ Audiofanzine scraper — French music gear community.
 Has classifieds section for instruments. httpx + BeautifulSoup.
 """
 
+from keywords import market_queries
+
 import httpx
 import logging
 from bs4 import BeautifulSoup
@@ -33,12 +35,11 @@ class AudiofanzineScraper(BaseScraper):
             "Accept-Language": "en-US,en;q=0.9,fr;q=0.8",
         }
 
-        keywords = ["zeta violin", "zeta electric violin", "zeta strados"]
 
-        async with httpx.AsyncClient(
+        async with self.make_client(
             timeout=15, follow_redirects=True, headers=headers
         ) as client:
-            for kw in keywords:
+            for kw in market_queries("fr", broad=True, limit=8):
                 try:
                     params = {"q": kw, "type": "classified"}
                     resp = await client.get(SEARCH_URL, params=params)

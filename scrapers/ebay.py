@@ -14,6 +14,8 @@ Prompt 15:
   * 19 marketplaces; unsupported ones answer 400 once and are skipped
 """
 
+from keywords import market_queries
+
 import httpx
 import logging
 import base64
@@ -34,17 +36,6 @@ MARKETPLACES = [
 ]
 
 # (query, category_ids or "")
-QUERIES = [
-    ("Zeta violin", ""),
-    ("Zeta electric violin", ""),
-    ("Zeta Strados", ""),
-    ("Zeta Jazz Fusion", ""),
-    ("Zeta JV44", ""),
-    ("Zeta SV24", ""),
-    ("Zeta JLP", ""),
-    ("Zetta violin", ""),
-    ("zeta", "619"),   # Musical Instruments & Gear — catches titles without "violin"
-]
 MAX_PAGES = 2  # 100 newest results per query and marketplace
 
 
@@ -96,14 +87,14 @@ class EbayScraper(BaseScraper):
         results = []
         seen_ids = set()
 
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        async with self.make_client(timeout=20, follow_redirects=True) as client:
             token = await self._get_token(client)
             if not token:
                 return []
 
             for marketplace in MARKETPLACES:
                 marketplace_ok = True
-                for kw, category in QUERIES:
+                for kw, category in [(q, "619") for q in market_queries(broad=True, limit=10)]:
                     if not marketplace_ok:
                         break
                     # Newest first + up to MAX_PAGES pages so a relevant item ranked

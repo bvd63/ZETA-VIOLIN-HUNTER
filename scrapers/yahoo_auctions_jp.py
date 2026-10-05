@@ -13,6 +13,8 @@ the log prints the most common CSS classes so the selectors can be fixed
 from the Railway logs without local access.
 """
 
+from keywords import market_queries
+
 import logging
 import re
 from collections import Counter
@@ -29,15 +31,6 @@ SEARCH_URL = "https://auctions.yahoo.co.jp/search/search"
 # see the site works and the parser can be validated from the logs) and any
 # Zeta among them is caught by the signal filter. Zeta-specific queries with no
 # results answer HTTP 404 on Yahoo — that is "no results", not an error.
-KEYWORDS = [
-    "エレキバイオリン",
-    "電子バイオリン",
-    "ZETA バイオリン",
-    "ゼータ バイオリン",
-    "ゼータ ヴァイオリン",
-    "zeta violin",
-    "zeta strados",
-]
 # Railway log 2026-09-07: hrefs are ".../jp/auction/x123" on auctions.yahoo.co.jp
 # (not page.auctions...), so match the path only.
 AUCTION_RX = re.compile(r"/jp/auction/([a-z]\d+)", re.I)
@@ -72,7 +65,7 @@ class YahooAuctionsJPScraper(BaseScraper):
         results = []
         seen_ids = set()
         async with self.make_client(headers=HEADERS) as client:
-            for kw in KEYWORDS:
+            for kw in market_queries("ja", broad=True, limit=8, extra=("エレキバイオリン",)):
                 try:
                     resp = await client.get(SEARCH_URL, params={
                         "p": kw, "va": kw, "n": 50, "s1": "new", "o1": "d", "exflg": 1, "b": 1,
@@ -84,7 +77,7 @@ class YahooAuctionsJPScraper(BaseScraper):
                         log.warning(f"Yahoo Auctions JP '{kw}' HTTP {resp.status_code}")
                         continue
                     items = self._parse(resp.text)
-                    if not items and len(resp.text) > 50000 and kw == KEYWORDS[0]:
+                    if not items and len(resp.text) > 50000 and kw == "エレキバイオリン":
                         self._log_structure(resp.text, kw)
                     self.fetched += len(items)
 

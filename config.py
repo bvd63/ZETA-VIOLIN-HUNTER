@@ -35,9 +35,9 @@ class Config:
     EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "")
 
     # --- Schedule ---
-    # Hours (comma separated) in SEARCH_TIMEZONE. Default: once a day at 12:00
+    # Hours (comma separated) in SEARCH_TIMEZONE. Default: twice a day at 10:00 and 22:00
     # Romania time (DST handled by the timezone). Legacy SEARCH_HOUR (UTC) is ignored.
-    SEARCH_HOURS = os.getenv("SEARCH_HOURS", "12")
+    SEARCH_HOURS = os.getenv("SEARCH_HOURS", "10,22")
     SEARCH_TIMEZONE = os.getenv("SEARCH_TIMEZONE", "Europe/Bucharest")
     RUNS_PER_DAY = max(1, len([h for h in SEARCH_HOURS.split(",") if h.strip().isdigit()]))
 
@@ -63,6 +63,10 @@ class Config:
     # 32 queries/day × 30 days ≈ 960/month, split across the day's runs
     BRAVE_QUERIES_PER_RUN = int(os.getenv("BRAVE_QUERIES_PER_RUN", str(max(1, 32 // RUNS_PER_DAY))))
     BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "10"))
+    # Hard monthly ceiling within the published $5 free credit, including retries.
+    BRAVE_MONTHLY_QUOTA = min(1000, max(0, int(os.getenv("BRAVE_MONTHLY_QUOTA", "960"))))
+    # Years in titles/bodies are often purchase/auction dates, not manufacture years.
+    FILTER_TEXT_YEARS = _bool("FILTER_TEXT_YEARS", "false")
 
     # --- US egress proxy (http://user:pass@host:port) for sites that block
     # European datacenter IPs: Guitar Center, Facebook Marketplace, ... ---

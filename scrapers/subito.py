@@ -7,6 +7,8 @@ NOT in ".items.list" (always empty). Appending a city name to the query text
 ("Zeta violino Milan") kills results, so we search nationwide once per keyword.
 """
 
+from keywords import market_queries
+
 import httpx
 import json
 import logging
@@ -18,14 +20,6 @@ log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.subito.it/annunci-italia/vendita/usato/"
 
-KEYWORDS = [
-    "zeta violino",
-    "zeta violin",
-    "zeta strados",
-    "violino elettrico zeta",
-    "zeta acoustic pro",
-    "zeta jazz fusion",
-]
 
 HEADERS = {
     "User-Agent": BROWSER_UA,
@@ -41,8 +35,8 @@ class SubitoScraper(BaseScraper):
         results = []
         seen_ids = set()
 
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers=HEADERS) as client:
-            for kw in KEYWORDS:
+        async with self.make_client(timeout=15, follow_redirects=True, headers=HEADERS) as client:
+            for kw in market_queries("it", broad=True, limit=8):
                 try:
                     resp = await client.get(SEARCH_URL, params={"q": kw})
                     if resp.status_code != 200:

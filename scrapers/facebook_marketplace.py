@@ -12,6 +12,8 @@ URL: facebook.com/marketplace/search/?query=QUERY
 Listings: a[href*="/marketplace/item/"] anchors in search results.
 """
 
+from keywords import market_queries
+
 import asyncio
 import logging
 import re
@@ -23,14 +25,6 @@ log = logging.getLogger(__name__)
 
 FB_SEARCH_URL = "https://www.facebook.com/marketplace/search/"
 
-KEYWORDS = [
-    "Zeta violin",
-    "Zeta electric violin",
-    "Zeta Strados",
-    "Zeta JV44",
-    "Zeta SV24",
-    "Zetta violin",
-]
 
 ZETA_SIGNALS = [
     "zeta", "zetta", "strados", "jv44", "jv45",
@@ -112,7 +106,7 @@ class FacebookMarketplaceScraper(BaseScraper):
                 )
                 page = await context.new_page()
 
-                for kw in KEYWORDS:
+                for kw in market_queries("en", broad=True, limit=8):
                     try:
                         url = f"{FB_SEARCH_URL}?query={kw.replace(' ', '+')}"
                         await page.goto(url, wait_until="domcontentloaded", timeout=30000)

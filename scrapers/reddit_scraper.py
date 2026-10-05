@@ -10,6 +10,8 @@ Setup required (MANUAL STEP — env vars in Railway):
 If these vars are not set, the scraper skips gracefully.
 """
 
+from keywords import market_queries
+
 import logging
 from scrapers.base import BaseScraper
 from config import Config
@@ -22,16 +24,6 @@ SUBREDDITS = [
     "ElectricViolin",
     "Luthier",
     "classicalmusic",
-]
-
-KEYWORDS = [
-    "zeta",
-    "strados",
-    "jv44",
-    "sv24",
-    "jean-luc ponty",
-    "jlp",
-    "jazz fusion violin",
 ]
 
 
@@ -78,7 +70,7 @@ class RedditScraper(BaseScraper):
                     for sub_name in SUBREDDITS:
                         try:
                             subreddit = reddit.subreddit(sub_name)
-                            for kw in KEYWORDS:
+                            for kw in market_queries("en", broad=True, limit=8):
                                 try:
                                     for post in subreddit.search(
                                         kw,
