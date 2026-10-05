@@ -1,6 +1,7 @@
 # 🎻 Zeta Violin Hunter
 
-Bot care caută zilnic viori electrice **Zeta** second-hand pe ~22 de piețe din lume
+Bot care caută zilnic viori electrice **Zeta** second-hand prin 22 de module de colectare,
+unele cu mai multe platforme și sute de regiuni, plus căutări web pe alte domenii,
 și trimite alerte pe Telegram, cu poză, preț în euro, semn „livrează în România”
 și marcaje pentru modele rare. Rulează pe Railway, la **10:00 și 22:00, ora României** (inclusiv schimbarea orei de vară).
 
@@ -62,6 +63,24 @@ Brave 32/zi și 960/lună, rezervate în SQLite înaintea cererii, inclusiv la r
 Creditul Brave și limitele contului trebuie să rămână disponibile; Railway facturează
 resursele reale, deci abonamentul de 5 USD nu garantează singur un plafon de consum.
 `DB_PATH=/data/zeta_listings.db` trebuie păstrat pe volumul existent.
+
+Craigslist folosește tot patru căutări pe regiune, dar trei caută acum în toate
+categoriile de vânzări, inclusiv estate/garage sales. Citește descrierea completă,
+verifică paginile și datele evenimentelor, și limitează detaliile la 150 de pagini
+pe ciclu. Un inventar mixt trebuie să identifice explicit o vioară Zeta/model;
+o haină Zeta și o vioară fără legătură nu formează o potrivire. Anunțurile trimise
+pentru evenimente arată obiectul din inventar și ultima zi anunțată.
+
+Pe lângă cele cinci grupuri de licitații, trei căutări web prioritare urmăresc
+piețe americane, magazine de instrumente folosite și estate sales (inclusiv
+AuctionNinja și MaxSold), în același plafon de cereri. Brave păstrează fragmentele
+suplimentare de context și dezactivează corectarea automată a numelor de modele.
+Acesta este acces prin indexare web, nu colectare directă garantată.
+
+`/status` arată separat sursele omise, cu eroare sau cu acces parțial. Numărul
+surselor rulate din ciclurile noi exclude modulele omise de guard/configurație.
+Detaliile Craigslist includ candidații verificați, expirați, neverificați și
+amânați de plafon. Un răspuns HTTP reușit nu confirmă că există o vioară eligibilă.
 
 Indexarea motoarelor și blocările site-urilor limitează acoperirea; nu este promisă
 detectarea fiecărei licitații. Arhivele documentează alegerea surselor și nu generează

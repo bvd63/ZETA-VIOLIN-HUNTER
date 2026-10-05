@@ -271,7 +271,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                     "duration": (datetime.utcnow() - started).total_seconds(),
                     "error": scraper.health_error(),
                     "details": {"requests_ok": scraper.requests_ok, "requests_attempted": scraper.requests_attempted,
-                                "rejected": dropped},
+                                "rejected": dropped, "coverage": getattr(scraper, "coverage_stats", {})},
                 }
 
             except asyncio.TimeoutError:

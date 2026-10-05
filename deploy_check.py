@@ -8,6 +8,8 @@ def main():
     for module, arguments in (
         ("tests.test_filters", []),
         ("tests.test_apify", []),
+        ("tests.test_craigslist", []),
+        ("tests.test_reliability", []),
         ("apify_preview", ["--check"]),
     ):
         print(f"Pre-deploy check: {module}", flush=True)

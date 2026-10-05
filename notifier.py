@@ -184,6 +184,14 @@ class TelegramNotifier:
             lines.append("📦 Ridicare personală; vânzătorul nu expediază.")
         if listing.get("mixed_lot"):
             lines.append("🎻 Lot mixt: include viori Zeta și alte instrumente.")
+        if listing.get("estate_sale"):
+            from filters import estate_violin_evidence
+            evidence = estate_violin_evidence(title, description)
+            if evidence:
+                lines.append(f"🎻 În inventar: {html.escape(evidence[:180])}")
+            lines.append("🏠 Vânzare locală; confirmă ridicarea sau expedierea cu organizatorul.")
+            if listing.get("sale_end"):
+                lines.append(f"📅 Ultima zi anunțată: {html.escape(str(listing['sale_end']))}")
         rare = self._rare_flags(title, description)
         if rare:
             lines.append(f"🔥 <b>Rar:</b> {html.escape(', '.join(rare))}")

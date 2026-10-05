@@ -13,7 +13,7 @@ import httpx
 import logging
 from datetime import datetime, timedelta
 from scrapers.base import BaseScraper
-from scrapers.google import GLOBAL_QUERIES, MATRIX_KEYWORDS, SITE_GROUPS, PRIORITY_QUERIES
+from scrapers.google import GLOBAL_QUERIES, MATRIX_KEYWORDS, SITE_GROUPS, PRIORITY_QUERIES, US_PRIORITY_QUERIES
 from config import Config
 from database import connect
 from search_budget import reserve_request
@@ -66,7 +66,8 @@ class BraveScraper(BaseScraper):
         """(list of (q, params), next_cursor). Global fresh queries first,
         then a rotating slice of the site matrix."""
         budget = max(1, Config.BRAVE_QUERIES_PER_RUN)
-        plan = [(q, {} if q in PRIORITY_QUERIES else {"freshness": "pm"}) for q in GLOBAL_QUERIES][:budget]
+        plan = [(q, {"country": "US"} if q in US_PRIORITY_QUERIES else
+                 {} if q in PRIORITY_QUERIES else {"freshness": "pm"}) for q in GLOBAL_QUERIES][:budget]
         matrix = [f"{kw} {group}" for kw in MATRIX_KEYWORDS for group in SITE_GROUPS]
         remaining = budget - len(plan)
         n = len(matrix)
@@ -106,7 +107,8 @@ class BraveScraper(BaseScraper):
                         self.skipped = not results
                         break
                     spent += 1
-                    params = {"q": q, "count": 20, "text_decorations": "false", "safesearch": "off", **extra}
+                    params = {"q": q, "count": 20, "text_decorations": "false", "safesearch": "off",
+                              "spellcheck": "false", "extra_snippets": "true", **extra}
                     resp = await client.get(BRAVE_API, headers=headers, params=params)
                     if resp.status_code in (401, 402, 403, 429):
                         log.warning(f"Brave HTTP {resp.status_code} (key/credit/rate?) — stopping: {resp.text[:200]!r}")
@@ -125,7 +127,9 @@ class BraveScraper(BaseScraper):
                         seen_ids.add(unique_id)
 
                         title = item.get("title", "")
-                        snippet = item.get("description", "") or ""
+                        snippets = [item.get("description", "") or ""]
+                        snippets.extend(s for s in (item.get("extra_snippets") or []) if isinstance(s, str))
+                        snippet = "\n".join(dict.fromkeys(snippets))[:6000]
                         if self._is_excluded(title):
                             continue
                         if not self._year_in_range(title + " " + snippet):
@@ -139,7 +143,7 @@ class BraveScraper(BaseScraper):
                             "price": "See listing",
                             "location": "Unknown",
                             "url": url,
-                            "description": snippet[:1000],
+                            "description": snippet,
                             "date_posted": str(item.get("page_age") or item.get("age") or "")[:10],
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, snippet),
