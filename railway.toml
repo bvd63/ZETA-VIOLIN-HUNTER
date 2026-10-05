@@ -1,5 +1,5 @@
 [deploy]
-preDeployCommand = ["python -m apify_preview --check"]
+preDeployCommand = ["python -m tests.test_filters && python -m tests.test_apify && python -m apify_preview --check"]
 startCommand = "python main.py"
 restartPolicyType = "always"
 healthcheckPath = "/health"
