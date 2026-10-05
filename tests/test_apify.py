@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -31,6 +32,7 @@ PIEDMONT_CARD = {"marketplace_listing_title": "Zeta Strados Electric Violin",
                 "listing_price": {"amount": "3000"},
                 "location": {"reverse_geocode": {"city": "Piedmont", "state": "CA"}},
                 "is_live": True, "is_sold": False, "is_pending": False}
+CASE, STRADOS_2001 = json.loads((Path(__file__).parent / "fixtures/facebook_2200_filter_regression.json").read_text())
 
 
 class ApifyTests(unittest.TestCase):
@@ -75,6 +77,25 @@ class ApifyTests(unittest.TestCase):
         self.assertNotEqual(classify(normalize({**FENTON, "listingTitle": "Zeta Educator Electric Viola"})), "")
         self.assertTrue(normalize({**FENTON, "location": [], "listingPhotos": "invalid", "primaryListingPhoto": {"image": "invalid"}}))
 
+    def test_actual_2200_case_and_violin_are_classified_correctly(self):
+        self.assertTrue(available(normalize(CASE)))
+        self.assertEqual(classify(normalize(CASE)), "noise")
+        self.assertTrue(available(normalize(STRADOS_2001)))
+        self.assertEqual(classify(normalize(STRADOS_2001)), "")
+
+    def test_reclassifies_fresh_cache_without_paid_runs(self):
+        with store() as conn:
+            for raw in (CASE, STRADOS_2001):
+                item = normalize(raw)
+                data = json.dumps(item)
+                conn.execute("INSERT INTO apify_items VALUES (?,?,?,?)", (item["url"], data, data, time.time()))
+            conn.commit()
+        requests = []
+        with patch.object(Config, "APIFY_MONTHLY_LIMIT_USD", 0):
+            results = asyncio.run(self.scraper(lambda r: requests.append(r) or httpx.Response(500)).search())
+        self.assertEqual(requests, [])
+        self.assertEqual([item["url"] for item in results], [STRADOS_2001["itemUrl"]])
+
     def test_cloud_predeploy_check_reads_private_tasks_without_starting_runs(self):
         from apify_preview import preview
         requests = []
@@ -115,6 +136,11 @@ class ApifyTests(unittest.TestCase):
 
     def test_two_stage_filters_before_details_and_uses_auth_header(self):
         starts = []
+        # A case from an older deployment must not consume a detail slot either.
+        with store() as conn:
+            item = normalize(CASE)
+            conn.execute("INSERT INTO apify_items (url,candidate) VALUES (?,?)", (item["url"], json.dumps(item)))
+            conn.commit()
         def handler(request):
             self.assertEqual(request.headers["Authorization"], "Bearer test-token")
             self.assertNotIn("token", request.url.params)
@@ -127,7 +153,8 @@ class ApifyTests(unittest.TestCase):
             if "actor-runs" in request.url.path:
                 dataset = "cards" if "discoveryRun" in request.url.path else "details"
                 return httpx.Response(200, json={"data": {"status": "SUCCEEDED", "defaultDatasetId": dataset}})
-            rows = [PIEDMONT_CARD, {**PIEDMONT_CARD, "listingUrl": "https://www.facebook.com/marketplace/item/2/",
+            rows = [PIEDMONT_CARD, {"marketplace_listing_title": CASE["listingTitle"], "listingUrl": CASE["itemUrl"]},
+                    {**PIEDMONT_CARD, "listingUrl": "https://www.facebook.com/marketplace/item/2/",
                      "marketplace_listing_title": "High Sierra Zeta backpack"}] if "/cards/" in request.url.path else [
                          {**FENTON, "listingTitle": PIEDMONT_CARD["marketplace_listing_title"], "itemUrl": PIEDMONT_CARD["listingUrl"]}]
             return httpx.Response(200, json=rows)

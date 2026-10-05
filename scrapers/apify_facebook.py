@@ -226,8 +226,11 @@ class ApifyFacebookScraper(BaseScraper):
                 if not listing:
                     continue
                 self.fetched += 1
-                if phase == "discovery" and (classify(listing) or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True):
-                    continue
+                if phase == "discovery":
+                    reason = classify(listing)
+                    if reason or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
+                        log.info("Apify discovery %s rejected: %s", listing["url"], reason or "sold/pending")
+                        continue
                 url = listing["url"]
                 observed.add(url)
                 conn.execute("INSERT INTO apify_items (url,candidate) VALUES (?,?) ON CONFLICT(url) DO UPDATE SET candidate=excluded.candidate",
@@ -249,7 +252,6 @@ class ApifyFacebookScraper(BaseScraper):
             self.skipped = True
             log.info("Apify Facebook not configured or disabled; skipping")
             return []
-        observed = set()
         cutoff = time.time() - Config.APIFY_DETAIL_TTL_HOURS * 3600
         try:
             with store() as conn:
@@ -270,20 +272,27 @@ class ApifyFacebookScraper(BaseScraper):
                                 conn.commit()
                             self.failures.append("Apify expired run; reservation retained, results unavailable")
                             continue
-                        observed.update(self._consume(reservation, phase, rows))
+                        self._consume(reservation, phase, rows)
                 else:
                     reservation, rows = await self._start(client, "discovery", regional_plan(self._cursor), Config.APIFY_DISCOVERY_CAP_USD)
                     if reservation:
-                        observed.update(self._consume(reservation, "discovery", rows))
+                        self._consume(reservation, "discovery", rows)
                     else:
                         self.skipped = True
                         log.info("Apify discovery skipped: guard or monthly reservation limit")
                 with store() as conn:
-                    queue = conn.execute("SELECT url FROM apify_items WHERE checked<? ORDER BY checked,url LIMIT 2", (cutoff,)).fetchall()
+                    queue = []
+                    for url, candidate in conn.execute("SELECT url,candidate FROM apify_items WHERE checked<? ORDER BY checked,url", (cutoff,)):
+                        listing = json.loads(candidate)
+                        if classify(listing) or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
+                            continue
+                        queue.append({"url": url})
+                        if len(queue) == 2:
+                            break
                 if queue:
-                    reservation, rows = await self._start(client, "details", [{"url": row[0]} for row in queue], Config.APIFY_DETAILS_CAP_USD)
+                    reservation, rows = await self._start(client, "details", queue, Config.APIFY_DETAILS_CAP_USD)
                     if reservation:
-                        observed.update(self._consume(reservation, "details", rows))
+                        self._consume(reservation, "details", rows)
                         self.skipped = False
         except Exception as exc:
             # No credential-bearing exception strings or response bodies in logs.
@@ -293,12 +302,16 @@ class ApifyFacebookScraper(BaseScraper):
         ready = []
         try:
             with store() as conn:
-                for url in sorted(observed):
-                    row = conn.execute("SELECT details,checked FROM apify_items WHERE url=?", (url,)).fetchone()
-                    if row and row[0] and row[1] >= cutoff:
-                        listing = json.loads(row[0])
-                        if available(listing) and not classify(listing):
-                            ready.append(listing)
+                # Reapply current rules to every fresh verified record, including
+                # previously rejected instruments. Main's delivery DB deduplicates.
+                for (details,) in conn.execute("SELECT details FROM apify_items WHERE details IS NOT NULL AND checked>=? ORDER BY url", (cutoff,)):
+                    listing = json.loads(details)
+                    reason = classify(listing)
+                    if available(listing) and not reason:
+                        ready.append(listing)
+                        log.info("Apify detail %s eligible", listing["url"])
+                    else:
+                        log.info("Apify detail %s withheld: %s", listing["url"], reason or "availability unconfirmed/sold/pending/hidden")
         except Exception as exc:
             self.failures.append("Apify cache unavailable: " + type(exc).__name__)
         log.info("Apify Facebook: %d fetched, %d verified candidates; %s", self.fetched, len(ready), self.health_error() or "OK")
