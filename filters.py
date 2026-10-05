@@ -14,6 +14,7 @@ title-only — sellers mention them in bodies of perfectly good listings.
 """
 
 import re
+import unicodedata
 from urllib.parse import urlsplit
 from keywords import MODEL_CODES, MODEL_NAMES, ARTISTS
 
@@ -35,7 +36,7 @@ def _rx(terms: list) -> "re.Pattern":
 ZETA_BRAND_RX = _rx(["zeta", "zetta", "zetamusic", "zeta music", "zeta music systems"])
 ZETA_BRAND_JP = ["ゼータ"]
 
-# Unique Zeta model codes, optional hyphen (SV-24). Yamaha SV-200/SV-250/EV-205
+# Zeta model codes, optional hyphen (SV-24). Yamaha SV-200/SV-250/EV-205
 # do NOT match because the digits must end at a word boundary.
 MODEL_CODE_RX = re.compile(r"(?<![\w])(?:" + "|".join(
     r"[\s\-]?".join(re.escape(part) for part in re.findall(r"[A-Za-z]+|\d+", code)) for code in MODEL_CODES
@@ -46,7 +47,7 @@ ZETA_ONLY_ARTIST_RX = _rx([*ARTISTS, "jlp"])
 # ---------------------------------------------------------------------------
 # §4.2 CLASS B — model names
 # ---------------------------------------------------------------------------
-STRADOS_RX = _rx(["strados"])  # alone is OK
+STRADOS_RX = _rx(["strados"])
 MODEL_NAME_RX = _rx(list(MODEL_NAMES))
 
 # ---------------------------------------------------------------------------
@@ -101,6 +102,11 @@ NOISE_TITLE_MEDIA_RX = _rx([
     "press release", "advertisement", "print ad", "magazine ad", "article clipping",
     "newspaper", "pamphlet", "revista", "revue", "zeitschrift", "concert", "tickets", "ticket",
 ])
+# Japanese titles have no spaces: "ドイツ盤LP" and "輸入ジャズCD" must
+# still identify records. ASCII boundaries also avoid matching serial ABCD123.
+# NFKC converts full-width ＣＤ/ＬＰ before this title-only check.
+NOISE_TITLE_FORMAT_RX = re.compile(r"(?<![a-z0-9])(?:cd|dvd|lp|ep)(?![a-z0-9])", re.I)
+NOISE_TITLE_MEDIA_JP = ["輸入盤", "国内盤", "アナログ盤", "紙ジャケット", "紙ジャケ", "ドイツ盤"]
 OTHER_INSTRUMENT_RX = _rx(["viola", "violas"])
 NOISE_TITLE_INSTRUMENT_RX = _rx(["bass", "guitar"])
 # Japanese noise — substring match (no word spaces in Japanese).
@@ -206,9 +212,10 @@ def has_zeta_signal(text: str) -> bool:
 def is_zeta_violin(title: str, description: str = "") -> bool:
     """CLASS A / B acceptance (positive side of §5)."""
     text = f"{title} {description}"
-    # JV44 is also a Luftwaffe unit used in aircraft-kit titles, and artist
-    # names identify albums too. A discovery signal is not proof of a violin.
-    if (MODEL_CODE_RX.search(text) or ZETA_ONLY_ARTIST_RX.search(text)) and has_violin_word(title):
+    # JV44 also identifies aircraft kits, so codes require a violin title.
+    # Artist names are discovery terms only: album titles routinely mention
+    # "violin" as a genre/instrument, including the user's Yahoo LP example.
+    if MODEL_CODE_RX.search(text) and has_violin_word(title):
         return True
     if STRADOS_RX.search(text) and (has_violin_word(title) or has_zeta_brand(text)):
         return True
@@ -229,6 +236,8 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None) 
     if title_conclusive is None:
         title_conclusive = is_zeta_violin(title)
     if NOISE_RX.search(title) or NOISE_OBJECT_RX.search(title) or NOISE_TITLE_MEDIA_RX.search(title):
+        return True
+    if NOISE_TITLE_FORMAT_RX.search(unicodedata.normalize("NFKC", title)) or any(j in title for j in NOISE_TITLE_MEDIA_JP):
         return True
     if OTHER_INSTRUMENT_RX.search(title) and not mixed_lot_includes_violin(title):
         return True

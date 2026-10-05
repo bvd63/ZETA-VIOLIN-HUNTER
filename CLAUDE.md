@@ -46,6 +46,16 @@ retrying queues and choosing price comparables, without deleting delivered histo
 Real probe titles are regression fixtures. Do not restore unconditional code/artist
 acceptance from historical §4–5 notes below.
 
+The full follow-up cycle exposed five Japanese artist recordings after a dry
+Yahoo search had returned no results. The owner's example is auction
+`b1122483681`, a German LP of Violin Summit, not a Zeta instrument. Artist names
+are now discovery terms only and never prove Zeta identity, even beside a violin
+word; require brand or model evidence. JLP5 is a model code. Title-only CD/LP/DVD
+checks use ASCII boundaries and NFKC so Japanese-adjacent/full-width labels match.
+Real Japanese recordings and genuine instrument counterexamples are regression
+fixtures. Validate subsequent production changes through previews with Telegram
+disabled; do not send more live test alerts.
+
 ### Historical state (September 2026; superseded where noted)
 
 ### Infrastructure

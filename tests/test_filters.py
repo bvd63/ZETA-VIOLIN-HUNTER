@@ -54,7 +54,7 @@ CASES = [
     ("Strados electric violin 5 string", "", ""),                       # §4.2 Strados alone
     ("JV44 electric violin with MIDI", "", ""),                         # §4.1 model code alone
     ("SV-24 5-string electric violin", "", ""),                         # hyphenated model code
-    ("Jean-Luc Ponty signature 5-string electric violin", "", ""),      # §4.1 artist alone
+    ("Jean-Luc Ponty signature 5-string electric violin", "", "non_zeta"),  # artist alone does not prove Zeta
     ("Violín eléctrico Zeta", "", ""),                                  # ES
     ("Zeta elektrische viool", "", ""),                                 # NL
     ("Zeta Geige elektrisch 5 Saiten", "", ""),                         # DE

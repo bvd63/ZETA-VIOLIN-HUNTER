@@ -111,6 +111,30 @@ class RegressionTests(unittest.TestCase):
         self.db.touch_active(invalid)
         self.assertEqual(self.db.active_listings(),[])
 
+    def test_user_yahoo_lp_and_artist_genre_records_are_rejected(self):
+        titles=[
+            'ドイツ盤LP! Stuff Smith / Stephane Grappelly / Svend Asmussen / Jean-Luc Ponty / Violin-Summit 67年 [SABA/SB15 099ST] ヴァイオリン',
+            'ジャン=リュック・ポンティ 極光 ジャズ ヴァイオリン エレクトリック プログレ ジャズ・ロック リマスター 紙 美品 Jean-luc Ponty AURORA',
+            'ジャン=リュック・ポンティ 桃源への旅立ち ヴァイオリン プログレ ジャズ ロック リマスター 紙 美品 Jean-luc Ponty IMAGINARY VOYAGE',
+            'ジャン=リュック・ポンティ コズミック・メッセンジャー ヴァイオリン プログレ ジャズ ロック Jean-luc Ponty COSMIC MESSENGER 紙',
+            'ジャン=リュック・ポンティ ウィングス・オブ・ミュージック ヴァイオリン プログレ ジャズ ロック Jean-luc Ponty WINGS OF MUSIC 紙',
+        ]
+        for title in titles:
+            with self.subTest(title=title):
+                self.assertNotEqual(classify(self.listing(title=title)), '')
+
+    def test_japanese_media_format_boundaries_preserve_instrument_descriptions(self):
+        for title in ('輸入ジャズCD Zeta ヴァイオリン', 'ドイツ盤LP Zeta violin', 'Zeta バイオリン ＣＤ', 'Zeta violin ＬＰ'):
+            with self.subTest(title=title):
+                self.assertEqual(classify(self.listing(title=title)), 'noise')
+        self.assertEqual(classify(self.listing(title='Zeta electric violin serial ABCD123',description='Includes a demo CD and imported LP recording.')), '')
+
+    def test_artist_discovery_requires_zeta_identity_but_jlp5_is_a_model_code(self):
+        title='Jean-Luc Ponty signature 5-string electric violin'
+        self.assertEqual(classify(self.listing(title=title)), 'non_zeta')
+        self.assertEqual(classify(self.listing(title=title,description='Zeta Jazz Fusion JLP5')), '')
+        self.assertEqual(classify(self.listing(title='JLP5 バイオリン 5弦')), '')
+
     def test_artist_discovery_queries_include_local_violin_word(self):
         found=set()
         for day in range(1,29):

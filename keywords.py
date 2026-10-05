@@ -3,14 +3,14 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-MODEL_CODES = ("JV44", "JV45", "SV24", "SV25", "SV43", "SV244", "CV44", "EV25", "EV44", "JVS4")
+MODEL_CODES = ("JV44", "JV45", "SV24", "SV25", "SV43", "SV244", "CV44", "EV25", "EV44", "JVS4", "JLP5")
 MODEL_NAMES = (
     "jazz fusion", "jazz standard", "jazz modern", "jazz classic", "jazz acoustic pro",
     "jazz fusion legacy", "fusion legacy", "jazz legacy", "strados modern",
     "strados fusion", "strados acoustic pro", "strados standard", "strados legacy",
     "e-fusion", "e-modern", "ev acoustic pro", "acoustic pro", "educator", "vanessa-mae", "imbus fusion", "modernist",
 )
-ARTISTS = ("Jean-Luc Ponty", "Boyd Tinsley", "Eileen Ivers", "JLP5")
+ARTISTS = ("Jean-Luc Ponty", "Boyd Tinsley", "Eileen Ivers")
 VIOLIN_WORDS = {
     "en": "violin", "fr": "violon", "it": "violino", "es": "violín",
     "de": "Geige", "nl": "viool", "pl": "skrzypce", "pt": "violino",

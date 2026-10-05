@@ -68,4 +68,4 @@ detectarea fiecărei licitații. Arhivele documentează alegerea surselor și nu
 alerte de vânzare activă. Testele sunt offline; probele live opționale din liveness
 se activează separat prin `RUN_LIVE_TESTS=1`.
 
-Codurile și artiștii sunt indicii de căutare, nu dovadă suficientă de vioară: `JV44` apare și pe machete, iar Jean-Luc Ponty pe discuri. Filtrul cere context de vioară în titlu pentru aceste potriviri; exemplele din proba live sunt teste de regresie.
+Codurile și artiștii sunt indicii de căutare: `JV44` apare și pe machete, iar Jean-Luc Ponty pe discuri. Codurile cer context de vioară în titlu; numele unui artist nu confirmă marca Zeta, chiar dacă titlul spune „violin”. Pentru artiști trebuie și indicii de brand sau model. `JLP5` este tratat drept cod de model. Formatele CD/LP/DVD sunt respinse și când sunt lipite de caractere japoneze sau scrise cu litere full-width. Exemplele reale din probele live sunt teste de regresie.
