@@ -48,6 +48,7 @@ from scrapers.yahoo_auctions_jp import YahooAuctionsJPScraper  # noqa: E402
 from scrapers.guitar_center import GuitarCenterScraper  # noqa: E402
 from scrapers.reddit_scraper import RedditScraper  # noqa: E402
 from scrapers.facebook_marketplace import FacebookMarketplaceScraper  # noqa: E402
+from scrapers.apify_facebook import ApifyFacebookScraper  # noqa: E402
 
 from price_tracker import PriceTracker, parse_price_usd  # noqa: E402
 from status_tracker import StatusTracker  # noqa: E402
@@ -108,7 +109,7 @@ def build_scrapers() -> list:
         MercariJPScraper(),
         YahooAuctionsJPScraper(),       # runs only from non-EEA egress (Railway = Singapore)
         GuitarCenterScraper(),          # runs only with US egress
-        FacebookMarketplaceScraper(),   # Playwright; runs only with US egress
+        ApifyFacebookScraper() if Config.APIFY_TOKEN else FacebookMarketplaceScraper(),
         RedditScraper(),
         # Disabled (see CLAUDE.md §2): Kleinanzeigen, Wallapop, Leboncoin,
         # Maestronet, Violinist.com, Audiofanzine — covered by Google/Brave.
@@ -602,6 +603,10 @@ async def main():
     log.info("🎻 Zeta Violin Hunter starting up...")
     log.info(f"   DB: {Config.DB_PATH} | US proxy: {'yes' if Config.US_PROXY_URL else 'no'} | "
              f"Brave: {'yes' if Config.BRAVE_API_KEY else 'no'} | condition: {Config.CONDITION}")
+    if Config.APIFY_TOKEN:
+        log.info("   Apify Facebook: %s | monthly reserved cap $%.2f (UTC calendar month)",
+                 "configured" if ApifyFacebookScraper().is_configured() else "disabled/missing task IDs",
+                 Config.APIFY_MONTHLY_LIMIT_USD)
     await detect_egress()
     if Config.STARTUP_DIAGNOSTICS:
         asyncio.create_task(run_reachability(), name="reachability").add_done_callback(_log_task_exception)

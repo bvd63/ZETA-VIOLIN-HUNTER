@@ -11,6 +11,12 @@ MODEL_NAMES = (
     "e-fusion", "e-modern", "ev acoustic pro", "acoustic pro", "educator", "vanessa-mae", "imbus fusion", "modernist",
 )
 ARTISTS = ("Jean-Luc Ponty", "Boyd Tinsley", "Eileen Ivers")
+STRING_VARIANTS = tuple(
+    variant for count, word in ((4, "four"), (5, "five"))
+    for variant in (f"{count}-string", f"{count}-strings", f"{count} string",
+                    f"{count} strings", f"{count}string", f"{count}strings",
+                    f"{word}-string", f"{word} string", f"{word} strings")
+)
 VIOLIN_WORDS = {
     "en": "violin", "fr": "violon", "it": "violino", "es": "violín",
     "de": "Geige", "nl": "viool", "pl": "skrzypce", "pt": "violino",
@@ -34,6 +40,7 @@ def market_queries(language: str = "en", *, broad: bool = False, limit: int = 8,
     core = list(dict.fromkeys(core))
     pool = [f"Zetta {word}", *MODEL_CODES, *[f"{artist} {word}" for artist in ARTISTS]]
     pool += [f"{model} {word}" for model in MODEL_NAMES if model != "educator"]
+    pool += [f"Zeta {variant} {word}" for variant in STRING_VARIANTS]
     local = now or datetime.now(ZoneInfo("Europe/Bucharest"))
     slots = max(1, limit - len(core))
     offset = (local.toordinal() * 2 + int(local.hour >= 22)) * slots
@@ -49,4 +56,6 @@ WEB_KEYWORDS = [
     'Zeta JLP OR Jean-Luc Ponty violin OR Boyd Tinsley violin OR Eileen Ivers violin',
     'ゼータ バイオリン OR ゼータ エレキバイオリン OR ZETA ヴァイオリン',
     'Zeta скрипка OR Zeta цигулка OR Zeta skrzypce OR Zeta hegedű',
+    'Zeta violin (' + ' OR '.join(f'"{v}"' for v in STRING_VARIANTS[:9]) + ')',
+    'Zeta violin (' + ' OR '.join(f'"{v}"' for v in STRING_VARIANTS[9:]) + ')',
 ]

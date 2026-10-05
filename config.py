@@ -65,6 +65,20 @@ class Config:
     BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "10"))
     # Hard monthly ceiling within the published $5 free credit, including retries.
     BRAVE_MONTHLY_QUOTA = min(1000, max(0, int(os.getenv("BRAVE_MONTHLY_QUOTA", "960"))))
+
+    # Apify Facebook: invoked by the existing scheduler, never a second cron.
+    APIFY_TOKEN = os.getenv("APIFY_TOKEN", "")
+    APIFY_ENABLED = _bool("APIFY_ENABLED", "true")
+    APIFY_DISCOVERY_TASK_ID = os.getenv("APIFY_DISCOVERY_TASK_ID", "")
+    APIFY_DETAILS_TASK_ID = os.getenv("APIFY_DETAILS_TASK_ID", "")
+    # Optional existing run read during a one-off deployment verification.
+    APIFY_VALIDATION_RUN_ID = os.getenv("APIFY_VALIDATION_RUN_ID", "")
+    # Conservative ledger reserves each run's full cap before starting it.
+    APIFY_MONTHLY_LIMIT_USD = max(0, float(os.getenv("APIFY_MONTHLY_LIMIT_USD", "4")))
+    APIFY_DISCOVERY_CAP_USD = max(0, float(os.getenv("APIFY_DISCOVERY_CAP_USD", "0.065")))
+    APIFY_DETAILS_CAP_USD = max(0, float(os.getenv("APIFY_DETAILS_CAP_USD", "0.02")))
+    APIFY_GUARD_HOURS = max(1, float(os.getenv("APIFY_GUARD_HOURS", "10")))
+    APIFY_DETAIL_TTL_HOURS = max(1, float(os.getenv("APIFY_DETAIL_TTL_HOURS", "72")))
     # Years in titles/bodies are often purchase/auction dates, not manufacture years.
     FILTER_TEXT_YEARS = _bool("FILTER_TEXT_YEARS", "false")
 
