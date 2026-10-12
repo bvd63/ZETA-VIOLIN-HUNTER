@@ -129,7 +129,7 @@ class TelegramNotifier:
         if not alerts:
             return
         lines = ["⚠️ <b>ZETA VIOLIN HUNTER — WATCHDOG</b>",
-                 "Aceste surse nu mai returnează nimic. Verifică logurile Railway:"]
+                 "Unele surse au probleme de acces sau acoperire. Celelalte căutări continuă:"]
         lines += [f"• {html.escape(a)}" for a in alerts]
         lines.append(f"🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
         await self.send("\n".join(lines))
@@ -140,7 +140,7 @@ class TelegramNotifier:
             return
         health = f"🔎 {sources_ok} surse au răspuns"
         if sources_error:
-            health += f", ⚠️ {sources_error} cu eroare"
+            health += f", ⚠️ {sources_error} cu eroare sau acoperire parțială"
         if sources_zero:
             health += f", {sources_zero} fără rezultate"
         status_line = "✅ Căutarea s-a terminat cu succes." if not sources_error else "⚠️ Căutare terminată cu erori la unele surse."

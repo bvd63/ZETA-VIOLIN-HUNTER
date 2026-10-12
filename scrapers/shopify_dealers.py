@@ -11,6 +11,7 @@ used / pre-owned / consignment, so CONDITION=used drops the dealer's new stock
 and keeps their trade-ins.
 """
 
+import asyncio
 import logging
 import re
 from scrapers.base import BaseScraper, BROWSER_UA
@@ -31,6 +32,9 @@ USED_RX = re.compile(r"\b(used|pre[\s\-]?owned|consign\w*|trade[\s\-]?in|b[\s\-]
 TAG_RX = re.compile(r"<[^>]+>")
 
 HEADERS = {"User-Agent": BROWSER_UA, "Accept": "application/json, */*;q=0.8"}
+# Conservative spacing for public storefront abuse-prevention, not an Admin
+# API rate limit. All existing collection and keyword searches are retained.
+REQUEST_GAP_SECONDS = 1.5
 
 
 class ShopifyDealersScraper(BaseScraper):
@@ -43,9 +47,21 @@ class ShopifyDealersScraper(BaseScraper):
         async with self.make_client(headers=HEADERS) as client:
             for label, base, country, collections, default_condition in STORES:
                 products = []
+                last_request = None
+
+                async def fetch(url: str, params: dict):
+                    nonlocal last_request
+                    loop = asyncio.get_running_loop()
+                    if last_request is not None:
+                        wait = REQUEST_GAP_SECONDS - (loop.time() - last_request)
+                        if wait > 0:
+                            await asyncio.sleep(wait)
+                    last_request = loop.time()
+                    return await client.get(url, params=params)
+
                 for handle in collections:
                     try:
-                        resp = await client.get(f"{base}/collections/{handle}/products.json", params={"limit": 250})
+                        resp = await fetch(f"{base}/collections/{handle}/products.json", {"limit": 250})
                         if resp.status_code == 200:
                             for p in resp.json().get("products", []) or []:
                                 p["_collection"] = handle
@@ -56,11 +72,13 @@ class ShopifyDealersScraper(BaseScraper):
                         log.warning(f"{label} collection '{handle}' error: {e}")
                 for term in market_queries(broad=True, limit=6):
                     try:
-                        resp = await client.get(f"{base}/search/suggest.json", params={
+                        resp = await fetch(f"{base}/search/suggest.json", {
                             "q": term, "resources[type]": "product", "resources[limit]": 10,
                         })
                         if resp.status_code == 200:
                             products.extend(((resp.json().get("resources") or {}).get("results") or {}).get("products") or [])
+                        else:
+                            log.warning("%s suggest '%s' HTTP %s", label, term, resp.status_code)
                     except Exception as e:
                         log.warning(f"{label} suggest '{term}' error: {e}")
                 self.fetched += len(products)
@@ -73,7 +91,9 @@ class ShopifyDealersScraper(BaseScraper):
                         continue
                     tags = p.get("tags") or []
                     tags_text = " ".join(tags) if isinstance(tags, list) else str(tags)
-                    body = TAG_RX.sub(" ", p.get("body_html") or "")
+                    # Predictive search supplies `body`; collection JSON uses
+                    # `body_html`. Keep the entire description for later filters.
+                    body = TAG_RX.sub(" ", p.get("body_html") or p.get("body") or "")
                     body = re.sub(r"\s+", " ", body).strip()
                     if not has_zeta_signal(f"{title} {tags_text} {body}"):
                         continue
@@ -92,7 +112,7 @@ class ShopifyDealersScraper(BaseScraper):
                         price = f"{variants[0]['price']} USD"
                     elif p.get("price"):
                         price = f"{p['price']} USD"
-                    used_hint = f"{title} {tags_text} {p.get('_collection', '')}"
+                    used_hint = f"{title} {tags_text} {p.get('type', '')} {p.get('_collection', '')}"
                     condition = "Used" if USED_RX.search(used_hint) else default_condition
                     images = p.get("images") or []
                     image_url = ""
@@ -116,7 +136,7 @@ class ShopifyDealersScraper(BaseScraper):
                         "price": price or "N/A",
                         "location": country,
                         "url": f"{base}/products/{handle}",
-                        "description": body[:300],
+                        "description": body,
                         "condition": condition,
                         "seller": label,
                         "date_posted": str(p.get("published_at") or p.get("created_at") or "")[:10],

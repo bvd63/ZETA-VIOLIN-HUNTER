@@ -51,7 +51,9 @@ class Config:
     GOOGLE_DAILY_QUOTA = int(os.getenv("GOOGLE_DAILY_QUOTA", "96"))
     # Skip the automatic cycle at container start if a cycle already ran less
     # than N hours ago (CLAUDE.md §7: no re-run on restart). Deploy = restart.
-    STARTUP_RUN_GUARD_HOURS = float(os.getenv("STARTUP_RUN_GUARD_HOURS", "6"))
+    # Preserve the next scheduled search: a deploy late in the interval must
+    # not consume that day's remaining Brave requests before the scheduled hour.
+    STARTUP_RUN_GUARD_HOURS = float(os.getenv("STARTUP_RUN_GUARD_HOURS", str(max(6, 24 / RUNS_PER_DAY))))
     # Do not run Google again if the previous run was less than N hours ago
     # (protects the quota on container restarts). 10h: an evening deploy run
     # (e.g. 18:00 UTC) must NOT block the next day's 12:00 Bucharest run

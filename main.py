@@ -296,15 +296,17 @@ async def _watchdog(scrapers: list, notifier: TelegramNotifier) -> None:
     threshold = max(2, Config.WATCHDOG_ZERO_STREAK)
     alerts = []
     for scraper in scrapers:
-        if not scraper.is_configured():
+        if not scraper.is_configured() or scraper.skipped:
             continue
         st = streaks.get(scraper.name)
         if not st:
             continue
         err, zero = st["error"], st["zero"]
-        if err >= 2 and (err == 2 or err % 10 == 0):
-            alerts.append(f"{scraper.name}: eroare în {err} cicluri consecutive")
-        elif zero >= threshold and (zero == threshold or zero % 10 == 0):
+        if err >= 2:
+            if err == 2 or err % 10 == 0:
+                alerts.append(f"{scraper.name}: erori sau acoperire parțială în {err} cicluri consecutive")
+            continue  # an access failure must not become a 'zero results' warning
+        if zero >= threshold and (zero == threshold or zero % 10 == 0):
             alerts.append(f"{scraper.name}: 0 rezultate brute în {zero} cicluri consecutive")
     if alerts:
         log.warning("WATCHDOG: " + "; ".join(alerts))

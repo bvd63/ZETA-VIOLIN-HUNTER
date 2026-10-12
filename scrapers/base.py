@@ -41,6 +41,7 @@ class BaseScraper:
         self.requests_attempted = 0
         self.requests_ok = 0
         self.failures = []
+        self.content_failures = []
 
     def is_configured(self) -> bool:
         """False when required credentials/config are missing and search()
@@ -57,10 +58,10 @@ class BaseScraper:
         async def requested(request: httpx.Request) -> None:
             self.requests_attempted += 1
         async def responded(response: httpx.Response) -> None:
-            if response.status_code < 400:
+            if await self._response_is_healthy(response):
                 self.requests_ok += 1
             else:
-                self.failures.append(f"HTTP {response.status_code}")
+                self.failures.append(f"HTTP {response.status_code} ({response.request.url.host})")
         hooks = kwargs.setdefault("event_hooks", {})
         hooks.setdefault("request", []).append(requested)
         hooks.setdefault("response", []).append(responded)
@@ -68,11 +69,16 @@ class BaseScraper:
             kwargs["proxy"] = Config.US_PROXY_URL
         return httpx.AsyncClient(**kwargs)
 
+    async def _response_is_healthy(self, response: httpx.Response) -> bool:
+        """Allow adapters to recognize a verified, platform-specific empty search."""
+        return response.status_code < 400
+
     def health_error(self) -> str:
         errors = list(getattr(self, "failures", []))
         missing = getattr(self, "requests_attempted", 0) - getattr(self, "requests_ok", 0) - len(errors)
         if missing > 0:
             errors.append(f"{missing} request(s) without response")
+        errors.extend(getattr(self, "content_failures", []))
         return ", ".join(dict.fromkeys(errors))[:160]
 
     async def get_retry(self, client: httpx.AsyncClient, url: str, retries: int = 1, **kwargs) -> httpx.Response:

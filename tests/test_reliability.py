@@ -383,5 +383,251 @@ class RegressionTests(unittest.TestCase):
             pt.close()
 
 
+class SourceHealthTests(unittest.TestCase):
+    """Regressions from the October 12 production status and public probes."""
+
+    @staticmethod
+    def yahoo_html(query, cards=""):
+        return (f'<html><title>Yahoo!オークション - {query}の中古品一覧</title>'
+                '<p>に一致する商品はありません。キーワードの一部を利用した結果を表示しています</p>'
+                f'{cards}</html>')
+
+    def test_yahoo_valid_empty_404_is_healthy_and_partial_instruments_are_kept(self):
+        from scrapers.yahoo_auctions_jp import YahooAuctionsJPScraper
+        scraper = YahooAuctionsJPScraper()
+        card = ('<li class="Product"><a class="Product__titleLink" '
+                'href="/jp/auction/b123456789">中古 Zeta Strados バイオリン</a></li>')
+
+        def handler(request):
+            body = self.yahoo_html(request.url.params['p'], card)
+            # Force the response hook to read the streamed body before classifying.
+            return httpx.Response(404, stream=httpx.ByteStream(body.encode()))
+
+        original = scraper.make_client
+        with patch.object(Config, 'EGRESS_COUNTRY', 'SG'), \
+                patch('scrapers.yahoo_auctions_jp.market_queries', return_value=['Zeta Jazz Fusion']), \
+                patch.object(scraper, 'make_client', side_effect=lambda **kw: original(
+                    transport=httpx.MockTransport(handler), **kw)):
+            results = asyncio.run(scraper.search())
+        self.assertEqual(len(results), 1)
+        self.assertEqual(classify(results[0]), '')
+        self.assertEqual(scraper.fetched, 1)
+        self.assertEqual(scraper.requests_ok, 1)
+        self.assertEqual(scraper.health_error(), '')
+
+    def test_yahoo_real_missing_pages_wrong_routes_and_blocks_stay_errors(self):
+        from scrapers.yahoo_auctions_jp import YahooAuctionsJPScraper
+        cases = [
+            ('https://auctions.yahoo.co.jp/search/search?p=zeta', 404, '<title>Not Found</title>'),
+            ('https://auctions.yahoo.co.jp/jp/auction/b123?p=zeta', 404, self.yahoo_html('zeta')),
+            ('https://auctions.yahoo.co.jp/search/search?p=zeta', 404, self.yahoo_html('other')),
+            ('https://example.com/search/search?p=zeta', 404, self.yahoo_html('zeta')),
+            ('https://auctions.yahoo.co.jp/search/search?p=zeta', 403, self.yahoo_html('zeta')),
+        ]
+        for url, status, body in cases:
+            with self.subTest(url=url, status=status, body=body):
+                scraper = YahooAuctionsJPScraper()
+                async def run():
+                    async with scraper.make_client(transport=httpx.MockTransport(
+                            lambda r: httpx.Response(status, text=body))) as client:
+                        await client.get(url)
+                asyncio.run(run())
+                self.assertEqual(scraper.requests_ok, 0)
+                self.assertIn(f'HTTP {status}', scraper.health_error())
+
+    def test_yahoo_verified_zero_match_404_resets_false_error_streak(self):
+        from scrapers.yahoo_auctions_jp import YahooAuctionsJPScraper
+        scraper = YahooAuctionsJPScraper()
+        body = ('<title>【2026年最新】 Yahoo!オークション -stradosの中古品一覧</title>'
+                '<p>条件に一致する商品は見つかりませんでした。</p>')
+        async def run():
+            async with scraper.make_client(transport=httpx.MockTransport(
+                    lambda r: httpx.Response(404, text=body))) as client:
+                await client.get('https://auctions.yahoo.co.jp/search/search?p=strados')
+        asyncio.run(run())
+        self.assertEqual(scraper.requests_ok, 1)
+        self.assertEqual(scraper.health_error(), '')
+        from status_tracker import StatusTracker
+        tracker = StatusTracker()
+        try:
+            tracker.record_scraper('Yahoo empty fixture', 0, 0, error='HTTP 404')
+            tracker.record_scraper('Yahoo empty fixture', 0, 0, details={'requests_ok': 1})
+            self.assertEqual(tracker.get_streaks()['Yahoo empty fixture'], {'zero': 0, 'error': 0})
+        finally:
+            tracker.close()
+
+    def test_yahoo_loading_shell_is_reported_and_other_queries_continue(self):
+        from scrapers.yahoo_auctions_jp import YahooAuctionsJPScraper
+        scraper = YahooAuctionsJPScraper()
+        def handler(request):
+            if request.url.params['p'] == 'loading':
+                return httpx.Response(200, text='<div class="gv-SkeletonItem">Loading</div>')
+            return httpx.Response(404, text=self.yahoo_html('strados'))
+        original = scraper.make_client
+        with patch.object(Config, 'EGRESS_COUNTRY', 'SG'), \
+                patch('scrapers.yahoo_auctions_jp.market_queries', return_value=['loading', 'strados']), \
+                patch.object(scraper, 'make_client', side_effect=lambda **kw: original(
+                    transport=httpx.MockTransport(handler), **kw)):
+            asyncio.run(scraper.search())
+        self.assertEqual(scraper.requests_attempted, 2)
+        self.assertEqual(scraper.requests_ok, 2)
+        self.assertIn('require JavaScript', scraper.health_error())
+        self.assertNotIn('without response', scraper.health_error())
+
+    def test_yahoo_empty_notice_split_over_elements_is_valid_search(self):
+        from scrapers.yahoo_auctions_jp import YahooAuctionsJPScraper
+        response = httpx.Response(404, text=(
+            '<title>Yahoo!オークション - ＳＴＲＡＤＯＳの中古品一覧</title>'
+            '<h2>条件に一致する商品は</h2><p>見つかりませんでした。</p>'),
+            request=httpx.Request('GET', 'https://auctions.yahoo.co.jp/search/search/?p=strados'))
+        self.assertTrue(YahooAuctionsJPScraper._is_empty_search(response))
+
+    def test_shopify_spacing_preserves_every_store_collection_and_keyword(self):
+        from scrapers.shopify_dealers import ShopifyDealersScraper, STORES, REQUEST_GAP_SECONDS
+        scraper = ShopifyDealersScraper()
+        requests = []
+        terms = ['zeta', 'strados', 'JV44', 'JV45', 'SV24', 'SV25']
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, json={'products': [], 'resources': {'results': {'products': []}}})
+        original = scraper.make_client
+        with patch('scrapers.shopify_dealers.market_queries', return_value=terms), \
+                patch('scrapers.shopify_dealers.asyncio.sleep', AsyncMock()) as sleep, \
+                patch.object(scraper, 'make_client', side_effect=lambda **kw: original(
+                    transport=httpx.MockTransport(handler), **kw)):
+            asyncio.run(scraper.search())
+        self.assertEqual(len(requests), sum(len(s[3]) + len(terms) for s in STORES))
+        for _, base, _, collections, _ in STORES:
+            host = httpx.URL(base).host
+            subset = [r for r in requests if r.url.host == host]
+            self.assertEqual([r.url.params['q'] for r in subset if r.url.path == '/search/suggest.json'], terms)
+            self.assertEqual(len(subset), len(collections) + len(terms))
+        self.assertEqual(sleep.await_count, len(requests) - len(STORES))
+        self.assertTrue(all(0 < c.args[0] <= REQUEST_GAP_SECONDS for c in sleep.await_args_list))
+        self.assertEqual(scraper.health_error(), '')
+
+    def test_shopify_rate_limit_does_not_discard_later_queries_or_other_stores(self):
+        from scrapers.shopify_dealers import ShopifyDealersScraper
+        scraper = ShopifyDealersScraper()
+        requests = []
+        def handler(request):
+            requests.append((request.url.host, request.url.params['q']))
+            if request.url.host == 'one.example' and request.url.params['q'] == 'zeta':
+                return httpx.Response(429)
+            product = {'id': 1, 'handle': 'used-zeta', 'title': 'Used Zeta Strados electric violin'}
+            return httpx.Response(200, json={'resources': {'results': {'products': [product]}}})
+        original = scraper.make_client
+        stores = [('One', 'https://one.example', 'USA', [], 'Used'),
+                  ('Two', 'https://two.example', 'USA', [], 'Used')]
+        with patch('scrapers.shopify_dealers.STORES', stores), \
+                patch('scrapers.shopify_dealers.market_queries', return_value=['zeta', 'strados']), \
+                patch('scrapers.shopify_dealers.asyncio.sleep', AsyncMock()), \
+                patch.object(scraper, 'make_client', side_effect=lambda **kw: original(
+                    transport=httpx.MockTransport(handler), **kw)):
+            results = asyncio.run(scraper.search())
+        self.assertEqual(requests, [('one.example', 'zeta'), ('one.example', 'strados'),
+                                    ('two.example', 'zeta'), ('two.example', 'strados')])
+        self.assertEqual(len(results), 2)
+        self.assertEqual(scraper.requests_ok, 3)
+        self.assertIn('HTTP 429 (one.example)', scraper.health_error())
+
+    def test_skipped_cycles_do_not_reset_error_streak(self):
+        from status_tracker import StatusTracker
+        tracker = StatusTracker()
+        name = 'Skipped-error fixture'
+        try:
+            tracker.record_scraper(name, 0, 0, error='HTTP 403')
+            tracker.record_scraper(name, -1, 0)
+            tracker.record_scraper(name, 0, 0, error='HTTP 403')
+            tracker.record_scraper(name, -1, 0)
+            self.assertEqual(tracker.get_streaks()[name]['error'], 2)
+            tracker.record_scraper(name, 4, 0)
+            self.assertEqual(tracker.get_streaks()[name]['error'], 0)
+        finally:
+            tracker.close()
+
+    def test_shopify_predictive_body_recovers_generic_used_violin_and_keeps_new_stock_rules(self):
+        from scrapers.shopify_dealers import ShopifyDealersScraper
+        scraper = ShopifyDealersScraper()
+        products = [
+            {'id': 1, 'handle': 'vintage-electric', 'title': 'Vintage electric violin',
+             'type': 'Used Violins', 'body': '<p>' + ('Instrument details. ' * 40)
+             + 'This is a Zeta Strados electric violin.</p>'},
+            {'id': 2, 'handle': 'new-zeta', 'title': 'Zeta Strados electric violin',
+             'type': 'Electric Violins', 'body': 'Can be used on stage or in a studio.'},
+        ]
+        original = scraper.make_client
+        with patch('scrapers.shopify_dealers.STORES', [('Mixed store', 'https://store.example', 'USA', [], 'New')]), \
+                patch('scrapers.shopify_dealers.market_queries', return_value=['zeta']), \
+                patch.object(scraper, 'make_client', side_effect=lambda **kw: original(
+                    transport=httpx.MockTransport(lambda r: httpx.Response(200, json={
+                        'resources': {'results': {'products': products}}})), **kw)):
+            results = asyncio.run(scraper.search())
+        by_handle = {r['url'].rsplit('/', 1)[-1]: r for r in results}
+        used = by_handle['vintage-electric']
+        self.assertIn('Zeta Strados', used['description'][300:])
+        self.assertEqual(used['condition'], 'Used')
+        self.assertEqual(classify(used), '')
+        self.assertEqual(classify(by_handle['new-zeta']), 'new_stock')
+
+    def test_access_errors_are_never_reported_as_empty_markets(self):
+        import main
+        scraper = BaseScraper()
+        scraper.name = 'Blocked fixture'
+        notifier = SimpleNamespace(send_watchdog=AsyncMock())
+        with patch.object(main.status_tracker, 'get_streaks', return_value={
+                scraper.name: {'error': 3, 'zero': 30}}):
+            asyncio.run(main._watchdog([scraper], notifier))
+        notifier.send_watchdog.assert_not_awaited()
+        with patch.object(main.status_tracker, 'get_streaks', return_value={
+                scraper.name: {'error': 10, 'zero': 30}}):
+            asyncio.run(main._watchdog([scraper], notifier))
+        message = notifier.send_watchdog.await_args.args[0][0]
+        self.assertIn('erori sau acoperire parțială', message)
+        self.assertNotIn('0 rezultate', message)
+
+    def test_long_error_streak_is_not_stuck_at_notification_milestone(self):
+        from status_tracker import StatusTracker
+        tracker = StatusTracker()
+        try:
+            for i in range(31):
+                tracker.record_scraper('Long-error fixture', 0, 0, error='HTTP 403')
+            self.assertEqual(tracker.get_streaks()['Long-error fixture'], {'zero': 31, 'error': 31})
+            self.assertEqual(tracker.get_streaks(lookback=30)['Long-error fixture']['error'], 30)
+        finally:
+            tracker.close()
+
+    def test_watchdog_skipped_source_does_not_resend_old_milestone(self):
+        import main
+        scraper = BaseScraper()
+        scraper.name = 'Skipped watchdog fixture'
+        scraper.skipped = True
+        notifier = SimpleNamespace(send_watchdog=AsyncMock())
+        with patch.object(main.status_tracker, 'get_streaks', return_value={
+                scraper.name: {'error': 2, 'zero': 2}}):
+            asyncio.run(main._watchdog([scraper], notifier))
+        notifier.send_watchdog.assert_not_awaited()
+
+    def test_deploy_after_morning_cycle_preserves_evening_search_budget(self):
+        from datetime import timedelta
+        import main
+        search = AsyncMock()
+        # Default production schedule is 10:00/22:00; a deploy 11 hours after
+        # the morning search used to run early and starve the evening search.
+        with patch.object(main.status_tracker, 'last_cycle_started', return_value=datetime.utcnow() - timedelta(hours=11)), \
+                patch.object(Config, 'STARTUP_RUN_GUARD_HOURS', 12), \
+                patch('main.run_search_cycle', search):
+            asyncio.run(main._startup_cycle())
+        search.assert_not_awaited()
+
+    def test_watchdog_does_not_claim_partial_sources_return_nothing(self):
+        notifier = TelegramNotifier('fake', 'fake')
+        notifier.send = AsyncMock(return_value=True)
+        asyncio.run(notifier.send_watchdog(['Yahoo: acoperire parțială']))
+        message = notifier.send.await_args.args[0]
+        self.assertNotIn('nu mai returnează nimic', message)
+        self.assertIn('Celelalte căutări continuă', message)
+
+
 if __name__ == '__main__':
     unittest.main()
