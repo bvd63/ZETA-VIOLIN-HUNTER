@@ -82,6 +82,18 @@ surselor rulate din ciclurile noi exclude modulele omise de guard/configurație.
 Detaliile Craigslist includ candidații verificați, expirați, neverificați și
 amânați de plafon. Un răspuns HTTP reușit nu confirmă că există o vioară eligibilă.
 
+Yahoo poate răspunde cu 404 pentru o pagină validă de căutare fără potriviri exacte.
+Botul verifică titlul, cuvântul căutat și mesajul japonez înainte să o trateze ca
+o căutare reușită; citește și eventualele rezultate parțiale. Paginile lipsă,
+blocările și rezultatele care rămân neîncărcate în JavaScript sunt raportate.
+Magazinele Shopify păstrează toate căutările și descrierile complete din
+colecții sau predictive search. Cererile către fiecare magazin sunt distanțate
+cu 1,5 secunde, iar o eroare la un cuvânt nu oprește celelalte căutări.
+Protecția implicită la repornire acoperă intervalul dintre rulările programate
+(12 ore pentru 10:00/22:00), pentru a păstra bugetul și ora următoarei căutări.
+Mesajele de monitorizare disting problemele de acces/acoperire de o piață fără
+anunțuri noi; nicio sursă și nicio căutare existentă nu au fost eliminate.
+
 Indexarea motoarelor și blocările site-urilor limitează acoperirea; nu este promisă
 detectarea fiecărei licitații. Arhivele documentează alegerea surselor și nu generează
 alerte de vânzare activă. Testele sunt offline; probele live opționale din liveness

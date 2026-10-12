@@ -95,31 +95,41 @@ class StatusTracker:
             log.warning(f"last cycle lookup error: {e}")
             return None
 
-    def get_streaks(self, lookback: int = 30) -> dict:
+    def get_streaks(self, lookback: int = 0) -> dict:
         """For each scraper: number of consecutive most-recent cycles with
-        raw_count == 0 ('zero') and with an error ('error')."""
+        raw_count == 0 ('zero') and with an error ('error'). Scan until each
+        streak ends, rather than capping it at a repeated notification milestone.
+        An explicit positive lookback still limits the scan for callers."""
         streaks = {}
         try:
             names = [r[0] for r in self.conn.execute("SELECT DISTINCT scraper FROM scraper_stats")]
             for name in names:
-                rows = self.conn.execute("""
+                query = """
                     SELECT raw_count, error, details FROM scraper_stats
-                    WHERE scraper = ? ORDER BY id DESC LIMIT ?
-                """, (name, lookback)).fetchall()
+                    WHERE scraper = ? ORDER BY id DESC
+                """
+                params = (name,)
+                if lookback > 0:
+                    query += " LIMIT ?"
+                    params = (name, lookback)
+                rows = self.conn.execute(query, params)
                 zero = err = 0
-                for raw, error, details in rows:
-                    if error:
-                        err += 1
-                    else:
-                        break
+                zero_open = error_open = True
                 for raw, error, details in rows:
                     if raw is not None and raw < 0:
                         continue  # skipped cycle (quota guard / unconfigured): neither counts nor resets
-                    if json.loads(details or "{}").get("requests_ok", 0) > 0 and not error:
-                        break
-                    if (raw or 0) == 0:
-                        zero += 1
-                    else:
+                    if error_open:
+                        if error:
+                            err += 1
+                        else:
+                            error_open = False
+                    if zero_open:
+                        healthy_empty = json.loads(details or "{}").get("requests_ok", 0) > 0 and not error
+                        if (raw or 0) == 0 and not healthy_empty:
+                            zero += 1
+                        else:
+                            zero_open = False
+                    if not zero_open and not error_open:
                         break
                 streaks[name] = {"zero": zero, "error": err}
         except Exception as e:

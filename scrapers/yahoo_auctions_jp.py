@@ -17,6 +17,8 @@ from keywords import market_queries
 
 import logging
 import re
+import httpx
+import unicodedata
 from collections import Counter
 from urllib.parse import quote
 from bs4 import BeautifulSoup
@@ -52,6 +54,40 @@ HEADERS = {
 class YahooAuctionsJPScraper(BaseScraper):
     name = "Yahoo Auctions JP"
 
+    @staticmethod
+    def _is_empty_search(response: httpx.Response) -> bool:
+        """Yahoo serves a real search page as 404 when exact matches are absent.
+
+        Require the actual search route, echoed query and Japanese empty-result
+        notice; an ordinary missing page or blocked response remains an error.
+        The page can still contain useful partial keyword matches.
+        """
+        url = response.request.url
+        if (response.status_code != 404 or url.host != "auctions.yahoo.co.jp"
+                or url.path.rstrip("/") != "/search/search"):
+            return False
+        query = url.params.get("p", "")
+        soup = BeautifulSoup(response.text, "lxml")
+        title = soup.title.get_text(" ", strip=True) if soup.title else ""
+        # The same notice can be split over inline elements. Normalize only
+        # presentation differences; keep the route/query/notice requirements.
+        text = re.sub(r"\s+", "", soup.get_text(" ", strip=True))
+        empty_notice = any(notice in text for notice in (
+            "に一致する商品はありません",
+            "条件に一致する商品は見つかりませんでした",
+        ))
+        normalized_title = unicodedata.normalize("NFKC", title).casefold()
+        normalized_query = unicodedata.normalize("NFKC", query).casefold()
+        return (bool(query) and normalized_query in normalized_title
+                and "yahoo!オークション" in normalized_title and empty_notice)
+
+    async def _response_is_healthy(self, response: httpx.Response) -> bool:
+        if response.status_code == 404:
+            # Response hooks run before httpx reads the body.
+            await response.aread()
+            return self._is_empty_search(response)
+        return await super()._response_is_healthy(response)
+
     def is_configured(self) -> bool:
         # Blocked for European egress; only meaningful from Asia/US.
         return bool(Config.EGRESS_COUNTRY) and Config.EGRESS_COUNTRY.upper() not in EEA_UK
@@ -70,13 +106,17 @@ class YahooAuctionsJPScraper(BaseScraper):
                     resp = await client.get(SEARCH_URL, params={
                         "p": kw, "va": kw, "n": 50, "s1": "new", "o1": "d", "exflg": 1, "b": 1,
                     })
-                    if resp.status_code == 404:
-                        log.info(f"Yahoo Auctions JP '{kw}': no results (404)")
-                        continue
-                    if resp.status_code != 200:
+                    empty_search = resp.status_code == 404 and self._is_empty_search(resp)
+                    if resp.status_code != 200 and not empty_search:
                         log.warning(f"Yahoo Auctions JP '{kw}' HTTP {resp.status_code}")
                         continue
                     items = self._parse(resp.text)
+                    if (not items and not empty_search
+                            and BeautifulSoup(resp.text, "lxml").select_one('[class*="gv-Skeleton"]')):
+                        self.content_failures.append("Yahoo search results require JavaScript rendering")
+                    if empty_search:
+                        log.info(f"Yahoo Auctions JP '{kw}': no exact matches (valid 404); "
+                                 f"checking {len(items)} partial matches")
                     if not items and len(resp.text) > 50000 and kw == "エレキバイオリン":
                         self._log_structure(resp.text, kw)
                     self.fetched += len(items)
