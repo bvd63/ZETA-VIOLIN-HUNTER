@@ -19,6 +19,7 @@ from keywords import market_queries
 from scrapers.base import BaseScraper
 from scrapers.gumtree import GumtreeScraper
 from scrapers.willhaben import WillhabenScraper, SEARCH_URL, CATEGORY_URL, search_plan
+from offer_verifier import is_item_url, inspect_page
 
 CARDS = (Path(__file__).parent / 'fixtures/gumtree_cards_2026.html').read_text()
 
@@ -36,6 +37,47 @@ def run(scraper, handler):
 
 
 class MarketplaceParserTests(unittest.TestCase):
+    def test_marketplace_item_routes_are_host_scoped(self):
+        paths = [('www.willhaben.at', '/iad/kaufen-und-verkaufen/d/zeta-geige-123/'),
+                 ('www.gumtree.com', '/p/violins/zeta-jv5/123')]
+        for host, path in paths:
+            self.assertTrue(is_item_url('https://' + host + path))
+            self.assertFalse(is_item_url('https://blog.example' + path))
+        self.assertFalse(is_item_url(CATEGORY_URL))
+        self.assertFalse(is_item_url('https://www.gumtree.com/search?q=zeta'))
+
+    def test_marketplace_primary_body_replaces_search_snippet(self):
+        for url in ('https://www.willhaben.at/iad/kaufen-und-verkaufen/d/zeta-geige-123/',
+                    'https://www.gumtree.com/p/violins/zeta-jv5/123'):
+            listing = {'url':url, 'title':'Zeta violin', 'description':'Old search snippet'}
+            state, _ = inspect_page(listing, '<main><h1>Zeta JV5</h1>Used Geige. Price £900.</main>', 200, url)
+            self.assertEqual(state, 'live')
+            self.assertNotIn('Old search snippet', listing['description'])
+            self.assertTrue(listing['_primary_content_checked'])
+
+    def test_strong_index_identity_can_alert_on_blocked_known_item_route(self):
+        from unittest.mock import AsyncMock
+        import main
+        import database
+        database.DB_PATH = os.environ['DB_PATH']
+        db = database.Database()
+        try:
+            for host, path in [('www.willhaben.at', '/iad/kaufen-und-verkaufen/d/zeta-jv5-123/'),
+                               ('www.gumtree.com', '/p/violins/zeta-jv5/123')]:
+                item = {'id':host, 'url':'https://' + host + path, 'title':'Zeta JV5 5 Strings',
+                        'description':'Used violin', 'platform':host, 'source':'search'}
+                async def verify():
+                    async with httpx.AsyncClient() as client:
+                        return await main._verify_search_hits([item], db, client, {})
+                with patch('main.verify_offer', AsyncMock(return_value=('unknown', 'HTTP 403'))):
+                    found = asyncio.run(verify())
+                self.assertEqual(len(found), 1)
+                self.assertEqual(found[0]['verification'], 'unknown')
+                self.assertFalse(db.is_seen(item['id']))
+                self.assertIn(item['url'], [x['url'] for x in db.pending()])
+        finally:
+            db.close()
+
     def test_new_div_cards_and_legacy_articles_both_parse(self):
         cards = GumtreeScraper._extract(CARDS)
         self.assertEqual(len(cards), 2)

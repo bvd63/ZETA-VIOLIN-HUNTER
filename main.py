@@ -20,7 +20,7 @@ from database import Database, connect  # noqa: E402
 from notifier import TelegramNotifier  # noqa: E402
 from filters import classify, has_primary_identity  # noqa: E402
 from liveness import is_live  # noqa: E402
-from offer_verifier import verify_offer, ITEM_PATH, GOVDEALS_RX  # noqa: E402
+from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX  # noqa: E402
 from discovery_queue import stage, complete  # noqa: E402
 from dedup import is_duplicate  # noqa: E402
 from fx import refresh_rates  # noqa: E402
@@ -163,7 +163,7 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             dropped["identity_unverified"] = dropped.get("identity_unverified", 0) + 1
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
-        if state == "live" or (state == "unknown" and (ITEM_PATH.search(urlsplit(listing.get("url", "")).path) or GOVDEALS_RX.search(listing.get("url", "")))):
+        if state == "live" or (state == "unknown" and (is_item_url(listing.get("url", "")) or GOVDEALS_RX.search(listing.get("url", "")))):
             reason = classify(listing)
             if reason:
                 if queue_namespace:

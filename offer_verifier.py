@@ -20,6 +20,19 @@ SALE_WORDS = re.compile(r"\b(?:for sale|wts|selling|current bid|minimum bid|plac
 EDITORIAL_TYPES = {"article", "newsarticle", "blogposting", "review", "reportagearticle"}
 
 
+def is_item_url(url: str) -> bool:
+    parts = urlsplit(url)
+    if ITEM_PATH.search(parts.path):
+        return True
+    # These short paths are only item evidence on their own marketplace host.
+    # Do not let a generic /p/ or /d/ page on another site become an offer.
+    if parts.hostname in ("willhaben.at", "www.willhaben.at"):
+        return bool(re.fullmatch(r"/iad/kaufen-und-verkaufen/d/[^/]+-\d+/?", parts.path))
+    if parts.hostname in ("gumtree.com", "www.gumtree.com"):
+        return bool(re.fullmatch(r"/p/(?:[^/]+/)+\d+/?", parts.path))
+    return False
+
+
 def public_url(url: str) -> bool:
     try:
         parts = urlsplit(url)
@@ -154,19 +167,19 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     if description:
         listing["description"] = description.get_text(" \n", strip=True)
         listing["_primary_content_checked"] = True
-    elif (main is not soup or h1 is not None) and ITEM_PATH.search(urlsplit(final_url).path):
+    elif (main is not soup or h1 is not None) and is_item_url(final_url):
         listing["description"] = scoped.get_text(" \n", strip=True)
         listing["_primary_content_checked"] = True
-    if ITEM_PATH.search(urlsplit(final_url).path) and re.search(
+    if is_item_url(final_url) and re.search(
             r"\b(?:auction ended|auction closed|sold for\s*:|sold amount\s*:|closed\s+auction date\s*:)", body, re.I):
         return "dead", "rezultat de licitație încheiată"
     if re.search(r"\b(?:closed|auction ended|sold amount)\s*[:(]", body, re.I) and listing.get("auction"):
         return "dead", "licitație încheiată"
     if SALE_WORDS.search(body):
         # Dedicated item URLs or classifieds sales text + monetary amount.
-        if ITEM_PATH.search(urlsplit(final_url).path) or re.search(r"[€$£¥]\s*\d|\d\s*(?:USD|EUR|GBP|JPY)\b", body):
+        if is_item_url(final_url) or re.search(r"[€$£¥]\s*\d|\d\s*(?:USD|EUR|GBP|JPY)\b", body):
             return "live", "pagină de vânzare / licitație"
-    if ITEM_PATH.search(urlsplit(final_url).path):
+    if is_item_url(final_url):
         return "unknown", "pagină de anunț; ofertă neverificată"
     return "non_sale", "nu am găsit o ofertă de vânzare"
 
