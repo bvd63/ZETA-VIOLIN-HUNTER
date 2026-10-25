@@ -115,6 +115,8 @@ class GoogleScraper(BaseScraper):
 
     # --- quota guard ------------------------------------------------------
     def _should_run(self) -> bool:
+        if getattr(self, "manual_fresh", False):
+            return True
         try:
             conn = _db()
             row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper = 'google'").fetchone()
@@ -129,6 +131,8 @@ class GoogleScraper(BaseScraper):
         return True
 
     def _mark_run(self) -> None:
+        if getattr(self, "manual_fresh", False):
+            return  # Preserve the next scheduled discovery window.
         try:
             conn = _db()
             conn.execute("INSERT OR REPLACE INTO scraper_runs VALUES ('google', ?)",
@@ -241,9 +245,18 @@ class GoogleScraper(BaseScraper):
                         break
                     spent += 1
                     params = {"key": self.api_key, "cx": self.cse_id, "q": q, "num": 10, **extra}
+                    self.record_discovery_query(q)
                     resp = await client.get(GOOGLE_API, params=params)
                     if resp.status_code in (429, 403):
-                        log.warning(f"Google CSE HTTP {resp.status_code} (quota?) — stopping: {resp.text[:200]!r}")
+                        try:
+                            message = str(resp.json().get('error', {}).get('message', ''))
+                        except (ValueError, TypeError):
+                            message = ''
+                        if resp.status_code == 403 and 'does not have the access' in message:
+                            self.content_failures.append('API_PROJECT_NOT_ELIGIBLE: project denied Custom Search access, not quota')
+                            log.warning('Google Custom Search: project is not eligible for this API (403); this is not credit exhaustion')
+                        else:
+                            log.warning('Google CSE HTTP %s; query stopped', resp.status_code)
                         break
                     if resp.status_code != 200:
                         log.warning(f"Google CSE HTTP {resp.status_code} for '{q[:60]}': {resp.text[:200]!r}")

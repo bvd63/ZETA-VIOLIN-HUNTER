@@ -85,3 +85,16 @@ Surse oficiale: [Apify run metadata](https://docs.apify.com/api/v2/actor-run-get
 [Railway pricing](https://docs.railway.com/pricing/plans),
 [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions),
 [GitHub scheduled workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+
+## Test manual cu interogări noi
+
+`POST /search?fresh=1`, cu antetul X-Search-Token, ocolește numai protecția de
+timp pentru ciclul cerut explicit. Nu modifică orele de referință ale cronului.
+Plafoanele financiare rămân active; Brave permite maximum16 cereri manuale
+suplimentare/zi, separat de cele32 normale, cu plafonul lunar comun neschimbat.
+Testele suplimentare consumă credite reale și nu intră în prognoza obișnuită
+de62 cicluri/lună. Câmpul `discovery_queries_attempted` și logurile arată ce
+motoare au făcut cereri noi; mode=manual_fresh nu implică succesul lor.
+Google403 API_PROJECT_NOT_ELIGIBLE indică lipsa accesului proiectului la API,
+nu epuizarea creditelor. Nu există o remediere software care să acorde acest
+drept proiectului; Google nu a fost dezactivat și nu se ascunde eroarea.

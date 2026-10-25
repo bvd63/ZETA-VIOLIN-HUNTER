@@ -62,7 +62,7 @@ class ReserveSearch(BaseScraper):
             return []
         if not hasattr(self, "content_failures"):
             self.reset_health()
-        if not claim_window(self.engine + ":last_run", 10 * 3600):
+        if not getattr(self, "manual_fresh", False) and not claim_window(self.engine + ":last_run", 10 * 3600):
             self.skipped = True
             return []
         now = time.time()
@@ -85,6 +85,7 @@ class ReserveSearch(BaseScraper):
                 else:
                     write(self.engine + ":extra_cursor", extra_cursor + index - count + 1)
                 try:
+                    self.record_discovery_query(query)
                     response = await client.post(self.api, headers=self.headers(), json=self.payload(query, hosts))
                     if response.status_code != 200:
                         write(self.engine + ":health", {"error": f"HTTP {response.status_code}", "checked": time.time()})

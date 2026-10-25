@@ -5,6 +5,14 @@
 
 ---
 
+## October 26 — owner explicitly requested fresh discovery now
+
+- Adds authenticated `POST /search?fresh=1` for the owner's requested fresh validation. Default cron, startup and ordinary search behavior stay guarded. Only the per-cycle time guard is bypassed; scheduled guard timestamps are never advanced by the extra test. All spending reservations remain active, cursors advance for queries actually spent, and the real process lock/delivery pipeline is used.
+- Brave's extra manual run has a separate16/day ceiling; the normal32/day allowance is preserved, with the same shared1000/month ceiling. Tavily/Exa retain their rolling/day spending caps; Apify keeps its5USD cap and a separate manual-discovery time guard. Repeated fresh triggers cannot obtain unlimited credit. An extra run spends real credits, distinct from regular monthly forecasts.
+- Every engine logs/counts actual attempted discovery queries (including the two Apify search URLs), separately from general HTTP/detail/cache work. `/status` source details retain these counts and manual_fresh mode. A fresh-mode label is not proof every provider succeeded; query counts and errors decide.
+- A real reserved Google probe returned403 PERMISSION_DENIED: "This project does not have the access to Custom Search JSON API." Official Google docs confirm closure to new customers and existing-customer retirement Jan1,2027. Code now distinguishes API_PROJECT_NOT_ELIGIBLE from depleted credits and never claims a key rotation can restore eligibility. Google remains configured/queried; no source removed.
+- A one-time follow-up in this chat is scheduled for26Oct10:20 Bucharest to inspect the natural10:00 run, with no extra searches, quota resets or TEST messages. Current access probes compare Romanian vs Railway routes; blocked source fixes require actual returned/parsed content before claiming recovery.
+
 ## Current implementation — October 26, reliability follow-up
 
 - Owner authorized the ordered implementation: contextual filtering, 31-day budget continuity, additive Facebook/US discovery, final offer checks/feedback, backup/monitoring. Preserve all searches except explicitly removed Yahoo Japan. No new subscriptions, recharge, proxies or region moves.

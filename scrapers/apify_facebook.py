@@ -163,11 +163,12 @@ class ApifyFacebookScraper(BaseScraper):
                 conn.rollback()
                 return ""
             if phase == "discovery":
-                row = conn.execute("SELECT value FROM apify_state WHERE key='last_discovery'").fetchone()
+                guard_key = 'last_manual_discovery' if getattr(self, 'manual_fresh', False) else 'last_discovery'
+                row = conn.execute("SELECT value FROM apify_state WHERE key=?", (guard_key,)).fetchone()
                 if row and time.time() - float(row[0]) < Config.APIFY_GUARD_HOURS * 3600:
                     conn.rollback()
                     return ""
-                conn.execute("INSERT OR REPLACE INTO apify_state VALUES ('last_discovery',?)", (str(time.time()),))
+                conn.execute("INSERT OR REPLACE INTO apify_state VALUES (?,?)", (guard_key, str(time.time())))
                 conn.execute("INSERT OR REPLACE INTO apify_state VALUES ('cursor',?)", (str(self._cursor + 1),))
             reservation = uuid.uuid4().hex
             conn.execute("INSERT INTO apify_jobs (id,phase,period,cap,created) VALUES (?,?,?,?,?)",
@@ -217,6 +218,9 @@ class ApifyFacebookScraper(BaseScraper):
         if not reservation:
             return "", []
         task = Config.APIFY_DISCOVERY_TASK_ID if phase == "discovery" else Config.APIFY_DETAILS_TASK_ID
+        if phase == "discovery":
+            for target in urls:
+                self.record_discovery_query(target["url"])
         result = await self._request(client, "POST", f"/actor-tasks/{task}/runs",
             params={"maxTotalChargeUsd": cap, "timeout": 180, "memory": 4096, "restartOnError": "false"},
             json={"startUrls": urls, "resultsLimit": 5 if phase == "discovery" else len(urls),

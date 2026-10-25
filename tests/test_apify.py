@@ -55,6 +55,19 @@ class ApifyTests(unittest.TestCase):
         scraper.make_client = lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs)
         return scraper
 
+    def test_manual_discovery_keeps_regular_guard_and_obeys_global_budget(self):
+        scraper=ApifyFacebookScraper();scraper.reset_health();scraper._cursor=0
+        previous=str(time.time())
+        with store() as conn:
+            conn.execute("INSERT INTO apify_state VALUES ('last_discovery',?)",(previous,));conn.commit()
+        scraper.manual_fresh=True
+        self.assertTrue(scraper._reserve('discovery',.065))
+        self.assertFalse(scraper._reserve('discovery',.065))
+        with store() as conn:
+            self.assertEqual(conn.execute("SELECT value FROM apify_state WHERE key='last_discovery'").fetchone()[0],previous)
+        with patch.object(Config,'APIFY_MONTHLY_LIMIT_USD',.065):
+            self.assertFalse(scraper._reserve('details',.02))
+
     def test_verified_terminal_cost_releases_only_known_unused_reservation(self):
         from apify_costs import settle, spent_micro
         from datetime import datetime, timezone

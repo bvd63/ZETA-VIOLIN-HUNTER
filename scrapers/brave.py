@@ -54,6 +54,8 @@ class BraveScraper(BaseScraper):
             log.warning(f"Brave state write failed: {e}")
 
     def _should_run(self) -> bool:
+        if getattr(self, "manual_fresh", False):
+            return True
         last = self._kv_get("brave")
         if last:
             try:
@@ -105,7 +107,7 @@ class BraveScraper(BaseScraper):
         async with self.make_client(timeout=20) as client:
             for q, extra in plan:
                 try:
-                    if not reserve_request("brave", Config.BRAVE_MONTHLY_QUOTA):
+                    if not reserve_request("brave", Config.BRAVE_MONTHLY_QUOTA, manual=getattr(self, "manual_fresh", False)):
                         self.content_failures.append("Brave bot request allowance reached; other providers continue")
                         log.info("Brave monthly budget exhausted — no further HTTP requests")
                         self.skipped = not results
@@ -113,6 +115,7 @@ class BraveScraper(BaseScraper):
                     spent += 1
                     params = {"q": q, "count": 20, "text_decorations": "false", "safesearch": "off",
                               "spellcheck": "false", "extra_snippets": "true", **extra}
+                    self.record_discovery_query(q)
                     resp = await client.get(BRAVE_API, headers=headers, params=params)
                     if resp.status_code in (401, 402, 403, 429):
                         log.warning("Brave HTTP %s (key/credit/rate) — other providers continue", resp.status_code)
@@ -160,7 +163,8 @@ class BraveScraper(BaseScraper):
 
         consumed_matrix = max(0, spent - min(len(GLOBAL_QUERIES), len(plan)))
         self._kv_set("brave_cursor", str((cursor + consumed_matrix) % (len(MATRIX_KEYWORDS) * len(SITE_GROUPS))))
-        self._kv_set("brave", datetime.utcnow().isoformat())
+        if not getattr(self, "manual_fresh", False):
+            self._kv_set("brave", datetime.utcnow().isoformat())
         log.info(f"Brave: {len(results)} listings found")
         return results
 

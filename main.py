@@ -316,7 +316,9 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                     "duration": (datetime.utcnow() - started).total_seconds(),
                     "error": scraper.health_error(),
                     "details": {"requests_ok": scraper.requests_ok, "requests_attempted": scraper.requests_attempted,
-                                "rejected": dropped, "coverage": getattr(scraper, "coverage_stats", {})},
+                                "rejected": dropped, "coverage": getattr(scraper, "coverage_stats", {}),
+                                "discovery_queries_attempted": getattr(scraper, "discovery_queries_attempted", 0),
+                                "manual_fresh": getattr(scraper, "manual_fresh", False)},
                 }
 
             except asyncio.TimeoutError:
@@ -500,6 +502,8 @@ async def resource_tick() -> None:
 
 
 def source_problem(name: str, error: str) -> str:
+    if name == "Google Search" and "API_PROJECT_NOT_ELIGIBLE" in error:
+        return "Google: proiectul nu are acces la Custom Search API; nu este epuizare de credite."
     if name == "Google Search" and "403" in error:
         return "Google: API refuză accesul proiectului (403)."
     if name == "Willhaben" and "403" in error:
@@ -507,7 +511,7 @@ def source_problem(name: str, error: str) -> str:
     return f"{name}: {error[:160]}"
 
 
-async def run_search_cycle():
+async def run_search_cycle(*, force_discovery: bool = False):
     """Run one full search cycle across ALL platforms. Concurrent triggers
     queue behind the lock (a scheduled run is never lost)."""
     if search_cycle_lock.locked():
@@ -526,6 +530,9 @@ async def run_search_cycle():
         notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)
         price_tracker = PriceTracker()
         scrapers = build_scrapers()
+        for scraper in scrapers:
+            scraper.manual_fresh = force_discovery
+        log.info("Discovery mode: %s; spending limits remain active", "manual fresh" if force_discovery else "scheduled/guarded")
 
         total_sent = 0
         all_drops = []
@@ -717,10 +724,12 @@ async def handle_search(request):
     if search_cycle_lock.locked():
         return web.json_response({"status": "busy", "message": "A search cycle is already running."}, status=409)
     try:
-        count = await run_search_cycle()
+        fresh = request.query.get("fresh", "0") == "1"
+        count = await run_search_cycle(force_discovery=True) if fresh else await run_search_cycle()
         return web.json_response({
             "status": "success",
             "message": f"Search completed. Found {count} new listings.",
+            "discovery_mode": "manual_fresh" if fresh else "guarded",
             "timestamp": datetime.now().isoformat()
         })
     except Exception as e:

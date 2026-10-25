@@ -8,7 +8,7 @@ from database import connect
 log = logging.getLogger(__name__)
 
 
-def reserve_request(engine: str, limit: int) -> bool:
+def reserve_request(engine: str, limit: int, *, manual: bool = False) -> bool:
     """Fail closed on ledger errors. UTC month for Brave, Pacific day for Google."""
     if limit <= 0:
         return False
@@ -23,13 +23,13 @@ def reserve_request(engine: str, limit: int) -> bool:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper = ?", (key,)).fetchone()
         used = int(row[0]) if row else 0
-        day_key = f"brave_daily:{now:%Y-%m-%d}"
+        day_key = f"brave_manual_daily:{now:%Y-%m-%d}" if manual else f"brave_daily:{now:%Y-%m-%d}"
         daily_used = 0
         if engine == "brave":
             daily_row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper = ?", (day_key,)).fetchone()
             if daily_row:
                 daily_used = int(daily_row[0])
-            else:
+            elif not manual:
                 # Upgrade old versions conservatively: each completed, non-skipped
                 # Brave cycle may have spent the previous 32-query daily budget.
                 has_stats = conn.execute("SELECT 1 FROM sqlite_master WHERE name='scraper_stats'").fetchone()
@@ -37,7 +37,7 @@ def reserve_request(engine: str, limit: int) -> bool:
                     old_runs = conn.execute("SELECT COUNT(*) FROM scraper_stats WHERE scraper='Brave Search' AND raw_count >= 0 AND run_at >= ?",
                                             (f"{now:%Y-%m-%d}T00:00:00",)).fetchone()[0]
                     daily_used = min(32, old_runs * 32)
-            if daily_used >= 32:
+            if daily_used >= (16 if manual else 32):
                 conn.rollback()
                 return False
         if used >= limit:

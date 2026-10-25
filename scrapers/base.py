@@ -42,6 +42,13 @@ class BaseScraper:
         self.requests_ok = 0
         self.failures = []
         self.content_failures = []
+        self.discovery_queries_attempted = 0
+
+    def record_discovery_query(self, query: str) -> None:
+        self.discovery_queries_attempted = getattr(self, 'discovery_queries_attempted', 0) + 1
+        import logging
+        logging.getLogger(__name__).info('%s fresh query %s: %s', self.name,
+                                        self.discovery_queries_attempted, query[:400])
 
     def is_configured(self) -> bool:
         """False when required credentials/config are missing and search()
