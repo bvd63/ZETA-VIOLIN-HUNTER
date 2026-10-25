@@ -122,7 +122,14 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
             if name:
                 listing["title"] = html.unescape(name)[:300]
             if product.get("description"):
-                listing["description"] = BeautifulSoup(str(product["description"]), "lxml").get_text(" ", strip=True)[:1200]
+                listing["description"] = BeautifulSoup(str(product["description"]), "lxml").get_text(" ", strip=True)
+            brand = product.get("brand") or ""
+            if isinstance(brand, dict):
+                brand = brand.get("name") or ""
+            listing["brand"] = brand if isinstance(brand, str) else ""
+            listing["model"] = product.get("model") if isinstance(product.get("model"), str) else ""
+            category = product.get("category") or []
+            listing["categories"] = [category] if isinstance(category, str) else category
             if offer.get("price") is not None:
                 listing["price"] = f"{offer['price']} {offer.get('priceCurrency', '')}".strip()
             if offer.get("price") is not None or availability in ("instock", "limitedavailability", "preorder"):
@@ -133,7 +140,17 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
         return "non_sale", "articol / recenzie, fără ofertă proprie"
     for tag in main.find_all(["script", "style", "nav", "footer"]):
         tag.decompose()
-    body = main.get_text(" ", strip=True)
+    scoped = BeautifulSoup(str(main), "lxml")
+    for related in scoped.select('aside, [class*="recommend"], [id*="recommend"], [class*="related"], [id*="related"]'):
+        related.decompose()
+    body = scoped.get_text(" ", strip=True)
+    # Read the item body, not just the search-engine snippet. Never borrow
+    # footer/recommended-product text as identity evidence.
+    description = scoped.select_one('[itemprop="description"], #description, #postingbody')
+    if description:
+        listing["description"] = description.get_text(" \n", strip=True)
+    elif main is not soup and ITEM_PATH.search(urlsplit(final_url).path):
+        listing["description"] = scoped.get_text(" \n", strip=True)
     if ITEM_PATH.search(urlsplit(final_url).path) and re.search(
             r"\b(?:auction ended|auction closed|sold for\s*:|sold amount\s*:|closed\s+auction date\s*:)", body, re.I):
         return "dead", "rezultat de licitație încheiată"
@@ -188,8 +205,10 @@ async def verify_offer(listing: dict, client) -> tuple:
                 if state and state != "live":
                     return "dead", f"reverb state={state}"
                 if state == "live":
+                    from scrapers.reverb import identity_fields
                     listing["title"] = data.get("title") or listing.get("title", "")
-                    listing["description"] = BeautifulSoup(data.get("description") or "", "lxml").get_text(" ", strip=True)[:1200]
+                    listing["description"] = BeautifulSoup(data.get("description") or "", "lxml").get_text(" ", strip=True)
+                    listing.update(identity_fields(data))
                     listing["condition"] = (data.get("condition") or {}).get("display_name", "")
                     price = data.get("price") or {}
                     if price.get("amount") is not None:

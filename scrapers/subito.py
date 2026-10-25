@@ -82,7 +82,7 @@ class SubitoScraper(BaseScraper):
                             "price": price,
                             "location": location,
                             "url": item_url,
-                            "description": body[:300],
+                            "description": body,
                             "date_posted": (ad.get("date") or "")[:10],
                             "image_url": self._extract_image(ad),
                             "relevance_score": self._relevance_score(title, body),

@@ -97,7 +97,7 @@ class GuitarCenterScraper(BaseScraper):
                             "price": price or "N/A",
                             "location": "USA",
                             "url": url,
-                            "description": description[:300],
+                            "description": description,
                             "relevance_score": score,
                         })
 

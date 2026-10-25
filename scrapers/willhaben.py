@@ -81,7 +81,7 @@ class WillhabenScraper(BaseScraper):
                             "price": price,
                             "location": location,
                             "url": f"https://www.willhaben.at/iad/{seo.lstrip('/')}",
-                            "description": description[:300],
+                            "description": description,
                             "date_posted": attrs.get("PUBLISHED_String", "")[:10],
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, description),

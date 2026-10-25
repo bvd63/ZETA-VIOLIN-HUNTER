@@ -87,7 +87,7 @@ CASES = [
     ("Zeta Strados Electric Violin", "Violin shown not included.", "noise"),
     ("MIDI gear", "ZETA Synthony II for violin.", "noise"),
     ("Zeta Strados electric violin", "ski trip forces sale", ""),
-    ("Electric violin 5 string", "It is a Zeta Strados, comes with a Boss pedal.", "noise"),         # title inconclusive → body rules apply
+    ("Electric violin 5 string", "It is a Zeta Strados, comes with a Boss pedal.", ""),  # body identifies the instrument; pedal is included gear
     ("Electric violin 5 string", "Zeta Strados, black, plays great.", ""),
     # sold / ended only when the title says so
     ("Zeta Strados violin must be sold this week", "", ""),

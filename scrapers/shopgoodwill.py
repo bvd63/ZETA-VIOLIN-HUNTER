@@ -97,7 +97,7 @@ class ShopGoodwillScraper(BaseScraper):
                                 "price": price,
                                 "location": "USA",
                                 "url": f"https://shopgoodwill.com/item/{item_id}",
-                                "description": description[:300],
+                                "description": description,
                                 "date_posted": str(item.get("startTime") or "")[:10],
                                 "image_url": item.get("imageURL") or "",
                                 "relevance_score": self._relevance_score(title, description),

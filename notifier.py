@@ -11,6 +11,7 @@ import html
 from urllib.parse import urlsplit, urlunsplit
 from datetime import datetime
 from config import Config
+from keywords import preference_matches
 
 log = logging.getLogger(__name__)
 
@@ -210,6 +211,9 @@ class TelegramNotifier:
         ]
         if listing.get("verification") == "unknown":
             lines.append("⚠️ Disponibilitate neverificată; verifică pagina înainte de a cumpăra.")
+        preferences = preference_matches(listing)
+        if preferences:
+            lines.append(f"🎯 <b>PRIORITATEA TA:</b> {html.escape('; '.join(preferences))}")
         if listing.get("auction") or "bid)" in price.lower():
             lines.append("🔨 Licitație — suma afișată poate fi oferta curentă, fără comisioane.")
         if listing.get("auction_end"):
@@ -286,8 +290,6 @@ class TelegramNotifier:
         import re
         text = f"{title} {description}".lower()
         flags = []
-        if re.search(r"jean[\s\-]*luc[\s\-]*ponty|\bjlp\b|ponty signature", text):
-            flags.append("Jean-Luc Ponty signature")
         if re.search(r"\b5[\s\-]*(string|strings|str|corde|corzi|saiten|cordes|cuerdas|snarig|弦)", text):
             flags.append("5 corzi")
         if re.search(r"\bmidi\b", text):

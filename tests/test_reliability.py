@@ -142,7 +142,8 @@ class RegressionTests(unittest.TestCase):
     def test_artist_discovery_queries_include_local_violin_word(self):
         found=set()
         for day in range(1,29):
-            found.update(market_queries('nl',broad=True,now=datetime(2026,10,day,10)))
+            for hour in (10,22):
+                found.update(market_queries('nl',broad=True,now=datetime(2026,10,day,hour)))
         self.assertNotIn('Jean-Luc Ponty',found)
         self.assertIn('Jean-Luc Ponty viool',found)
 

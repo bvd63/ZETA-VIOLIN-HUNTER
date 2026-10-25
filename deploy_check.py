@@ -10,6 +10,7 @@ def main():
         ("tests.test_apify", []),
         ("tests.test_craigslist", []),
         ("tests.test_reliability", []),
+        ("tests.test_identity_recall", []),
         ("tests.test_notifications", []),
         ("tests.test_search_reserves", []),
         ("tests.test_pushover", []),

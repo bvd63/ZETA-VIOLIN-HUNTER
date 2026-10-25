@@ -89,7 +89,7 @@ class MarktplaatsScraper(BaseScraper):
                                 "price": price,
                                 "location": location,
                                 "url": url,
-                                "description": description[:300],
+                                "description": description,
                                 "date_posted": self._date(str(ad.get("date") or "")),
                                 "image_url": image_url,
                                 "relevance_score": self._relevance_score(title, description),

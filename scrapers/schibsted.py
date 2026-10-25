@@ -80,7 +80,7 @@ class SchibstedScraper(BaseScraper):
                                 "price": price,
                                 "location": country,
                                 "url": item_url,
-                                "description": description[:300],
+                                "description": description,
                                 "image_url": image if isinstance(image, str) else "",
                                 "relevance_score": self._relevance_score(title, description),
                             })

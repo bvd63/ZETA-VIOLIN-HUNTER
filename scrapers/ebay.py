@@ -188,7 +188,7 @@ class EbayScraper(BaseScraper):
                                 "price": price,
                                 "location": location,
                                 "url": url,
-                                "description": description[:300],
+                                "description": description,
                                 "condition": condition,
                                 "seller": str((item.get("seller") or {}).get("username") or ""),
                                 "ships_to_ro": ships_to_ro,

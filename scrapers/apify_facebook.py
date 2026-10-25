@@ -18,7 +18,7 @@ import httpx
 
 from config import Config
 from database import connect
-from filters import classify
+from filters import classify, has_zeta_signal, has_violin_word
 from keywords import STRING_VARIANTS
 from scrapers.base import BaseScraper
 
@@ -125,6 +125,15 @@ def store():
         conn.close()
 
 
+def discovery_reason(listing: dict) -> str:
+    """A card is incomplete; plausible instruments need the existing detail stage."""
+    reason = classify(listing)
+    text = str(listing.get("title") or "") + " " + str(listing.get("description") or "")
+    if reason == "non_zeta" and (has_zeta_signal(text) or has_violin_word(text)):
+        return ""
+    return reason
+
+
 class ApifyFacebookScraper(BaseScraper):
     name = "Facebook Marketplace"
 
@@ -227,7 +236,7 @@ class ApifyFacebookScraper(BaseScraper):
                     continue
                 self.fetched += 1
                 if phase == "discovery":
-                    reason = classify(listing)
+                    reason = discovery_reason(listing)
                     if reason or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
                         log.info("Apify discovery %s rejected: %s", listing["url"], reason or "sold/pending")
                         continue
@@ -284,11 +293,13 @@ class ApifyFacebookScraper(BaseScraper):
                     queue = []
                     for url, candidate in conn.execute("SELECT url,candidate FROM apify_items WHERE checked<? ORDER BY checked,url", (cutoff,)):
                         listing = json.loads(candidate)
-                        if classify(listing) or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
+                        if discovery_reason(listing) or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
                             continue
-                        queue.append({"url": url})
-                        if len(queue) == 2:
-                            break
+                        queue.append((bool(classify(listing)), {"url": url}))
+                    # Confirmed identity first; retain oldest-first ordering
+                    # within each tier. The existing two-detail cost cap stays.
+                    queue.sort(key=lambda entry: entry[0])
+                    queue = [entry[1] for entry in queue[:2]]
                 if queue:
                     reservation, rows = await self._start(client, "details", queue, Config.APIFY_DETAILS_CAP_USD)
                     if reservation:

@@ -116,7 +116,7 @@ class RedditScraper(BaseScraper):
                                             "price": "See post",
                                             "location": "Online",
                                             "url": url,
-                                            "description": body[:300],
+                                            "description": body,
                                             "relevance_score": score,
                                         })
 

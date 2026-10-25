@@ -34,6 +34,22 @@ def _build_headers() -> dict:
     return headers
 
 
+def identity_fields(item: dict) -> dict:
+    """Keep the primary listing's structured make/model/category evidence."""
+    raw_categories = item.get("categories") or []
+    categories = []
+    if isinstance(raw_categories, list):
+        for category in raw_categories:
+            if isinstance(category, dict):
+                category = category.get("full_name") or category.get("name") or ""
+            if isinstance(category, str):
+                categories.append(category)
+    return {"brand": item.get("make") if isinstance(item.get("make"), str) else "",
+            "model": item.get("model") if isinstance(item.get("model"), str) else "",
+            "finish": item.get("finish") if isinstance(item.get("finish"), str) else "",
+            "categories": categories}
+
+
 class ReverbScraper(BaseScraper):
     name = "Reverb"
 
@@ -99,6 +115,7 @@ class ReverbScraper(BaseScraper):
                                 continue
 
                             results.append({
+                                **identity_fields(item),
                                 "id": listing_id,
                                 "platform": "Reverb",
                                 "title": title,

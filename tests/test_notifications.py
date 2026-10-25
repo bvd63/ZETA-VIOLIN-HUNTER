@@ -52,8 +52,19 @@ class NotificationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(method, "sendMessage")
         self.assertFalse(payload["disable_notification"])
         self.assertIn("VIOARĂ ZETA GĂSITĂ", payload["text"])
+        self.assertNotIn("/10", payload["text"])
         self.assertIn("seen:", payload["reply_markup"]["inline_keyboard"][-1][0]["callback_data"])
         self.assertEqual(self.receipts.pending_count("-123"), 1)
+
+    async def test_owner_priority_uses_metadata_without_claiming_signature_authenticity(self):
+        self.bot._request = AsyncMock(return_value={"ok": True, "result": {"message_id": 46}})
+        item = {**self.listing, "model": "JLP5", "finish": "JLP Burst"}
+        self.assertEqual(await self.bot.send_listings([item]), [item])
+        text = self.bot._request.await_args.args[1]["text"]
+        self.assertIn("PRIORITATEA TA", text)
+        self.assertIn("Jean-Luc Ponty / JLP", text)
+        self.assertIn("burst", text)
+        self.assertNotIn("Jean-Luc Ponty signature", text)
 
     async def test_photo_failure_falls_back_to_text_with_same_confirmation(self):
         self.bot._request = AsyncMock(side_effect=[{}, {"ok": True, "result": {"message_id": 45}}])

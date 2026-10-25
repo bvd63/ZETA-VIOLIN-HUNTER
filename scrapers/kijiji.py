@@ -77,7 +77,7 @@ class KijijiScraper(BaseScraper):
                             "price": price,
                             "location": location,
                             "url": url if url.startswith("http") else f"https://www.kijiji.ca{url}",
-                            "description": description[:300],
+                            "description": description,
                             "date_posted": str(ad.get("activationDate") or "")[:10],
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, description),

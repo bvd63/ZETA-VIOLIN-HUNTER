@@ -111,7 +111,7 @@ class HiBidScraper(BaseScraper):
                             "location": location or "USA",
                             "url": f"https://hibid.com/lot/{lot_id}",
                             "description": (f"{auction.get('eventName', '')} — ends {str(auction.get('eventDateEnd', ''))[:10]}. "
-                                            f"{description}")[:300],
+                                            f"{description}"),
                             "date_posted": "",
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, description),

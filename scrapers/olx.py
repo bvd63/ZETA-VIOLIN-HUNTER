@@ -84,7 +84,7 @@ class OlxScraper(BaseScraper):
                                 "price": price,
                                 "location": location,
                                 "url": url,
-                                "description": description[:300],
+                                "description": description,
                                 "date_posted": str(offer.get("created_time") or "")[:10],
                                 "image_url": image_url,
                                 "relevance_score": self._relevance_score(title, description),

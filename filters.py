@@ -16,7 +16,7 @@ title-only — sellers mention them in bodies of perfectly good listings.
 import re
 import unicodedata
 from urllib.parse import urlsplit
-from keywords import MODEL_CODES, MODEL_NAMES, ARTISTS
+from keywords import MODEL_CODES, MODEL_NAMES, ARTISTS, JLP_RX
 
 
 def _rx(terms: list) -> "re.Pattern":
@@ -59,14 +59,22 @@ VIOLIN_RX = _rx([
     "violon", "violons", "violon électrique", "violon electrique",
     "violín", "violin", "violines", "violín eléctrico",
     "geige", "geigen", "e-geige", "elektrische geige",
-    "viool", "violijn", "elektrische viool",
+    "viool", "violen", "violijn", "elektrische viool",
     "skrzypce", "skrzypce elektryczne",
     "vioara", "vioară", "viori",
     # Nordic / Slavic / Hungarian / Czech
     "fiolin", "fiol", "elfiol", "viulu", "sähköviulu", "hegedű", "housle",
     "цигулка", "скрипка", "электроскрипка", "електроскрипка",
+    "βιολί", "βιολι", "keman",
 ])
-VIOLIN_JP = ["バイオリン", "ヴァイオリン", "エレキバイオリン", "エレクトリックバイオリン", "エレクトリックヴァイオリン"]
+VIOLIN_JP = ["バイオリン", "ヴァイオリン", "エレキバイオリン", "エレクトリックバイオリン", "エレクトリックヴァイオリン",
+             "小提琴", "바이올린"]
+
+# Instrument configuration is useful when sellers omit its translated name.
+# Accessories still go through the object-of-sale / case / intent checks below.
+STRING_CONFIGURATION_RX = re.compile(
+    r"(?<!\w)(?:[456]|four|five|six)[\s-]*(?:strings?|cordes?|corde|corzi|saiten|snaren|strenger)\b"
+    r"|[４５６456]\s*弦", re.I)
 
 # ---------------------------------------------------------------------------
 # §4.5 BLACKLIST — noise
@@ -190,22 +198,25 @@ NEW_STOCK_TITLE_RX = _rx([
 # helpers
 # ---------------------------------------------------------------------------
 def _text(listing: dict) -> tuple:
-    title = str(listing.get("title", "") or "")
-    desc = str(listing.get("description", "") or "")
+    title = unicodedata.normalize("NFKC", str(listing.get("title", "") or ""))
+    desc = unicodedata.normalize("NFKC", str(listing.get("description", "") or ""))
     return title, desc
 
 
 def has_zeta_brand(text: str) -> bool:
+    text = unicodedata.normalize("NFKC", text)
     return bool(ZETA_BRAND_RX.search(text)) or any(j in text for j in ZETA_BRAND_JP)
 
 
 def has_violin_word(text: str) -> bool:
+    text = unicodedata.normalize("NFKC", text)
     return bool(VIOLIN_RX.search(text)) or any(j in text for j in VIOLIN_JP)
 
 
 def has_zeta_signal(text: str) -> bool:
     """Broad pre-filter for scrapers that query generic terms: anything that
     could be a Zeta (brand, unique code, signature artist, Strados)."""
+    text = unicodedata.normalize("NFKC", text)
     return (
         has_zeta_brand(text)
         or bool(MODEL_CODE_RX.search(text))
@@ -217,20 +228,45 @@ def has_zeta_signal(text: str) -> bool:
 # ---------------------------------------------------------------------------
 # §5 filter logic
 # ---------------------------------------------------------------------------
-def is_zeta_violin(title: str, description: str = "") -> bool:
-    """CLASS A / B acceptance (positive side of §5)."""
-    text = f"{title} {description}"
-    # JV44 also identifies aircraft kits, so codes require a violin title.
+def _violin_category(categories: object) -> bool:
+    """Only a product's own instrument category, never a parent/accessory label."""
+    if isinstance(categories, str):
+        categories = [categories]
+    if not isinstance(categories, (list, tuple)):
+        return False
+    for category in categories:
+        if not isinstance(category, str):
+            continue
+        leaf = re.split(r"[/>]", category)[-1].strip()
+        if (has_violin_word(leaf) and not CASE_RX.search(leaf) and not NOISE_OBJECT_RX.search(leaf)
+                and not re.search(r"\b(?:accessor\w*|strings?|bows?|parts?)\b", leaf, re.I)):
+            return True
+    return False
+
+
+def _identity_metadata(listing: dict) -> dict:
+    """Adapters supply metadata for the primary item, not surrounding products."""
+    return {"brand": listing.get("brand", ""), "model": listing.get("model", ""),
+            "categories": listing.get("categories", ())}
+
+
+def is_zeta_violin(title: str, description: str = "", *, brand: str = "", model: str = "",
+                   categories: object = ()) -> bool:
+    """Identity evidence may span title, full description and primary product fields."""
+    text = unicodedata.normalize("NFKC", f"{title} {description} {brand if isinstance(brand, str) else ''} {model if isinstance(model, str) else ''}")
+    has_code = bool(MODEL_CODE_RX.search(text))
+    has_violin = has_violin_word(text) or _violin_category(categories)
+    # JV44 also identifies aircraft kits. A bare code or artist is insufficient;
+    # brand+model or code+instrument evidence does not require an English title.
     # Artist names are discovery terms only: album titles routinely mention
     # "violin" as a genre/instrument, including the user's Yahoo LP example.
-    if MODEL_CODE_RX.search(text) and has_violin_word(title):
+    if has_code and has_violin:
         return True
-    if STRADOS_RX.search(text) and (has_violin_word(title) or has_zeta_brand(text)):
+    if STRADOS_RX.search(text) and (has_violin or has_zeta_brand(text)):
         return True
     has_zeta = has_zeta_brand(text)
-    has_violin = has_violin_word(text)
     has_model = bool(MODEL_NAME_RX.search(text))
-    if has_zeta and (has_violin or has_model):
+    if has_zeta and (has_violin or has_model or has_code or JLP_RX.search(text) or STRING_CONFIGURATION_RX.search(text)):
         return True
     # §4.2: model name with violin context, no brand string
     if has_model and has_violin:
@@ -238,7 +274,23 @@ def is_zeta_violin(title: str, description: str = "") -> bool:
     return False
 
 
-def has_noise(title: str, description: str = "", title_conclusive: bool = None) -> bool:
+def description_identifies_instrument(description: str) -> bool:
+    """A clean identity clause can precede included pedals, manuals or other gear.
+
+    'Zeta Strados, comes with a pedal' is an instrument. 'Zeta Synthony II for
+    violin' has an accessory in its identity clause and is still rejected.
+    """
+    for entry in re.split(r"[,;\n]|(?<=[.!?])\s+", description):
+        identity_clauses = [entry] + [entry[:bundle.start()] for bundle in CASE_BUNDLE_RX.finditer(entry)]
+        for clause in identity_clauses:
+            if (is_zeta_violin(clause) and not has_noise(clause)
+                    and not is_excluded_intent(clause)):
+                return True
+    return False
+
+
+def has_noise(title: str, description: str = "", title_conclusive: bool = None,
+              *, metadata: dict = None) -> bool:
     """title_conclusive=True → the title alone proves a Zeta violin, so the
     body is checked only for homonym noise, not for object-of-sale words."""
     if title_conclusive is None:
@@ -253,7 +305,7 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None) 
         return True
     if any(j in title for j in NOISE_JP):
         return True
-    if not INTENT_RX.search(title) and is_standalone_case(title):
+    if not INTENT_RX.search(title) and is_standalone_case(title, metadata):
         return True
     if INSTRUMENT_ABSENT_RX.search(description):
         return True
@@ -266,7 +318,7 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None) 
     return False
 
 
-def is_standalone_case(title: str) -> bool:
+def is_standalone_case(title: str, metadata: dict = None) -> bool:
     """Keep 'Zeta violin with case', reject 'Zeta violin case' / 'case for Zeta'."""
     case = CASE_RX.search(title)
     if not case:
@@ -274,9 +326,10 @@ def is_standalone_case(title: str) -> bool:
     before, after = title[:case.start()], title[case.end():]
     # The instrument must be identified independently of the accessory phrase.
     for bundle in CASE_BUNDLE_RX.finditer(before):
-        if is_zeta_violin(before[:bundle.start()]):
+        instrument = before[:bundle.start()].strip()
+        if instrument and (is_zeta_violin(instrument, **(metadata or {})) or has_violin_word(instrument)):
             return False
-    if is_zeta_violin(before) and re.match(r"\s+(?:included|inclus|inclusa|incluso)\b", after, re.I):
+    if before.strip() and is_zeta_violin(before, **(metadata or {})) and re.match(r"\s+(?:included|inclus|inclusa|incluso)\b", after, re.I):
         return False
     # Reverse-order explicit bundles are also real offers of an instrument.
     if re.match(r"\s+(?:with|including|plus|and)\b|\s*[+&]", after, re.I) and is_zeta_violin(after):
@@ -387,23 +440,25 @@ def classify(listing: dict) -> str:
     title, desc = _text(listing)
     if listing.get("source") == "search" and is_editorial_url(str(listing.get("url", ""))):
         return "non_sale"
-    title_conclusive = is_zeta_violin(title)
+    metadata = _identity_metadata(listing)
+    title_conclusive = is_zeta_violin(title, **metadata)
     if is_other_brand(title):
         return "other_brand"
     if is_new_stock(listing, Config.CONDITION, Config.EXCLUDED_SELLERS):
         return "new_stock"
     inventory_evidence = estate_violin_evidence(title, desc)
     body_for_noise = inventory_evidence or desc
-    if INSTRUMENT_ABSENT_RX.search(desc) or has_noise(title, body_for_noise, title_conclusive):
+    body_conclusive = title_conclusive or description_identifies_instrument(body_for_noise)
+    if INSTRUMENT_ABSENT_RX.search(desc) or has_noise(title, body_for_noise, body_conclusive, metadata=metadata):
         return "noise"
-    if is_excluded_intent(title, desc, title_conclusive):
+    if is_excluded_intent(title, desc, body_conclusive):
         return "intent"
     if is_sold_or_ended(title):
         return "sold"
     if (not title_conclusive and re.search(r"\b(?:estate|garage|yard|moving|rummage)\s+sales?\b", title, re.I)
             and not inventory_evidence):
         return "non_zeta"
-    if not (title_conclusive or is_zeta_violin(title, body_for_noise)):
+    if not (title_conclusive or is_zeta_violin(title, body_for_noise, **metadata)):
         return "non_zeta"
     if not is_valid_listing_url(str(listing.get("url", ""))):
         return "url"

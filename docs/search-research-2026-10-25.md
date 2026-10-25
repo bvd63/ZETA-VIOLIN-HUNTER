@@ -27,6 +27,24 @@ prin API-ul Pushover. Testul nu a modificat istoricul anunțurilor. Celelalte
 aplicații din raport rămân opțiuni evaluate, nu servicii instalate sau abonamente
 cumpărate.
 
+**Corecție de identificare, seara de 25 octombrie:** cercetarea a descoperit
+[anunțul arhivat «Zeta JV5 1997 – Black»](https://reverb.com/item/97447559-zeta-jv5-1997-black).
+Titlul și descrierea nu conțin un cuvânt pentru vioară, dar modelul și categoriile
+îl identifică. Filtrul anterior îl respingea. Corecția combină titlul, descrierea
+integrală disponibilă și datele produsului; nu cere obligatoriu «violin» și
+recunoaște JV5, JLP4/JLP5, variantele de corzi și termeni multilingvi suplimentari.
+Descrierile surselor active nu mai sunt tăiate la 300 de caractere înainte de
+clasificare. Cardurile Facebook plauzibile, dar incomplete, ajung la verificarea
+detaliilor în aceleași limite de cost. Cazurile de accesorii, discuri și machete
+de avion rămân teste negative obligatorii. Toate cele unsprezece suite trec.
+
+Preferința nouă a proprietarului este pentru modele vechi Jean-Luc Ponty/JLP și
+sunburst. [Zeta numește finisajul «JLP Burst»](https://zetaviolins.com/store/JLP4-Reissue-p530306070),
+dar există reeditări moderne; culoarea și o simplă mențiune de preamplificator
+JLP nu autentifică un model vintage. Aceste expresii completează descoperirea și
+primesc marcajul «PRIORITATEA TA» în alerte, fără excluderea altor Zeta second-hand.
+Anunțul JV5 folosit la verificare este încheiat; nu a fost trimis ca oportunitate.
+
 ## 1. Ce s-a verificat în botul existent
 
 - Vioara confirmată de proprietar este [Reverb 103084523](https://reverb.com/item/103084523-zeta-jazz-fusion-5-string-violon-jv5-1993-noire).

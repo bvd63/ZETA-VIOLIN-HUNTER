@@ -177,6 +177,28 @@ class ApifyTests(unittest.TestCase):
         self.assertEqual(requests, [])
         self.assertIn("monthly budget", scraper.health_error())
 
+    def test_incomplete_card_gets_identity_from_full_details(self):
+        starts = []
+        card = {**PIEDMONT_CARD, "marketplace_listing_title": "Electric violin 5 strings with case"}
+        detail = {**FENTON, "itemUrl": PIEDMONT_CARD["listingUrl"],
+                  "listingTitle": card["marketplace_listing_title"],
+                  "description": {"text": "Excellent condition. " * 40 + "Zeta JV5, 1997."}}
+        def handler(request):
+            if request.method == "POST":
+                starts.append(json.loads(request.content))
+                return httpx.Response(201, json={"data": {"id": "cardsRun" if len(starts) == 1 else "detailsRun"}})
+            if "actor-runs" in request.url.path:
+                dataset = "cards" if "cardsRun" in request.url.path else "details"
+                return httpx.Response(200, json={"data": {"status": "SUCCEEDED", "defaultDatasetId": dataset}})
+            return httpx.Response(200, json=[card if "/cards/" in request.url.path else detail])
+        scraper = self.scraper(handler)
+        result = asyncio.run(scraper.search())
+        self.assertEqual(len(starts), 2)
+        self.assertEqual(len(starts[1]["startUrls"]), 1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(classify(result[0]), "")
+        self.assertTrue(result[0]["description"].endswith("Zeta JV5, 1997."))
+
     def test_post_timeout_never_repeats_same_discovery_slot(self):
         posts = []
         def handler(request):

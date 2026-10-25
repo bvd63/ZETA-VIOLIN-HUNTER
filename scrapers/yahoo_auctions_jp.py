@@ -139,7 +139,7 @@ class YahooAuctionsJPScraper(BaseScraper):
                             "price": item["price"],
                             "location": "Japan",
                             "url": item["url"],
-                            "description": item["extra"][:300],
+                            "description": item["extra"],
                             "condition": "New" if NEW_JP_RX.search(item["extra"]) else "",
                             "image_url": item["image"],
                             "relevance_score": self._relevance_score(item["title"]),

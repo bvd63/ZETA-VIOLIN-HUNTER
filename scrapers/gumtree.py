@@ -76,7 +76,7 @@ class GumtreeScraper(BaseScraper):
                             "price": price,
                             "location": tile["location"] or "United Kingdom",
                             "url": tile["url"],
-                            "description": tile["description"][:300],
+                            "description": tile["description"],
                             "image_url": tile["image"],
                             "relevance_score": self._relevance_score(title, tile["description"]),
                         })
@@ -110,7 +110,7 @@ class GumtreeScraper(BaseScraper):
             img = art.select_one("img")
             image = (img.get("src") or img.get("data-src") or "") if img else ""
             tiles.append({
-                "url": url, "title": title, "description": description or text[:300],
+                "url": url, "title": title, "description": description or text,
                 "location": location, "price": price_m.group(0) if price_m else "N/A",
                 "image": image if image.startswith("http") else "", "text": text,
             })

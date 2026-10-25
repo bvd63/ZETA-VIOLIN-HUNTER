@@ -20,6 +20,7 @@ jobs:
       - run: python -m tests.test_dedup
       - run: python -m tests.test_liveness
       - run: python -m tests.test_reliability
+      - run: python -m tests.test_identity_recall
       - run: python -m tests.test_apify
       - run: python -m tests.test_craigslist
       - run: python -m tests.test_notifications
