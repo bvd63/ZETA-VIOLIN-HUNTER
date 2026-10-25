@@ -210,6 +210,41 @@ class NotificationsTests(unittest.IsolatedAsyncioTestCase):
         finally:
             db.close()
 
+    async def test_retry_rechecks_identity_after_primary_details_change(self):
+        import main
+        db = database.Database()
+        db.enqueue(self.listing)
+        db.close()
+        async def verify(item, client):
+            item.update(title='Case for Zeta violin', description='Case only, instrument not included.')
+            return 'live', 'primary object is a case'
+        send = AsyncMock()
+        with patch.object(TelegramNotifier, 'send_listings', send), \
+                patch.object(TelegramNotifier, 'send_reminders', AsyncMock()), \
+                patch('main.verify_offer', verify):
+            await main.notification_tick()
+        send.assert_not_awaited()
+
+    async def test_unknown_snippet_only_candidate_stays_pending_without_false_alert(self):
+        import main
+        item = {**self.listing, 'title':'Stage lights', 'description':'Zeta electric violin with original case.',
+                'source':'search', 'url':'https://govdeals.com/en/asset/2328/7913'}
+        db = database.Database()
+        db.enqueue(item)
+        db.close()
+        send = AsyncMock()
+        with patch.object(TelegramNotifier, 'send_listings', send), \
+                patch.object(TelegramNotifier, 'send_reminders', AsyncMock()), \
+                patch('main.verify_offer', AsyncMock(return_value=('unknown','access unavailable'))):
+            await main.notification_tick()
+        send.assert_not_awaited()
+        db = database.Database()
+        try:
+            self.assertEqual([x['url'] for x in db.pending()], [item['url']])
+            self.assertFalse(db.is_seen(item['id']))
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

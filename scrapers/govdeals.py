@@ -40,13 +40,13 @@ class GovDealsClient:
         self.site_id = site_id
 
     async def initialize(self) -> None:
-        response = await self.client.get(HOME)
+        response = await self.client.get(HOME, headers=BROWSER_HEADERS)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "lxml")
         script = soup.find("script", src=re.compile(r"(?:^|/)main\.[^/]+\.js$"))
         if not script:
             raise ValueError("GovDeals public frontend script not found")
-        js = await self.client.get(urljoin(HOME, script["src"]))
+        js = await self.client.get(urljoin(HOME, script["src"]), headers=BROWSER_HEADERS)
         js.raise_for_status()
         key = re.search(r'maestroApiKey\s*:\s*"([^"\s]+)"', js.text)
         if not key:

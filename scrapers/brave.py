@@ -64,19 +64,20 @@ class BraveScraper(BaseScraper):
         return True
 
     def plan_queries(self, cursor: int) -> tuple:
-        """(list of (q, params), next_cursor). Global fresh queries first,
+        """(list of (q, params), next_cursor). Broad and owner queries first,
         then a rotating slice of the site matrix."""
         budget = max(1, Config.BRAVE_QUERIES_PER_RUN)
-        plan = [(q, {"country": "US"} if q in US_PRIORITY_QUERIES else
-                 {} if q in PRIORITY_QUERIES else {"freshness": "pm"}) for q in GLOBAL_QUERIES][:budget]
+        plan = [(q, {"country": "US"} if q in US_PRIORITY_QUERIES else {})
+                for q in GLOBAL_QUERIES][:budget]
         matrix = [f"{kw} {group}" for kw in MATRIX_KEYWORDS for group in SITE_GROUPS]
         remaining = budget - len(plan)
         n = len(matrix)
         take = min(remaining, n)
         for i in range(take):
-            # past year only — older indexed pages are almost always ended listings
+            # An old indexed page may still sell a vintage instrument. Verify
+            # availability on the actual item, never infer it from index age.
             plan.append((f"({MATRIX_KEYWORDS[((cursor + i) % n) // len(SITE_GROUPS)]}) "
-                         f"({SITE_GROUPS[(cursor + i) % len(SITE_GROUPS)]})", {"freshness": "py"}))
+                         f"({SITE_GROUPS[(cursor + i) % len(SITE_GROUPS)]})", {}))
         return plan, ((cursor + take) % n if n else 0)
 
     async def search(self) -> list:
@@ -104,6 +105,7 @@ class BraveScraper(BaseScraper):
             for q, extra in plan:
                 try:
                     if not reserve_request("brave", Config.BRAVE_MONTHLY_QUOTA):
+                        self.content_failures.append("Brave bot request allowance reached; other providers continue")
                         log.info("Brave monthly budget exhausted — no further HTTP requests")
                         self.skipped = not results
                         break
@@ -112,7 +114,7 @@ class BraveScraper(BaseScraper):
                               "spellcheck": "false", "extra_snippets": "true", **extra}
                     resp = await client.get(BRAVE_API, headers=headers, params=params)
                     if resp.status_code in (401, 402, 403, 429):
-                        log.warning(f"Brave HTTP {resp.status_code} (key/credit/rate?) — stopping: {resp.text[:200]!r}")
+                        log.warning("Brave HTTP %s (key/credit/rate) — other providers continue", resp.status_code)
                         break
                     if resp.status_code != 200:
                         log.warning(f"Brave HTTP {resp.status_code} for '{q[:60]}': {resp.text[:200]!r}")

@@ -25,11 +25,14 @@ def canonical_url(url: str) -> str:
     path = parts.path.rstrip("/")
     if host == "reverb.com":
         import re
-        match = re.search(r"/(?:[a-z]{2}/)?item/(\d+)", path)
+        match = re.search(r"/(?:[a-z]{2}(?:-[a-z]{2})?/)?item/(\d+)", path, re.I)
         if match:
             path = f"/item/{match.group(1)}"
+    if host == "prod-seo.govdeals.com":
+        host = "govdeals.com"
     if host in ("govdeals.com", "allsurplus.com"):
-        path = path.removeprefix("/en")
+        import re
+        path = re.sub(r"^/[a-z]{2}(?:-[a-z]{2})?(?=/asset/)", "", path, flags=re.I)
     if host.startswith("ebay."):
         import re
         match = re.search(r"/itm/(?:[^/]+/)?(\d+)", path)
@@ -119,8 +122,10 @@ class Database:
         # Upgrade existing alert records without resetting dedup history.
         for listing_id, url, at in self.conn.execute("SELECT id, url, alerted_at FROM alerts"):
             if url:
-                self.conn.execute("INSERT OR IGNORE INTO delivered_urls (url, listing_id, delivered_at) VALUES (?, ?, ?)",
-                                  (canonical_url(url), listing_id, at))
+                prior = self.conn.execute("SELECT auction_end FROM delivered_urls WHERE listing_id=? ORDER BY delivered_at DESC LIMIT 1",
+                                          (listing_id,)).fetchone()
+                self.conn.execute("INSERT OR IGNORE INTO delivered_urls (url, listing_id, delivered_at,auction_end) VALUES (?, ?, ?, ?)",
+                                  (canonical_url(url), listing_id, at, prior[0] if prior else ""))
         self.conn.commit()
 
     # --- dedup ---------------------------------------------------------------

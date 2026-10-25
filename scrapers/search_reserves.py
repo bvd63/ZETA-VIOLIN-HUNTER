@@ -15,7 +15,7 @@ from config import Config
 from provider_state import read, write, reserve, claim_window
 from scrapers.base import BaseScraper
 from scrapers.google import SITE_GROUPS, AUCTION_GROUPS, US_MARKET_GROUPS
-from keywords import WEB_KEYWORDS
+from keywords import WEB_KEYWORDS, ADDITIONAL_WEB_KEYWORDS, MODEL_CODES, MODEL_NAMES
 
 log = logging.getLogger(__name__)
 GROUPS = US_MARKET_GROUPS + AUCTION_GROUPS + SITE_GROUPS
@@ -51,6 +51,9 @@ class ReserveSearch(BaseScraper):
     def is_configured(self) -> bool:
         return bool(getattr(Config, self.key_setting))
 
+    def extra_queries(self, cursor: int) -> list:
+        return []
+
     async def search(self) -> list:
         if not self.is_configured():
             self.skipped = True
@@ -66,14 +69,19 @@ class ReserveSearch(BaseScraper):
             return []
         cursor = int(read(self.engine + ":cursor", 0))
         count = getattr(Config, self.count_setting)
+        extra_cursor = int(read(self.engine + ":extra_cursor", 0))
+        queries = plan(cursor, count, self.offset) + self.extra_queries(extra_cursor)
         results, seen = [], set()
         async with self.make_client(timeout=30) as client:
-            for index, (query, hosts) in enumerate(plan(cursor, count, self.offset)):
+            for index, (query, hosts) in enumerate(queries):
                 if not reserve(self.engine, self.units, self.rolling_limit(), self.daily_limit):
                     self.content_failures.append("bot reservation limit; other sources continue")
                     break
                 # Advance BEFORE HTTP. A restart cannot re-spend the same slot.
-                write(self.engine + ":cursor", cursor + index + 1)
+                if index < count:
+                    write(self.engine + ":cursor", cursor + index + 1)
+                else:
+                    write(self.engine + ":extra_cursor", extra_cursor + index - count + 1)
                 try:
                     response = await client.post(self.api, headers=self.headers(), json=self.payload(query, hosts))
                     if response.status_code != 200:
@@ -122,6 +130,23 @@ class TavilyScraper(ReserveSearch):
     api = "https://api.tavily.com/search"
     key_setting, count_setting = "TAVILY_API_KEY", "TAVILY_QUERIES_PER_RUN"
     units, daily_limit, offset = 1, 28, 0
+
+    def extra_queries(self, cursor: int) -> list:
+        # Additional slots, never replacements for the eight original queries.
+        # Default 12/cycle * 62 cycles = 744 basic credits within the existing
+        # 900-credit ledger and 1000-credit free account allowance.
+        count = min(Config.TAVILY_EXTRA_QUERIES_PER_RUN,
+                    max(0, self.daily_limit // Config.RUNS_PER_DAY - Config.TAVILY_QUERIES_PER_RUN))
+        aliases = list(MODEL_CODES) + ["Zeta " + name for name in MODEL_NAMES]
+        result = []
+        for i in range(count):
+            slot = cursor + i
+            if slot % 4 < 2:
+                result.append((ADDITIONAL_WEB_KEYWORDS[slot % 4] + " for sale auction", []))
+            else:
+                term = aliases[((slot // 4) * 2 + slot % 4 - 2) % len(aliases)]
+                result.append((term + " used violin sale auction", []))
+        return result
 
     def rolling_limit(self):
         return Config.TAVILY_ROLLING_CREDITS

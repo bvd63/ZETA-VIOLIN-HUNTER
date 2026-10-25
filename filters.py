@@ -250,6 +250,12 @@ def _identity_metadata(listing: dict) -> dict:
             "categories": listing.get("categories", ())}
 
 
+def has_primary_identity(listing: dict) -> bool:
+    """Identity independent of an unverified search-engine description."""
+    title, _ = _text(listing)
+    return is_zeta_violin(title, **_identity_metadata(listing))
+
+
 def is_zeta_violin(title: str, description: str = "", *, brand: str = "", model: str = "",
                    categories: object = ()) -> bool:
     """Identity evidence may span title, full description and primary product fields."""
@@ -373,7 +379,7 @@ def estate_violin_evidence(title: str, description: str) -> str:
 
 def is_editorial_url(url: str) -> bool:
     path = urlsplit(url).path.lower()
-    return bool(re.search(r"/(?:blog|blogs|news|article|articles|magazine|magazines|reviews?|press)(?:/|$)", path))
+    return bool(re.search(r"/(?:blog|blogs|news|article|articles|magazine|magazines|reviews?|press|authors?)(?:/|$)", path))
 
 
 def is_excluded_intent(title: str, description: str = "", title_conclusive: bool = None) -> bool:
@@ -450,6 +456,13 @@ def classify(listing: dict) -> str:
         return "non_sale"
     metadata = _identity_metadata(listing)
     title_conclusive = is_zeta_violin(title, **metadata)
+    # Recording liner notes may mention Zeta instruments. The CD category
+    # plus an artist-only title identifies the actual object being sold.
+    media_path = re.search(r"/(?:cd-s-en-dvd-s|cds?|dvds?|vinyl|records)(?:/|-|$)",
+                           urlsplit(str(listing.get("url", ""))).path, re.I)
+    media_host = (urlsplit(str(listing.get("url", ""))).hostname or "").removeprefix("www.")
+    if media_host in ("2dehands.be", "2ememain.be") and media_path and not title_conclusive:
+        return "noise"
     if is_other_brand(title):
         return "other_brand"
     if is_new_stock(listing, Config.CONDITION, Config.EXCLUDED_SELLERS):

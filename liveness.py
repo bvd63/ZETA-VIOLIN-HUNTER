@@ -60,7 +60,7 @@ _LIVE_HINTS_RX = re.compile(
     re.IGNORECASE,
 )
 
-REVERB_ITEM_RX = re.compile(r"reverb\.com/(?:[a-z]{2}/)?item/(\d+)", re.IGNORECASE)
+REVERB_ITEM_RX = re.compile(r"reverb\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?item/(\d+)", re.IGNORECASE)
 
 
 def looks_dead(status_code: int, requested_url: str, final_url: str, text: str) -> str:

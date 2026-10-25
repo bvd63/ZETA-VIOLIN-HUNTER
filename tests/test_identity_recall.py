@@ -71,10 +71,10 @@ class IdentityRecallTests(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertEqual(classify(listing(title=title)), "")
                 self.assertTrue(preference_matches(listing(title=title)))
-        self.assertEqual(preference_matches(listing(title="Zeta JV5", finish="Tobacco Sunburst")),
-                         ["finisaj sunburst / burst menționat"])
+        self.assertIn("finisaj sunburst / burst menționat",
+                      preference_matches(listing(title="Zeta JV5", finish="Tobacco Sunburst")))
         self.assertEqual(classify(listing(title="Zeta JV5 1997 - Black")), "")
-        self.assertEqual(preference_matches(listing(title="Zeta JV5 1997 - Black")), [])
+        self.assertTrue(preference_matches(listing(title="Zeta JV5 1997 - Black")))
         self.assertEqual(classify(listing(title="Zeta Strados violin",finish="Sunburst")), "")
         self.assertEqual(preference_matches(listing(title="Zeta Strados violin",finish="Sunburst")), [])
 

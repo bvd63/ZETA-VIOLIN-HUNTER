@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", message=".*utcnow.*", category=DeprecationWarn
 
 from database import Database, connect  # noqa: E402
 from notifier import TelegramNotifier  # noqa: E402
-from filters import classify  # noqa: E402
+from filters import classify, has_primary_identity  # noqa: E402
 from liveness import is_live  # noqa: E402
 from offer_verifier import verify_offer, ITEM_PATH, GOVDEALS_RX  # noqa: E402
 from discovery_queue import stage, complete  # noqa: E402
@@ -150,6 +150,15 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
         listing, (state, why) = outcome
+        if (state == "unknown" and listing.get("source") == "search"
+                and not listing.get("_primary_content_checked") and not has_primary_identity(listing)):
+            # Index text may describe a recommendation for a different lot.
+            # Retain the candidate, but do not call that primary-item proof.
+            if queue_namespace:
+                complete(queue_namespace, listing, 3600)
+            dropped["identity_unverified"] = dropped.get("identity_unverified", 0) + 1
+            dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
+            continue
         if state == "live" or (state == "unknown" and (ITEM_PATH.search(urlsplit(listing.get("url", "")).path) or GOVDEALS_RX.search(listing.get("url", "")))):
             reason = classify(listing)
             if reason:
@@ -391,6 +400,12 @@ async def notification_tick() -> None:
                     if state in ("dead", "non_sale"):
                         db.discard_pending(listing.get("url", ""))
                         continue
+                    if classify(listing):
+                        db.discard_pending(listing.get("url", ""))
+                        continue
+                    if (state == "unknown" and listing.get("source") == "search"
+                            and not listing.get("_primary_content_checked") and not has_primary_identity(listing)):
+                        continue  # keep pending; a search snippet is not item proof
                     listing["verification"], listing["liveness"] = state, why
                     await _deliver(notifier, db, prices, [listing])
                 for listing, info in db.pending_price_drops():

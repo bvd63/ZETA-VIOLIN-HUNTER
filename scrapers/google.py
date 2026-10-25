@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from scrapers.base import BaseScraper
 from config import Config
 from database import connect
-from keywords import WEB_KEYWORDS, MODEL_CODES
+from keywords import WEB_KEYWORDS, BASE_WEB_KEYWORDS, MODEL_CODES
 from search_budget import reserve_request
 
 log = logging.getLogger(__name__)
@@ -50,7 +50,9 @@ US_PRIORITY_QUERIES = [f'({group}) (Zeta OR Zetta OR Strados) (violin OR fiddle 
 PRIORITY_QUERIES = ([f"({group}) ({AUCTION_SIGNALS})" for group in AUCTION_GROUPS]
                     + US_PRIORITY_QUERIES)
 GLOBAL_QUERIES = PRIORITY_QUERIES + WEB_KEYWORDS[:2]
-MATRIX_KEYWORDS = WEB_KEYWORDS
+# New keyword groups have extra Tavily slots. Keep the old matrix cadence,
+# rather than making every existing site/keyword combination wait longer.
+MATRIX_KEYWORDS = BASE_WEB_KEYWORDS
 
 # Search-engine results back up direct scrapers; main verifies each item page.
 SITE_GROUPS = [

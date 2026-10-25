@@ -28,7 +28,7 @@ class SearchReservesTests(unittest.TestCase):
             queue.conn.execute("DELETE FROM discovery_queue")
             queue.conn.commit()
         p = patch.multiple(Config, TAVILY_API_KEY="fake", EXA_API_KEY="fake",
-                           TAVILY_QUERIES_PER_RUN=8, EXA_QUERIES_PER_RUN=4,
+                           TAVILY_QUERIES_PER_RUN=8, TAVILY_EXTRA_QUERIES_PER_RUN=4, EXA_QUERIES_PER_RUN=4,
                            TAVILY_ROLLING_CREDITS=900, EXA_ROLLING_BUDGET_USD=8)
         p.start()
         self.addCleanup(p.stop)
@@ -61,12 +61,14 @@ class SearchReservesTests(unittest.TestCase):
             calls.append(json.loads(request.content))
             return httpx.Response(200, json={"results": [{"title": "Zeta violin", "url": "https://reverb.com/item/123", "content": "Used Zeta"}]})
         found = self.run_scraper(TavilyScraper(), handler)
-        self.assertEqual(len(calls), 8)
+        self.assertEqual(len(calls), 12)
         self.assertEqual(len(found), 1)
         self.assertTrue(all(p["search_depth"] == "basic" and p["auto_parameters"] is False and
                             p["include_answer"] is False for p in calls))
+        self.assertEqual([p["query"] for p in calls[:8]], [q for q,_ in plan(0,8)])
+        self.assertEqual(read("tavily:extra_cursor"), 4)
         self.assertEqual(read("tavily:cursor"), 8)
-        self.assertEqual(used("tavily"), 8)
+        self.assertEqual(used("tavily"), 12)
 
     def test_exa_has_bounded_result_and_content_cost(self):
         calls = []
@@ -77,6 +79,15 @@ class SearchReservesTests(unittest.TestCase):
         self.assertEqual(used("exa"), 4 * 17000)
         self.assertTrue(all(p["type"] == "auto" and p["numResults"] == 10 and
                             p["contents"] == {"highlights": True} for p in calls))
+
+    def test_additional_search_slots_preserve_base_and_cover_all_model_aliases(self):
+        from keywords import MODEL_CODES, MODEL_NAMES, ADDITIONAL_WEB_KEYWORDS
+        scraper = TavilyScraper()
+        expanded = [q for cursor in range(0, 200, 4) for q, _ in scraper.extra_queries(cursor)]
+        for alias in list(MODEL_CODES) + ['Zeta ' + name for name in MODEL_NAMES] + ADDITIONAL_WEB_KEYWORDS:
+            self.assertTrue(any(alias in q for q in expanded), alias)
+        self.assertLessEqual((8 + len(scraper.extra_queries(0))) * 62, 900)
+        self.assertLessEqual((8 + len(scraper.extra_queries(0))) * 2, scraper.daily_limit)
 
     def test_exa_source_preferences_do_not_exclude_other_marketplaces(self):
         scraper = ExaScraper()

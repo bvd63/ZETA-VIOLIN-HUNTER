@@ -1,0 +1,1629 @@
+{
+  "sources": [
+    "ReverbScraper",
+    "EbayScraper",
+    "GoogleScraper",
+    "BraveScraper",
+    "CraigslistScraper",
+    "ShopGoodwillScraper",
+    "HiBidScraper",
+    "GovDealsScraper",
+    "AllSurplusScraper",
+    "KijijiScraper",
+    "MarktplaatsScraper",
+    "WillhabenScraper",
+    "SchibstedScraper",
+    "GumtreeScraper",
+    "OlxScraper",
+    "SubitoScraper",
+    "ShopifyDealersScraper",
+    "MercariJPScraper",
+    "YahooAuctionsJPScraper",
+    "GuitarCenterScraper",
+    "FacebookMarketplaceScraper",
+    "RedditScraper"
+  ],
+  "site_groups": [
+    "site:offerup.com OR site:mercari.com OR site:facebook.com/marketplace OR site:etsy.com OR site:bonanza.com OR site:5miles.com OR site:ebid.net OR site:varagesale.com",
+    "site:guitarcenter.com OR site:sweetwater.com OR site:samash.com OR site:musicgoround.com OR site:chicagomusicexchange.com OR site:elderly.com OR site:musiciansfriend.com OR site:zzounds.com",
+    "site:liveauctioneers.com OR site:invaluable.com OR site:proxibid.com OR site:estatesales.net OR site:catawiki.com OR site:tarisio.com OR site:bonhams.com OR site:the-saleroom.com OR site:govdeals.com OR site:allsurplus.com OR site:publicsurplus.com OR site:auctionzip.com",
+    "site:reverb.com OR site:ebay.com OR site:craigslist.org OR site:subito.it OR site:marktplaats.nl OR site:jp.mercari.com",
+    "site:gumtree.com.au OR site:preloved.co.uk OR site:carousell.com OR site:trademe.co.nz OR site:donedeal.ie OR site:adverts.ie OR site:shpock.com OR site:depop.com",
+    "site:kleinanzeigen.de OR site:quoka.de OR site:ricardo.ch OR site:tutti.ch OR site:anibis.ch OR site:2ememain.be OR site:musiker-board.de OR site:kleinanzeigen.de/s-musikinstrumente",
+    "site:leboncoin.fr OR site:wallapop.com OR site:milanuncios.com OR site:bakeca.it OR site:mercatinomusicale.com OR site:zikinf.com OR site:audiofanzine.com OR site:vinted.com",
+    "site:tradera.com OR site:sprzedajemy.pl OR site:allegro.pl OR site:bazos.cz OR site:sbazar.cz OR site:aukro.cz OR site:bazos.sk OR site:gumtree.pl",
+    "site:auctions.yahoo.co.jp OR site:paypayfleamarket.yahoo.co.jp OR site:rakuten.co.jp OR site:jmty.jp OR site:digimart.net OR site:j-guitar.com OR site:carousell.sg OR site:bunjang.co.kr",
+    "site:maestronet.com OR site:violinist.com OR site:reddit.com OR site:thegearpage.net OR site:talkbass.com OR site:fiddlehangout.com OR site:gearspace.com OR site:vi-control.net",
+    "site:jofogas.hu OR site:hardverapro.hu OR site:bazar.bg OR site:kupujemprodajem.com OR site:njuskalo.hr OR site:bolha.com OR site:avito.ru OR site:sahibinden.com",
+    "site:mercadolibre.com.ar OR site:mercadolibre.com.mx OR site:mercadolivre.com.br OR site:olx.com.br OR site:gumtree.co.za OR site:mudah.my OR site:olx.in OR site:yapo.cl"
+  ],
+  "priority_queries": [
+    "(site:gardinerhoulgate.co.uk OR site:musicalinstrument-auctions.co.uk OR site:tarisio.com OR site:ha.com OR site:govdeals.com) (Zeta OR Strados OR JV44 OR JV45 OR SV24 OR SV25 OR SV43 OR SV244 OR CV44 OR EV25 OR EV44 OR JVS4 OR JLP5 OR \"Jean-Luc Ponty\")",
+    "(site:govdeals.com OR site:allsurplus.com OR site:publicsurplus.com OR site:hibid.com OR site:shopgoodwill.com) (Zeta OR Strados OR JV44 OR JV45 OR SV24 OR SV25 OR SV43 OR SV244 OR CV44 OR EV25 OR EV44 OR JVS4 OR JLP5 OR \"Jean-Luc Ponty\")",
+    "(site:proxibid.com OR site:liveauctioneers.com OR site:invaluable.com OR site:the-saleroom.com OR site:auctionzip.com) (Zeta OR Strados OR JV44 OR JV45 OR SV24 OR SV25 OR SV43 OR SV244 OR CV44 OR EV25 OR EV44 OR JVS4 OR JLP5 OR \"Jean-Luc Ponty\")",
+    "(site:catawiki.com OR site:tarisio.com OR site:bonhams.com OR site:bidspotter.com OR site:easyliveauction.com) (Zeta OR Strados OR JV44 OR JV45 OR SV24 OR SV25 OR SV43 OR SV244 OR CV44 OR EV25 OR EV44 OR JVS4 OR JLP5 OR \"Jean-Luc Ponty\")",
+    "(site:interencheres.com OR site:drouot.com OR site:lot-tissimo.com OR site:ha.com OR site:dorotheum.com) (Zeta OR Strados OR JV44 OR JV45 OR SV24 OR SV25 OR SV43 OR SV244 OR CV44 OR EV25 OR EV44 OR JVS4 OR JLP5 OR \"Jean-Luc Ponty\")",
+    "(site:craigslist.org OR site:offerup.com OR site:mercari.com OR site:facebook.com/marketplace) (Zeta OR Zetta OR Strados) (violin OR fiddle OR \"Jazz Fusion\")",
+    "(site:musicgoround.com OR site:guitarcenter.com OR site:elderly.com OR site:chicagomusicexchange.com OR site:sweetwater.com/used) (Zeta OR Zetta OR Strados) (violin OR fiddle OR \"Jazz Fusion\")",
+    "(site:estatesales.net OR site:estatesales.org OR site:auctionninja.com OR site:maxsold.com) (Zeta OR Zetta OR Strados) (violin OR fiddle OR \"Jazz Fusion\")"
+  ],
+  "codes": [
+    "JV44",
+    "JV45",
+    "SV24",
+    "SV25",
+    "SV43",
+    "SV244",
+    "CV44",
+    "EV25",
+    "EV44",
+    "JVS4",
+    "JLP5"
+  ],
+  "names": [
+    "jazz fusion",
+    "jazz standard",
+    "jazz modern",
+    "jazz classic",
+    "jazz acoustic pro",
+    "jazz fusion legacy",
+    "fusion legacy",
+    "jazz legacy",
+    "strados modern",
+    "strados fusion",
+    "strados acoustic pro",
+    "strados standard",
+    "strados legacy",
+    "e-fusion",
+    "e-modern",
+    "ev acoustic pro",
+    "acoustic pro",
+    "educator",
+    "vanessa-mae",
+    "imbus fusion",
+    "modernist"
+  ],
+  "strings": [
+    "4-string",
+    "4-strings",
+    "4 string",
+    "4 strings",
+    "4string",
+    "4strings",
+    "four-string",
+    "four string",
+    "four strings",
+    "5-string",
+    "5-strings",
+    "5 string",
+    "5 strings",
+    "5string",
+    "5strings",
+    "five-string",
+    "five string",
+    "five strings"
+  ],
+  "languages": {
+    "en": "violin",
+    "fr": "violon",
+    "it": "violino",
+    "es": "violín",
+    "de": "Geige",
+    "nl": "viool",
+    "pl": "skrzypce",
+    "pt": "violino",
+    "ja": "バイオリン",
+    "no": "fiolin",
+    "fi": "viulu",
+    "da": "violin",
+    "sv": "fiol",
+    "bg": "цигулка",
+    "uk": "скрипка"
+  },
+  "web": [
+    "Zeta violin OR Zeta fiddle",
+    "Zeta Strados OR Strados violin",
+    "Zeta Jazz Fusion OR Jazz Fusion violin",
+    "JV44 OR JV45 OR SV24 OR SV25 OR SV43 OR SV244 OR CV44 OR EV25 OR EV44 OR JVS4 OR JLP5",
+    "Zetta violin OR Zeta violino OR Zeta violon OR Zeta Geige OR Zeta viool",
+    "Zeta JLP OR Jean-Luc Ponty violin OR Boyd Tinsley violin OR Eileen Ivers violin",
+    "ゼータ バイオリン OR ゼータ エレキバイオリン OR ZETA ヴァイオリン",
+    "Zeta скрипка OR Zeta цигулка OR Zeta skrzypce OR Zeta hegedű",
+    "Zeta violin (\"4-string\" OR \"4-strings\" OR \"4 string\" OR \"4 strings\" OR \"4string\" OR \"4strings\" OR \"four-string\" OR \"four string\" OR \"four strings\")",
+    "Zeta violin (\"5-string\" OR \"5-strings\" OR \"5 string\" OR \"5 strings\" OR \"5string\" OR \"5strings\" OR \"five-string\" OR \"five string\" OR \"five strings\")"
+  ],
+  "caps": {
+    "BRAVE_QUERIES_PER_RUN": 16,
+    "BRAVE_MONTHLY_QUOTA": 960,
+    "APIFY_MONTHLY_LIMIT_USD": 4.0,
+    "APIFY_DISCOVERY_CAP_USD": 0.065,
+    "APIFY_DETAILS_CAP_USD": 0.02,
+    "APIFY_DETAIL_TTL_HOURS": 72.0,
+    "SEARCH_HOURS": "10,22",
+    "SEARCH_TIMEZONE": "Europe/Bucharest"
+  },
+  "apify_samples": {
+    "0": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+violin&exact=false&radius=500"
+      }
+    ],
+    "1": [
+      {
+        "url": "https://www.facebook.com/marketplace/chicago/search/?query=zeta+violin&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/seattle/search/?query=zeta+violin&exact=false&radius=500"
+      }
+    ],
+    "2": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/chicago/search/?query=zeta+violin&exact=false&radius=500"
+      }
+    ],
+    "3": [
+      {
+        "url": "https://www.facebook.com/marketplace/chicago/search/?query=zeta+violin&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+violin&exact=false&radius=500"
+      }
+    ],
+    "4": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+strados&exact=false&radius=500"
+      }
+    ],
+    "5": [
+      {
+        "url": "https://www.facebook.com/marketplace/chicago/search/?query=zeta+violin&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/seattle/search/?query=zeta+strados&exact=false&radius=500"
+      }
+    ],
+    "7": [
+      {
+        "url": "https://www.facebook.com/marketplace/chicago/search/?query=zeta+violin&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      }
+    ],
+    "8": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+jazz+fusion&exact=false&radius=500"
+      }
+    ],
+    "12": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zetta+violin&exact=false&radius=500"
+      }
+    ],
+    "20": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+4-strings+violin&exact=false&radius=500"
+      }
+    ],
+    "36": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+4strings+violin&exact=false&radius=500"
+      }
+    ],
+    "52": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+5-string+violin&exact=false&radius=500"
+      }
+    ],
+    "68": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+5string+violin&exact=false&radius=500"
+      }
+    ],
+    "84": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+five+strings+violin&exact=false&radius=500"
+      }
+    ],
+    "87": [
+      {
+        "url": "https://www.facebook.com/marketplace/chicago/search/?query=zeta+violin&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+five+strings+violin&exact=false&radius=500"
+      }
+    ],
+    "88": [
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+strados&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/losangeles/search/?query=zeta+violin&exact=false&radius=500"
+      }
+    ],
+    "175": [
+      {
+        "url": "https://www.facebook.com/marketplace/chicago/search/?query=zeta+violin&exact=false&radius=500"
+      },
+      {
+        "url": "https://www.facebook.com/marketplace/sanfrancisco/search/?query=zeta+five+strings+violin&exact=false&radius=500"
+      }
+    ]
+  },
+  "direct_query_samples": [
+    {
+      "language": "en",
+      "now": "2026-10-05T10:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-fusion violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-05T10:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-fusion violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-05T10:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "acoustic pro violin",
+        "vanessa-mae violin",
+        "imbus fusion violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-05T10:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "acoustic pro violin",
+        "vanessa-mae violin",
+        "imbus fusion violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-05T10:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist violin",
+        "Zeta 4-string violin",
+        "Zeta 4-strings violin",
+        "Zeta 4 string violin",
+        "Zeta 4 strings violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-05T10:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist violin",
+        "Zeta 4-string violin",
+        "Zeta 4-strings violin",
+        "Zeta 4 string violin",
+        "Zeta 4 strings violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-25T22:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "jazz standard violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-25T22:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "jazz standard violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-25T22:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5string violin",
+        "Zeta 5strings violin",
+        "Zeta five-string violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-25T22:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5string violin",
+        "Zeta 5strings violin",
+        "Zeta five-string violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-25T22:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados legacy violin",
+        "e-fusion violin",
+        "e-modern violin",
+        "ev acoustic pro violin",
+        "acoustic pro violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-10-25T22:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados legacy violin",
+        "e-fusion violin",
+        "e-modern violin",
+        "ev acoustic pro violin",
+        "acoustic pro violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-11-01T10:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-modern violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-11-01T10:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-modern violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-11-01T10:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist violin",
+        "Zeta 4-string violin",
+        "Zeta 4-strings violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-11-01T10:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist violin",
+        "Zeta 4-string violin",
+        "Zeta 4-strings violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-11-01T10:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 4string violin",
+        "Zeta 4strings violin",
+        "Zeta four-string violin",
+        "Zeta four string violin",
+        "Zeta four strings violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-11-01T10:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 4string violin",
+        "Zeta 4strings violin",
+        "Zeta four-string violin",
+        "Zeta four string violin",
+        "Zeta four strings violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-12-31T22:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5-string violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-12-31T22:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5-string violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-12-31T22:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados standard violin",
+        "strados legacy violin",
+        "e-fusion violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-12-31T22:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados standard violin",
+        "strados legacy violin",
+        "e-fusion violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-12-31T22:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta violin",
+        "Zeta Jazz Fusion",
+        "strados",
+        "EV25",
+        "EV44",
+        "JVS4",
+        "JLP5",
+        "Jean-Luc Ponty violin"
+      ]
+    },
+    {
+      "language": "en",
+      "now": "2026-12-31T22:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "EV25",
+        "EV44",
+        "JVS4",
+        "JLP5",
+        "Jean-Luc Ponty violin"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-05T10:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-fusion Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-05T10:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-fusion Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-05T10:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "acoustic pro Geige",
+        "vanessa-mae Geige",
+        "imbus fusion Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-05T10:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "acoustic pro Geige",
+        "vanessa-mae Geige",
+        "imbus fusion Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-05T10:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist Geige",
+        "Zeta 4-string Geige",
+        "Zeta 4-strings Geige",
+        "Zeta 4 string Geige",
+        "Zeta 4 strings Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-05T10:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist Geige",
+        "Zeta 4-string Geige",
+        "Zeta 4-strings Geige",
+        "Zeta 4 string Geige",
+        "Zeta 4 strings Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-25T22:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "jazz standard Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-25T22:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "jazz standard Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-25T22:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5string Geige",
+        "Zeta 5strings Geige",
+        "Zeta five-string Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-25T22:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5string Geige",
+        "Zeta 5strings Geige",
+        "Zeta five-string Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-25T22:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados legacy Geige",
+        "e-fusion Geige",
+        "e-modern Geige",
+        "ev acoustic pro Geige",
+        "acoustic pro Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-10-25T22:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados legacy Geige",
+        "e-fusion Geige",
+        "e-modern Geige",
+        "ev acoustic pro Geige",
+        "acoustic pro Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-11-01T10:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-modern Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-11-01T10:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-modern Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-11-01T10:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist Geige",
+        "Zeta 4-string Geige",
+        "Zeta 4-strings Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-11-01T10:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist Geige",
+        "Zeta 4-string Geige",
+        "Zeta 4-strings Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-11-01T10:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 4string Geige",
+        "Zeta 4strings Geige",
+        "Zeta four-string Geige",
+        "Zeta four string Geige",
+        "Zeta four strings Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-11-01T10:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 4string Geige",
+        "Zeta 4strings Geige",
+        "Zeta four-string Geige",
+        "Zeta four string Geige",
+        "Zeta four strings Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-12-31T22:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5-string Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-12-31T22:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5-string Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-12-31T22:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados standard Geige",
+        "strados legacy Geige",
+        "e-fusion Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-12-31T22:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados standard Geige",
+        "strados legacy Geige",
+        "e-fusion Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-12-31T22:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta Geige",
+        "Zeta Jazz Fusion",
+        "strados",
+        "EV25",
+        "EV44",
+        "JVS4",
+        "JLP5",
+        "Jean-Luc Ponty Geige"
+      ]
+    },
+    {
+      "language": "de",
+      "now": "2026-12-31T22:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "EV25",
+        "EV44",
+        "JVS4",
+        "JLP5",
+        "Jean-Luc Ponty Geige"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-05T10:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-fusion violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-05T10:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-fusion violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-05T10:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "acoustic pro violon",
+        "vanessa-mae violon",
+        "imbus fusion violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-05T10:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "acoustic pro violon",
+        "vanessa-mae violon",
+        "imbus fusion violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-05T10:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist violon",
+        "Zeta 4-string violon",
+        "Zeta 4-strings violon",
+        "Zeta 4 string violon",
+        "Zeta 4 strings violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-05T10:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist violon",
+        "Zeta 4-string violon",
+        "Zeta 4-strings violon",
+        "Zeta 4 string violon",
+        "Zeta 4 strings violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-25T22:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "jazz standard violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-25T22:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "jazz standard violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-25T22:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5string violon",
+        "Zeta 5strings violon",
+        "Zeta five-string violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-25T22:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5string violon",
+        "Zeta 5strings violon",
+        "Zeta five-string violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-25T22:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados legacy violon",
+        "e-fusion violon",
+        "e-modern violon",
+        "ev acoustic pro violon",
+        "acoustic pro violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-10-25T22:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados legacy violon",
+        "e-fusion violon",
+        "e-modern violon",
+        "ev acoustic pro violon",
+        "acoustic pro violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-11-01T10:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-modern violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-11-01T10:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "e-modern violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-11-01T10:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist violon",
+        "Zeta 4-string violon",
+        "Zeta 4-strings violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-11-01T10:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "modernist violon",
+        "Zeta 4-string violon",
+        "Zeta 4-strings violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-11-01T10:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 4string violon",
+        "Zeta 4strings violon",
+        "Zeta four-string violon",
+        "Zeta four string violon",
+        "Zeta four strings violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-11-01T10:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 4string violon",
+        "Zeta 4strings violon",
+        "Zeta four-string violon",
+        "Zeta four string violon",
+        "Zeta four strings violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-12-31T22:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5-string violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-12-31T22:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "Zeta 5-string violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-12-31T22:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados standard violon",
+        "strados legacy violon",
+        "e-fusion violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-12-31T22:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "strados standard violon",
+        "strados legacy violon",
+        "e-fusion violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-12-31T22:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta violon",
+        "Zeta Jazz Fusion",
+        "strados",
+        "EV25",
+        "EV44",
+        "JVS4",
+        "JLP5",
+        "Jean-Luc Ponty violon"
+      ]
+    },
+    {
+      "language": "fr",
+      "now": "2026-12-31T22:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "EV25",
+        "EV44",
+        "JVS4",
+        "JLP5",
+        "Jean-Luc Ponty violon"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-05T10:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-05T10:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-05T10:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "e-fusion バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-05T10:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "e-fusion バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-05T10:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "acoustic pro バイオリン",
+        "vanessa-mae バイオリン",
+        "imbus fusion バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-05T10:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "acoustic pro バイオリン",
+        "vanessa-mae バイオリン",
+        "imbus fusion バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-25T22:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-25T22:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-25T22:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "jazz standard バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-25T22:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "jazz standard バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-25T22:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "Zeta 5string バイオリン",
+        "Zeta 5strings バイオリン",
+        "Zeta five-string バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-10-25T22:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "Zeta 5string バイオリン",
+        "Zeta 5strings バイオリン",
+        "Zeta five-string バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-11-01T10:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-11-01T10:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-11-01T10:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "e-modern バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-11-01T10:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "e-modern バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-11-01T10:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "modernist バイオリン",
+        "Zeta 4-string バイオリン",
+        "Zeta 4-strings バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-11-01T10:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "modernist バイオリン",
+        "Zeta 4-string バイオリン",
+        "Zeta 4-strings バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-12-31T22:00:00",
+      "limit": 4,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-12-31T22:00:00",
+      "limit": 4,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-12-31T22:00:00",
+      "limit": 6,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "Zeta 5-string バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-12-31T22:00:00",
+      "limit": 6,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "Zeta 5-string バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-12-31T22:00:00",
+      "limit": 8,
+      "broad": false,
+      "expected": [
+        "Zeta バイオリン",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "strados standard バイオリン",
+        "strados legacy バイオリン",
+        "e-fusion バイオリン"
+      ]
+    },
+    {
+      "language": "ja",
+      "now": "2026-12-31T22:00:00",
+      "limit": 8,
+      "broad": true,
+      "expected": [
+        "zeta",
+        "Zeta Jazz Fusion",
+        "strados",
+        "ゼータ バイオリン",
+        "ゼータ エレキバイオリン",
+        "strados standard バイオリン",
+        "strados legacy バイオリン",
+        "e-fusion バイオリン"
+      ]
+    }
+  ]
+}

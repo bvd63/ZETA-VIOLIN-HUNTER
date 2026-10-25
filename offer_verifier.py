@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from filters import is_editorial_url, classify
 from liveness import looks_dead, UA, REVERB_ITEM_RX
 
-GOVDEALS_RX = re.compile(r"^https://(?:www\.)?(?:govdeals|allsurplus)\.com/(?:en/)?asset/(\d+)/(\d+)(?:[/?#]|$)", re.I)
+GOVDEALS_RX = re.compile(r"^https://(?:(?:www|prod-seo)\.)?(?:govdeals|allsurplus)\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?asset/(\d+)/(\d+)(?:[/?#]|$)", re.I)
 ITEM_PATH = re.compile(r"/(?:item|items|itm|lot|lots|asset|listing|listings|ad|offer|offers|annuncio|anzeige|jp/auction|auction-lot)/|/l/\d+[-/]|/sale/\d+/\d+/|/lot-[\w-]+|/marketplace/item/|/d/[^/]+/\d+\.html", re.I)
 ARCHIVE_PATH = re.compile(r"/(?:price-result|realized-prices|auction-results|cozio-archive)/", re.I)
 SALE_WORDS = re.compile(r"\b(?:for sale|wts|selling|current bid|minimum bid|place bid|buy now|buy it now|add to cart|make an offer|auction lot|price|prix|preis|à vendre|zu verkaufen|te koop|in vendita)\b", re.I)
@@ -102,6 +102,9 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     # Ignore footer/recommendations, scripts and navigation when checking sale intent.
     main = soup.find("main") or soup.find(id="main-content") or soup.find(id="postingbody") or soup
     h1 = main.find("h1")
+    if listing.get("source") == "search":
+        listing.setdefault("_discovery_description", listing.get("description", ""))
+        listing["description"] = ""
     if h1 and h1.get_text(strip=True):
         listing["title"] = h1.get_text(" ", strip=True)[:300]
     for product in products:
@@ -130,6 +133,7 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
             listing["model"] = product.get("model") if isinstance(product.get("model"), str) else ""
             category = product.get("category") or []
             listing["categories"] = [category] if isinstance(category, str) else category
+            listing["_primary_content_checked"] = True
             if offer.get("price") is not None:
                 listing["price"] = f"{offer['price']} {offer.get('priceCurrency', '')}".strip()
             if offer.get("price") is not None or availability in ("instock", "limitedavailability", "preorder"):
@@ -149,8 +153,10 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     description = scoped.select_one('[itemprop="description"], #description, #postingbody')
     if description:
         listing["description"] = description.get_text(" \n", strip=True)
-    elif main is not soup and ITEM_PATH.search(urlsplit(final_url).path):
+        listing["_primary_content_checked"] = True
+    elif (main is not soup or h1 is not None) and ITEM_PATH.search(urlsplit(final_url).path):
         listing["description"] = scoped.get_text(" \n", strip=True)
+        listing["_primary_content_checked"] = True
     if ITEM_PATH.search(urlsplit(final_url).path) and re.search(
             r"\b(?:auction ended|auction closed|sold for\s*:|sold amount\s*:|closed\s+auction date\s*:)", body, re.I):
         return "dead", "rezultat de licitație încheiată"
@@ -166,6 +172,7 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
 
 
 async def verify_offer(listing: dict, client) -> tuple:
+    listing.pop("_primary_content_checked", None)
     url = listing.get("url", "")
     if not public_url(url):
         return "non_sale", "URL public invalid"
@@ -188,6 +195,7 @@ async def verify_offer(listing: dict, client) -> tuple:
             if not verified:
                 return "dead", "GovDeals: licitație încheiată sau indisponibilă"
             listing.update({k: v for k, v in verified.items() if k not in ("id", "source")})
+            listing["_primary_content_checked"] = True
             return "live", "GovDeals: licitație activă verificată prin API"
         except Exception:
             return "unknown", "GovDeals: API indisponibil"
@@ -209,6 +217,7 @@ async def verify_offer(listing: dict, client) -> tuple:
                     listing["title"] = data.get("title") or listing.get("title", "")
                     listing["description"] = BeautifulSoup(data.get("description") or "", "lxml").get_text(" ", strip=True)
                     listing.update(identity_fields(data))
+                    listing["_primary_content_checked"] = True
                     listing["condition"] = (data.get("condition") or {}).get("display_name", "")
                     price = data.get("price") or {}
                     if price.get("amount") is not None:

@@ -5,7 +5,8 @@ import re
 import unicodedata
 from zoneinfo import ZoneInfo
 
-MODEL_CODES = ("JV44", "JV45", "SV24", "SV25", "SV43", "SV244", "CV44", "EV25", "EV44", "JVS4", "JLP5", "JV5", "JLP4")
+BASE_MODEL_CODES = ("JV44", "JV45", "SV24", "SV25", "SV43", "SV244", "CV44", "EV25", "EV44", "JVS4", "JLP5")
+MODEL_CODES = BASE_MODEL_CODES + ("JV5", "JLP4")
 MODEL_NAMES = (
     "jazz fusion", "jazz standard", "jazz modern", "jazz classic", "jazz acoustic pro",
     "jazz fusion legacy", "fusion legacy", "jazz legacy", "strados modern",
@@ -40,6 +41,9 @@ def preference_matches(listing: dict) -> list:
     matches = []
     if JLP_RX.search(text):
         matches.append("Jean-Luc Ponty / JLP menționat")
+    primary = normalize_identity_text(" ".join(str(listing.get(k) or "") for k in ("title", "model")))
+    if re.search(r"\bjazz\b|\bjv(?:44|45|5)\b|\bjvs4\b", primary, re.I):
+        matches.append("Jazz / JV menționat; căluș de confirmat în fotografii")
     if BURST_RX.search(text):
         matches.append("finisaj sunburst / burst menționat")
     return matches
@@ -71,10 +75,11 @@ def market_queries(language: str = "en", *, broad: bool = False, limit: int = 8,
     if language == "ja":
         core += ["ゼータ バイオリン", "ゼータ エレキバイオリン"]
     core = list(dict.fromkeys(core))
-    pool = [f"Zetta {word}", *MODEL_CODES, *[f"{artist} {word}" for artist in ARTISTS]]
+    # Preserve the original direct-market schedule. New codes/preferences have
+    # additional Tavily queries and widened web OR groups, not replacement slots.
+    pool = [f"Zetta {word}", *BASE_MODEL_CODES, *[f"{artist} {word}" for artist in ARTISTS]]
     pool += [f"{model} {word}" for model in MODEL_NAMES if model != "educator"]
     pool += [f"Zeta {variant} {word}" for variant in STRING_VARIANTS]
-    pool += list(PREFERRED_QUERIES)
     local = now or datetime.now(ZoneInfo("Europe/Bucharest"))
     slots = max(1, limit - len(core))
     offset = (local.toordinal() * 2 + int(local.hour >= 22)) * slots
@@ -82,7 +87,7 @@ def market_queries(language: str = "en", *, broad: bool = False, limit: int = 8,
     return list(dict.fromkeys(core + rotated))[:max(1, limit)]
 
 
-WEB_KEYWORDS = [
+BASE_WEB_KEYWORDS = [
     'Zeta violin OR Zeta fiddle', 'Zeta Strados OR Strados violin',
     'Zeta Jazz Fusion OR Jazz Fusion violin',
     ' OR '.join(MODEL_CODES),
@@ -92,6 +97,9 @@ WEB_KEYWORDS = [
     'Zeta скрипка OR Zeta цигулка OR Zeta skrzypce OR Zeta hegedű',
     'Zeta violin (' + ' OR '.join(f'"{v}"' for v in STRING_VARIANTS[:9]) + ')',
     'Zeta violin (' + ' OR '.join(f'"{v}"' for v in STRING_VARIANTS[9:]) + ')',
+]
+ADDITIONAL_WEB_KEYWORDS = [
     'Zeta 小提琴 OR Zeta 바이올린 OR Zeta βιολί OR Zeta keman',
     'Zeta JLP OR Zeta JLP4 OR Zeta JLP5 OR Zeta sunburst OR Zeta "tobacco burst" OR Zeta "JLP Burst"',
 ]
+WEB_KEYWORDS = BASE_WEB_KEYWORDS + ADDITIONAL_WEB_KEYWORDS

@@ -205,7 +205,8 @@ class TelegramNotifier:
 
         safe_url = self._normalize_url(url)
         lines = [
-            "🚨🎻 <b>VIOARĂ ZETA GĂSITĂ!</b>",
+            ("⚠️🎻 <b>CANDIDAT ZETA — DISPONIBILITATE NECONFIRMATĂ</b>"
+             if listing.get("verification") == "unknown" else "🚨🎻 <b>VIOARĂ ZETA GĂSITĂ!</b>"),
             f"<b>{html.escape(title[:240])}</b>",
             f"💰 <b>Preț: {html.escape(price)}</b>{self._eur_hint(price_context)}",
         ]

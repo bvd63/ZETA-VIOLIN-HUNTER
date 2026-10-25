@@ -19,7 +19,7 @@ import httpx
 from config import Config
 from database import connect
 from filters import classify, has_zeta_signal, has_violin_word
-from keywords import STRING_VARIANTS
+from keywords import STRING_VARIANTS, preference_matches
 from scrapers.base import BaseScraper
 
 log = logging.getLogger(__name__)
@@ -295,11 +295,14 @@ class ApifyFacebookScraper(BaseScraper):
                         listing = json.loads(candidate)
                         if discovery_reason(listing) or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
                             continue
-                        queue.append((bool(classify(listing)), {"url": url}))
-                    # Confirmed identity first; retain oldest-first ordering
-                    # within each tier. The existing two-detail cost cap stays.
+                        queue.append((bool(classify(listing)), not bool(preference_matches(listing)), {"url": url}))
+                    # One preferred slot, one oldest eligible slot: old Strados
+                    # and uncertain identities remain queued without starvation.
                     queue.sort(key=lambda entry: entry[0])
-                    queue = [entry[1] for entry in queue[:2]]
+                    preferred = min(queue, key=lambda entry: entry[:2]) if queue else None
+                    chosen = [preferred] if preferred else []
+                    chosen += [entry for entry in queue if entry is not preferred][:1]
+                    queue = [entry[2] for entry in chosen]
                 if queue:
                     reservation, rows = await self._start(client, "details", queue, Config.APIFY_DETAILS_CAP_USD)
                     if reservation:

@@ -23,7 +23,7 @@ import database
 database.DB_PATH = os.environ['DB_PATH']
 from database import Database, canonical_url
 from filters import classify
-from keywords import market_queries, MODEL_CODES
+from keywords import market_queries, MODEL_CODES, BASE_MODEL_CODES
 from scrapers.govdeals import parse_asset
 from scrapers.base import BaseScraper
 from offer_verifier import inspect_page, verify_offer
@@ -251,7 +251,7 @@ class RegressionTests(unittest.TestCase):
                 self.assertIn('zeta',queries)
                 self.assertIn('Zeta Jazz Fusion',queries)
                 found.update(queries)
-        self.assertTrue(set(MODEL_CODES) <= found)
+        self.assertTrue(set(BASE_MODEL_CODES) <= found)
         self.assertIn('Zetta Geige',found)
 
     def test_each_search_plan_prioritizes_all_auction_groups(self):
@@ -311,6 +311,96 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(state,'live')
                 self.assertEqual(listing['price'],'1910 USD')
         asyncio.run(run())
+
+    def test_localized_reverb_url_uses_api_even_when_html_has_buy_controls(self):
+        # The 22:00 search found this actual archived item through /en-nl/.
+        async def run():
+            for locale in ('en-nl','fr-fr','de','ja',''):
+                calls=[]
+                def handler(request):
+                    calls.append(str(request.url))
+                    return httpx.Response(200,json={'title':'Zeta JV44 Jazz electric violin',
+                                                   'state':{'slug':'ended'}})
+                url='https://reverb.com/'+(locale+'/' if locale else '')+'item/76052769-zeta-jv44-jazz-electric-violin'
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    state,why=await verify_offer(self.listing(url=url),client)
+                self.assertEqual(state,'dead')
+                self.assertEqual(why,'reverb state=ended')
+                self.assertEqual(calls,['https://api.reverb.com/api/listings/76052769'])
+        asyncio.run(run())
+
+    def test_live_audit_cd_category_does_not_sell_the_biography_instrument(self):
+        url='https://www.2dehands.be/v/cd-s-en-dvd-s/cd-s-jazz-en-blues/m2458045423-jean-luc-ponty-cosmic-messenger'
+        listing=self.listing(title="Jean-Luc Ponty 'Cosmic Messenger'",url=url,
+                             description='Jean-Luc Ponty plays a Zeta Jazz Fusion violin.')
+        self.assertEqual(classify(listing),'noise')
+        listing['title']='Zeta JV5 electric violin'
+        self.assertEqual(classify(listing),'')  # an explicitly miscategorized violin is retained
+
+    def test_unfetched_index_recommendation_is_deferred_not_notified_or_lost(self):
+        from discovery_queue import stage
+        import main
+        listing=self.listing(id='vending',source='search',title='Crane Merchant Media Vending Machine, Model 180',
+                             description='Recommended item: Zeta JV5 electric violin.',
+                             url='https://www.allsurplus.com/en/asset/16845/10337')
+        selected,_=stage('audit:unverified',[listing],60)
+        async def run():
+            with patch('main.verify_offer',AsyncMock(return_value=('unknown','GovDeals: API unavailable'))):
+                async with httpx.AsyncClient() as client:
+                    dropped={}
+                    found=await main._verify_search_hits(selected,self.db,client,dropped,'audit:unverified')
+            self.assertEqual(found,[])
+            self.assertEqual(dropped['identity_unverified'],1)
+        asyncio.run(run())
+        self.assertFalse(self.db.is_seen('vending'))
+        self.assertEqual(self.db.pending(),[])
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM discovery_queue WHERE namespace='audit:unverified'").fetchone()[0],1)
+
+    def test_unknown_strong_title_remains_visible_with_honest_heading(self):
+        import main
+        listing=self.listing(source='search',title='Zeta JLP5 electric violin')
+        async def run():
+            with patch('main.verify_offer',AsyncMock(return_value=('unknown','HTTP 403'))):
+                async with httpx.AsyncClient() as client:
+                    found=await main._verify_search_hits([listing],self.db,client,{})
+            self.assertEqual(len(found),1)
+        asyncio.run(run())
+        text=TelegramNotifier('fake','fake')._format_listing(1,listing)
+        self.assertIn('DISPONIBILITATE NECONFIRMATĂ',text)
+        self.assertNotIn('VIOARĂ ZETA GĂSITĂ',text)
+
+    def test_primary_page_clears_contaminated_search_description(self):
+        listing=self.listing(source='search',title='Crane coffee vending machine',
+                             description='Zeta Jazz Fusion violin recommended on this site.')
+        page='<main><h1>Crane coffee vending machine</h1><div id="description">Used vending machine.</div><button>Buy now</button></main>'
+        self.assertEqual(inspect_page(listing,page,200,listing['url'])[0],'live')
+        self.assertEqual(classify(listing),'non_zeta')
+        self.assertNotIn('Zeta',listing['description'])
+
+    def test_govdeals_frontend_fetch_has_browser_headers_in_search_verifier(self):
+        from scrapers.govdeals import GovDealsClient
+        from scrapers.base import BROWSER_HEADERS
+        seen=[]
+        def handler(request):
+            seen.append(request.headers.get('user-agent'))
+            text='<script src="main.fixture.js"></script>' if request.url.path=='/' else 'maestroApiKey:"fake-public-configuration"'
+            return httpx.Response(200,text=text)
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                await GovDealsClient(client).initialize()
+        asyncio.run(run())
+        self.assertEqual(seen,[BROWSER_HEADERS['User-Agent']]*2)
+
+    def test_govdeals_locale_aliases_keep_delivery_and_auction_deadline(self):
+        url='https://www.allsurplus.com/es/asset/370/12180'
+        deadline='2026-11-02T12:00:00+00:00'
+        item=self.listing(url=url,auction_end=deadline)
+        self.db.record_alert(item,2000)
+        self.assertTrue(self.db.was_url_alerted('https://allsurplus.com/pt/asset/370/12180',deadline))
+        self.assertFalse(self.db.was_url_alerted('https://allsurplus.com/en/asset/370/12180','2026-12-02T12:00:00+00:00'))
+        self.assertNotEqual(canonical_url(url),canonical_url('https://www.govdeals.com/en/asset/370/12180'))
+        self.assertEqual(canonical_url('https://prod-seo.govdeals.com/zh/asset/370/12180'),
+                         canonical_url('https://www.govdeals.com/en/asset/370/12180'))
 
     def test_mercari_preserves_yen_currency_before_range_check(self):
         from scrapers.mercari_jp import MercariJPScraper
@@ -651,6 +741,14 @@ class SourceHealthTests(unittest.TestCase):
                 patch('main.run_search_cycle', search):
             asyncio.run(main._startup_cycle())
         search.assert_not_awaited()
+
+    def test_primary_generic_page_without_main_retains_description_identity(self):
+        item = {'id':'plain-html', 'title':'Vintage instrument', 'description':'Index snippet',
+                'url':'https://dealer.example/item/123', 'source':'search', 'condition':'Used'}
+        html = '<html><body><h1>Vintage instrument</h1><p>Used Zeta Jazz Fusion 5-string.</p><p>For sale $1800.</p></body></html>'
+        self.assertEqual(inspect_page(item, html, 200, item['url'])[0], 'live')
+        self.assertTrue(item['_primary_content_checked'])
+        self.assertEqual(classify(item), '')
 
     def test_watchdog_does_not_claim_partial_sources_return_nothing(self):
         notifier = TelegramNotifier('fake', 'fake')

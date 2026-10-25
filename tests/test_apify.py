@@ -177,6 +177,24 @@ class ApifyTests(unittest.TestCase):
         self.assertEqual(requests, [])
         self.assertIn("monthly budget", scraper.health_error())
 
+    def test_preferred_detail_slot_does_not_starve_old_strados(self):
+        with store() as conn:
+            for number, title in [(1,'Zeta Strados violin'), (2,'Zeta JLP5 violin'), (3,'Zeta Jazz JV44 violin')]:
+                item = normalize({**FENTON, 'itemUrl':f'https://www.facebook.com/marketplace/item/{number}/',
+                                  'listingTitle':title})
+                conn.execute('INSERT INTO apify_items (url,candidate) VALUES (?,?)',
+                             (item['url'],json.dumps(item)))
+            conn.commit()
+        scraper = self.scraper(lambda r: self.fail('No live Apify requests'))
+        calls = []
+        async def start(client, phase, urls, cap):
+            calls.append((phase, urls))
+            return '', []
+        with patch.object(scraper, '_start', side_effect=start):
+            asyncio.run(scraper.search())
+        selected = next(urls for phase,urls in calls if phase=='details')
+        self.assertEqual([entry['url'].split('/')[-2] for entry in selected], ['2','1'])
+
     def test_incomplete_card_gets_identity_from_full_details(self):
         starts = []
         card = {**PIEDMONT_CARD, "marketplace_listing_title": "Electric violin 5 strings with case"}
