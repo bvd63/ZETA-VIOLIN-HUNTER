@@ -361,6 +361,14 @@ async def _watchdog(scrapers: list, notifier: TelegramNotifier) -> None:
             log.error(f"Watchdog Telegram error: {e}")
 
 
+async def _verify_delivery_offer(listing: dict, http) -> tuple:
+    # Queued direct collector offers remain item candidates after a restart,
+    # even when the marketplace uses an unfamiliar item URL structure.
+    if listing.get('source') != 'search':
+        listing['_direct_item_candidate'] = True
+    return await verify_offer(listing, http)
+
+
 async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: PriceTracker, listings: list) -> int:
     """Send listings; mark as seen/alerted ONLY the delivered ones."""
     unique, urls = [], set()
@@ -372,6 +380,8 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
                 db.discard_pending(listing.get("url", ""))
             continue
         urls.add(url)
+        if listing.get('source') != 'search':
+            listing['_direct_item_candidate'] = True
         db.enqueue(listing)
         listing["price_context"] = price_tracker.record_listing(listing)
         unique.append(listing)
@@ -388,7 +398,7 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
             async with semaphore:
                 if item.get('source') != 'search':
                     item['_direct_item_candidate'] = True
-                state, why = await verify_offer(item, http)
+                state, why = await _verify_delivery_offer(item, http)
                 if state in ('dead','non_sale') or classify(item):
                     db.discard_pending(item.get('url',''))
                     if state == 'dead':
@@ -441,7 +451,7 @@ async def notification_tick() -> None:
                     if classify(listing):
                         db.discard_pending(listing.get("url", ""))
                         continue
-                    state, why = await verify_offer(listing, http)
+                    state, why = await _verify_delivery_offer(listing, http)
                     if state in ("dead", "non_sale"):
                         db.discard_pending(listing.get("url", ""))
                         continue
@@ -456,7 +466,7 @@ async def notification_tick() -> None:
                     if classify(listing):
                         db.finish_price_drop(listing.get("url", ""))
                         continue
-                    state, _ = await verify_offer(listing, http)
+                    state, _ = await _verify_delivery_offer(listing, http)
                     if state in ("dead", "non_sale") or classify(listing):
                         db.finish_price_drop(listing.get("url", ""))
                         continue
@@ -529,7 +539,7 @@ async def run_search_cycle():
                     db.finish_price_drop(listing.get("url", ""))
                     continue
                 async with httpx.AsyncClient(timeout=15) as http:
-                    state, _ = await verify_offer(listing, http)
+                    state, _ = await _verify_delivery_offer(listing, http)
                 if state in ("dead", "non_sale") or classify(listing):
                     db.finish_price_drop(listing.get("url", ""))
                 elif _needs_primary_identity(listing, state):
@@ -544,7 +554,7 @@ async def run_search_cycle():
                         if classify(listing):
                             db.discard_pending(listing.get("url", ""))
                             continue
-                        state, why = await verify_offer(listing, http)
+                        state, why = await _verify_delivery_offer(listing, http)
                         if state in ("dead", "non_sale") or classify(listing):
                             db.discard_pending(listing.get("url", ""))
                             continue
@@ -600,7 +610,7 @@ async def run_search_cycle():
                         for listing, info in all_drops:
                             if listing.get('source') != 'search':
                                 listing['_direct_item_candidate'] = True
-                            state, why = await verify_offer(listing, http)
+                            state, why = await _verify_delivery_offer(listing, http)
                             if state in ('dead', 'non_sale') or classify(listing):
                                 db.finish_price_drop(listing.get('url', ''))
                                 continue

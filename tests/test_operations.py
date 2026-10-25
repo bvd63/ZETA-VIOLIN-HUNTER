@@ -114,7 +114,9 @@ class FinalDeliveryTests(unittest.IsolatedAsyncioTestCase):
             with patch('main.verify_offer', AsyncMock(side_effect=RuntimeError('fixture'))):
                 self.assertEqual(await main._deliver(SimpleNamespace(send_listings=AsyncMock()),db,
                     SimpleNamespace(record_listing=lambda _: {}),[item]),0)
-            self.assertIn(item['url'],[x['url'] for x in db.pending()])
+            pending = {x['url']:x for x in db.pending()}
+            self.assertIn(item['url'],pending)
+            self.assertTrue(pending[item['url']]['_direct_item_candidate'])
             self.assertFalse(db.was_url_alerted(item['url']))
         finally:
             db.close()
