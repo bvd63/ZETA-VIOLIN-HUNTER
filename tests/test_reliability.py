@@ -175,6 +175,32 @@ class RegressionTests(unittest.TestCase):
         title = 'ZETA Jazz Fusion 4-string MIDI Electric Violin White JV44 Serial 0103'
         self.assertEqual(classify(self.listing(title=title)), '')
 
+    def test_reverb_brand_in_description_tail_is_not_lost(self):
+        from scrapers.reverb import ReverbScraper
+        description = '<p>' + 'Excellent condition, includes original packaging. ' * 12 + 'Made by Zeta, Jazz Fusion violin.</p>'
+        item = {'id':123, 'title':'Electric violin 5 strings', 'description':description,
+                'condition':{'display_name':'Used'}, 'state':{'slug':'live'},
+                '_links':{'web':{'href':'https://reverb.com/item/123-violin'}}}
+        scraper = ReverbScraper()
+        def handler(request):
+            return httpx.Response(200,json={'listings':[item] if request.url.params['page']=='1' else []})
+        original = scraper.make_client
+        with patch.object(scraper,'make_client',side_effect=lambda **kw: original(transport=httpx.MockTransport(handler),**kw)):
+            listings = asyncio.run(scraper.search())
+        self.assertEqual(len(listings),1)
+        self.assertGreater(len(listings[0]['description']),300)
+        self.assertEqual(classify(listings[0]),'')
+
+    def test_gumtree_247_is_reported_as_access_failure(self):
+        from scrapers.gumtree import GumtreeScraper
+        scraper = GumtreeScraper()
+        async def run():
+            async with scraper.make_client(transport=httpx.MockTransport(lambda r: httpx.Response(247))) as client:
+                await client.get('https://www.gumtree.com/search?q=zeta')
+        asyncio.run(run())
+        self.assertEqual(scraper.requests_ok,0)
+        self.assertIn('HTTP 247',scraper.health_error())
+
     def test_media_and_concert_noise(self):
         for title in ('Zeta violin magazine 1994', 'Zeta Jazz Fusion violin review',
                       'Zeta electric violin print ad', 'Jean-Luc Ponty concert tickets'):
@@ -323,12 +349,13 @@ class RegressionTests(unittest.TestCase):
         finally:
             pt.close()
 
-    def test_header_failure_does_not_abort_individual_delivery(self):
+    def test_failed_listing_does_not_abort_other_deliveries(self):
         notifier=TelegramNotifier('fake','fake')
-        notifier.send=AsyncMock(side_effect=[RuntimeError('header failed'),True])
+        notifier._send_violin=AsyncMock(side_effect=[RuntimeError('delivery failed'),True])
         with patch.object(Config,'SEND_PHOTOS',False):
-            delivered=asyncio.run(notifier.send_listings([self.listing()]))
+            delivered=asyncio.run(notifier.send_listings([self.listing(), self.listing(id='other')]))
         self.assertEqual(len(delivered),1)
+        self.assertEqual(delivered[0]['id'],'other')
 
     def test_successful_empty_source_is_not_watchdog_failure(self):
         from status_tracker import StatusTracker

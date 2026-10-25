@@ -27,6 +27,15 @@ Guitar Center și Facebook Marketplace pornesc automat când există `US_PROXY_U
 
 ## Comenzi Telegram
 
+Alertele cu viori au titlu **🚨🎻 VIOARĂ ZETA GĂSITĂ!**, buton de deschidere și
+**✅ Am văzut**. Fără confirmare, botul revine după 10 minute și apoi la fiecare
+30 de minute, inclusiv după restart. Deschiderea anunțului sau citirea mesajului
+nu reprezintă confirmare: Telegram Bot API nu oferă starea de citire.
+Rapoartele obișnuite sunt silențioase; alertele și reamintirile cer notificare cu
+sunet. Telefonul trebuie să aibă notificările grupului și sunetul activate.
+Livrările eșuate sunt reîncercate în fiecare minut, fără căutări Brave/Apify noi.
+Istoricul vechi nu este importat ca necitit, pentru a nu retrimite oferte încheiate.
+
 `/cauta` pornește o căutare acum · `/status` starea surselor · `/active` viorile văzute live în ultimele 3 zile · `/verifica LINK` explică starea actuală a unui anunț · `/help`
 
 ## Rulare locală

@@ -24,32 +24,39 @@ class TelegramNotifier:
         self.chat_id = chat_id
 
     # --- low level -----------------------------------------------------------
-    async def _post(self, method: str, payload: dict) -> bool:
-        """POST to the Bot API with one retry on 429. Returns True on success."""
+    async def _request(self, method: str, payload: dict) -> dict:
+        """Check Telegram's acknowledgement, not just HTTP delivery. Never log tokens."""
         if not self.token or not self.chat_id:
             log.warning("Telegram not configured — skipping notification.")
-            log.info(f"[ALERT PREVIEW {method}]\n{payload.get('caption') or payload.get('text')}")
-            return False
+            return {}
         url = TELEGRAM_API.format(token=self.token, method=method)
         payload = {"chat_id": self.chat_id, **payload}
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code == 429:
-                try:
-                    retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
-                except Exception:
-                    retry_after = 30
-                log.warning(f"Telegram rate limited — waiting {retry_after}s")
-                await asyncio.sleep(retry_after + 1)
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.post(url, json=payload)
-            if resp.status_code != 200:
-                log.error(f"Telegram {method} error: {resp.text[:300]}")
-                return False
-            return True
+                if resp.status_code == 429:
+                    data = resp.json()
+                    retry_after = max(1, int(data.get("parameters", {}).get("retry_after", 30)))
+                    log.warning("Telegram rate limited — waiting %ss", retry_after)
+                    await asyncio.sleep(retry_after + 1)
+                    resp = await client.post(url, json=payload)
+                data = resp.json()
+                if resp.status_code != 200 or data.get("ok") is not True:
+                    log.error("Telegram %s rejected notification (HTTP %s, code %s)",
+                              method, resp.status_code, data.get("error_code"))
+                    return {}
+                return data
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            log.warning("Telegram %s request failed (%s)", method, type(exc).__name__)
+            return {}
 
-    async def send(self, text: str) -> bool:
+    async def _post(self, method: str, payload: dict) -> bool:
+        return bool(await self._request(method, payload))
+
+    async def send(self, text: str, *, silent: bool = False) -> bool:
         return await self._post("sendMessage", {
             "text": text, "parse_mode": "HTML", "disable_web_page_preview": False,
+            "disable_notification": silent,
         })
 
     async def send_photo(self, image_url: str, caption: str) -> bool:
@@ -58,33 +65,63 @@ class TelegramNotifier:
         })
 
     # --- high level ----------------------------------------------------------
+    @staticmethod
+    def _alert_buttons(receipt_id: str, url: str) -> dict:
+        rows = []
+        if url:
+            rows.append([{"text": "🎻 Deschide anunțul", "url": url}])
+        rows.append([{"text": "✅ Am văzut — oprește reamintirile", "callback_data": "seen:" + receipt_id}])
+        return {"inline_keyboard": rows}
+
+    async def _send_violin(self, listing: dict, text: str, *, event: str = "new", photo: bool = True) -> bool:
+        from alert_receipts import AlertReceipts
+        receipts = AlertReceipts()
+        try:
+            receipt_id = receipts.prepare(self.chat_id, listing, text, event)
+            options = {"parse_mode": "HTML", "disable_notification": False,
+                       "reply_markup": self._alert_buttons(receipt_id, self._normalize_url(listing.get("url", "")))}
+            image_url = self._normalize_url(str(listing.get("image_url", "") or ""))
+            data = {}
+            if photo and Config.SEND_PHOTOS and image_url and len(text) <= CAPTION_LIMIT:
+                data = await self._request("sendPhoto", {**options, "photo": image_url, "caption": text})
+            if not data:
+                data = await self._request("sendMessage", {**options, "text": text, "disable_web_page_preview": False})
+            if not data:
+                return False
+            receipts.delivered(receipt_id, (data.get("result") or {}).get("message_id"))
+            log.info("Telegram accepted violin alert %s: %s", receipt_id, listing.get("url", ""))
+            return True
+        finally:
+            receipts.close()
+
+    async def send_reminders(self) -> None:
+        """Run every minute, even while the search scheduler is idle."""
+        from alert_receipts import AlertReceipts
+        receipts = AlertReceipts()
+        try:
+            for alert in receipts.claim_due(self.chat_id):
+                if not receipts.is_pending(alert["id"]):
+                    continue
+                text = ("🔔🚨 <b>VIOARĂ ZETA — NU AI CONFIRMAT ALERTA</b>\n"
+                        "Apasă «Am văzut» ca să oprești reamintirile.\n"
+                        "Disponibilitatea se poate schimba între timp.\n\n" + alert["text"])
+                sent = await self._post("sendMessage", {
+                    "text": text, "parse_mode": "HTML", "disable_notification": False,
+                    "reply_markup": self._alert_buttons(alert["id"], self._normalize_url(alert["url"])),
+                })
+                receipts.reminder_result(alert["id"], sent)
+        finally:
+            receipts.close()
+
     async def send_listings(self, listings: list, header_note: str = "") -> list:
         """Send every listing; return the ones that were DELIVERED (main.py only
         marks those as seen, so a Telegram hiccup never loses an instrument)."""
-        header = (
-            f"🎻 <b>ZETA VIOLIN HUNTER</b>\n"
-            f"📦 <b>{len(listings)} new listing(s) found!</b>{header_note}\n"
-            f"{'─' * 30}"
-        )
-        try:
-            await self.send(header)
-        except Exception as exc:
-            log.warning("Telegram header failed (%s); continuing with queued listings", type(exc).__name__)
-
         delivered = []
         for i, listing in enumerate(listings, 1):
             msg = self._format_listing(i, listing)
-            image_url = self._normalize_url(str(listing.get("image_url", "") or ""))
             sent = False
             try:
-                # A caption longer than the limit would be cut mid-tag → Telegram 400;
-                # long messages go as text (4096 limit) instead.
-                if Config.SEND_PHOTOS and image_url and len(msg) <= CAPTION_LIMIT:
-                    sent = await self.send_photo(image_url, msg)
-                    if not sent:
-                        log.info("sendPhoto failed — falling back to text message")
-                if not sent:
-                    sent = await self.send(msg)
+                sent = await self._send_violin(listing, msg)
             except Exception as e:
                 log.error(f"Telegram delivery error for {listing.get('title', '')[:50]}: {e}")
                 sent = False
@@ -100,16 +137,13 @@ class TelegramNotifier:
         """drops: list of (listing, {old_price, new_price, drop_pct})."""
         if not drops:
             return []
-        try:
-            await self.send(f"📉 <b>ZETA VIOLIN HUNTER — PRICE DROP</b>\n{len(drops)} known listing(s) got cheaper\n{'─' * 30}")
-        except Exception as exc:
-            log.warning("Price-drop header failed (%s)", type(exc).__name__)
         delivered = []
         for i, (listing, info) in enumerate(drops, 1):
             title = html.escape(str(listing.get("title", "")))
             url = self._normalize_url(listing.get("url", ""))
             lines = [
-                f"📉 <b>#{i} — {title}</b>",
+                "🚨📉 <b>VIOARĂ ZETA — PREȚ REDUS</b>",
+                f"<b>{title}</b>",
                 f"💰 <b>{html.escape(str(info.get('old_price', '')))} → {html.escape(str(info.get('new_price', '')))}</b>"
                 f" (−{info.get('drop_pct', 0):.0f}%)",
                 f"🛒 <b>Platform:</b> {html.escape(str(listing.get('platform', '')))}",
@@ -118,7 +152,7 @@ class TelegramNotifier:
                 lines.append(f"🔗 <a href=\"{html.escape(url, quote=True)}\">View Listing</a>")
                 lines.append(url)
             try:
-                if await self.send("\n".join(lines)):
+                if await self._send_violin(listing, "\n".join(lines), event=f"drop:{info.get('new_price')}", photo=False):
                     delivered.append((listing, info))
             except Exception as exc:
                 log.warning("Price-drop delivery failed (%s)", type(exc).__name__)
@@ -134,7 +168,8 @@ class TelegramNotifier:
         lines.append(f"🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
         await self.send("\n".join(lines))
 
-    async def send_no_changes(self, sources_ok: int = 0, sources_error: int = 0, sources_zero: int = 0):
+    async def send_no_changes(self, sources_ok: int = 0, sources_error: int = 0, sources_zero: int = 0,
+                              error_details: list = None, pending: int = 0):
         if not Config.SEND_NO_CHANGES:
             log.info("SEND_NO_CHANGES=false — not sending the no-changes message")
             return
@@ -144,12 +179,15 @@ class TelegramNotifier:
         if sources_zero:
             health += f", {sources_zero} fără rezultate"
         status_line = "✅ Căutarea s-a terminat cu succes." if not sources_error else "⚠️ Căutare terminată cu erori la unele surse."
+        from zoneinfo import ZoneInfo
+        detail = "\n".join(f"• {html.escape(item)}" for item in (error_details or []))
+        pending_line = f"\n📬 {pending} alertă/alerte așteaptă livrarea; Telegram va fi reîncercat." if pending else ""
         await self.send(
-            "🎻 <b>ZETA VIOLIN HUNTER</b>\n"
+            "📋 <b>RAPORT CĂUTARE — fără alertă nouă livrată</b>\n"
             f"{status_line}\n"
-            "📭 Nu au fost găsite anunțuri noi în acest ciclu.\n"
-            f"{health}\n"
-            f"🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+            f"{health}{pending_line}\n{detail}\n"
+            f"🕒 {datetime.now(ZoneInfo(Config.SEARCH_TIMEZONE)):%d.%m.%Y %H:%M %Z}",
+            silent=True,
         )
 
     # --- formatting ----------------------------------------------------------
@@ -161,13 +199,13 @@ class TelegramNotifier:
         url = listing.get("url", "")
         description = str(listing.get("description", ""))
         date_posted = str(listing.get("date_posted", ""))
-        relevance = str(listing.get("relevance_score", "?"))
         price_context = listing.get("price_context", {}) or {}
 
         safe_url = self._normalize_url(url)
         lines = [
-            f"🎻 <b>#{idx} — {html.escape(title)}</b>",
-            f"💰 <b>Price:</b> {html.escape(price)}{self._eur_hint(price_context)}",
+            "🚨🎻 <b>VIOARĂ ZETA GĂSITĂ!</b>",
+            f"<b>{html.escape(title[:240])}</b>",
+            f"💰 <b>Preț: {html.escape(price)}</b>{self._eur_hint(price_context)}",
         ]
         if listing.get("verification") == "unknown":
             lines.append("⚠️ Disponibilitate neverificată; verifică pagina înainte de a cumpăra.")
@@ -221,7 +259,8 @@ class TelegramNotifier:
             lines.append(f"📅 <b>Posted:</b> {html.escape(date_posted)}")
         if description:
             lines.append(f"📝 {html.escape(description[:180])}...")
-        lines.append(f"⭐ <b>Relevance:</b> {html.escape(relevance)}/10")
+        lines.append(f"🔔 Reamintire în {Config.ALERT_FIRST_REMINDER_MINUTES} min, apoi la "
+                     f"{Config.ALERT_REPEAT_MINUTES} min, până apeși «Am văzut».")
 
         if safe_url:
             lines.append(f"🔗 <a href=\"{html.escape(safe_url, quote=True)}\">View Listing</a>")

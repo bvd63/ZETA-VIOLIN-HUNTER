@@ -10,6 +10,7 @@ from keywords import market_queries
 
 import logging
 import re
+import httpx
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
 from filters import has_zeta_signal
@@ -24,6 +25,11 @@ PRICE_RX = re.compile(r"£\s?[\d,]+(?:\.\d{2})?")
 
 class GumtreeScraper(BaseScraper):
     name = "Gumtree UK"
+
+    async def _response_is_healthy(self, response: httpx.Response) -> bool:
+        # The site's 247 anti-bot response contains no usable results. It must
+        # not be reported as a healthy empty search just because it is <400.
+        return response.status_code == 200 or 300 <= response.status_code < 400
 
     async def search(self) -> list:
         results = []

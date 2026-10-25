@@ -341,6 +341,57 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
     return len(delivered)
 
 
+async def notification_tick() -> None:
+    """Retry delivery and remind until acknowledged; never runs paid searches."""
+    notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)
+    try:
+        await notifier.send_reminders()
+    except Exception:
+        log.exception("Telegram reminder tick failed")
+    if search_cycle_lock.locked():
+        return
+    async with search_cycle_lock:
+        db, prices = Database(), PriceTracker()
+        try:
+            # Recovery should not depend on finding the same instrument again.
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
+                for listing in db.pending():
+                    if classify(listing):
+                        db.discard_pending(listing.get("url", ""))
+                        continue
+                    state, why = await verify_offer(listing, http)
+                    if state in ("dead", "non_sale"):
+                        db.discard_pending(listing.get("url", ""))
+                        continue
+                    listing["verification"], listing["liveness"] = state, why
+                    await _deliver(notifier, db, prices, [listing])
+                for listing, info in db.pending_price_drops():
+                    if classify(listing):
+                        db.finish_price_drop(listing.get("url", ""))
+                        continue
+                    state, _ = await verify_offer(listing, http)
+                    if state in ("dead", "non_sale"):
+                        db.finish_price_drop(listing.get("url", ""))
+                        continue
+                    if await notifier.send_price_drops([(listing, info)]):
+                        db.finish_price_drop(listing.get("url", ""))
+        except Exception:
+            log.exception("Telegram queued delivery retry failed")
+        finally:
+            prices.close()
+            db.close()
+
+
+def source_problem(name: str, error: str) -> str:
+    if name == "Google Search" and "403" in error:
+        return "Google: API refuză accesul proiectului (403)."
+    if name == "Willhaben" and "403" in error:
+        return "Willhaben: site-ul blochează accesul serverului (403)."
+    if name == "Yahoo Auctions JP" and "JavaScript" in error:
+        return "Yahoo Japonia: unele pagini nu furnizează rezultatele fără randare JavaScript."
+    return f"{name}: {error[:160]}"
+
+
 async def run_search_cycle():
     """Run one full search cycle across ALL platforms. Concurrent triggers
     queue behind the lock (a scheduled run is never lost)."""
@@ -365,6 +416,7 @@ async def run_search_cycle():
         all_drops = []
         platform_stats = {}
         sources_ok = sources_error = sources_zero = 0
+        source_issues = []
 
         try:
             for listing, info in db.pending_price_drops():
@@ -405,6 +457,7 @@ async def run_search_cycle():
                 platform_stats[name] = status
                 if status == "ERROR" or result.get("error"):
                     sources_error += 1
+                    source_issues.append(source_problem(name, result.get("error") or "eroare / timeout"))
                 elif result["raw"] == 0:
                     sources_zero += 1
                 elif result["raw"] > 0:
@@ -442,7 +495,9 @@ async def run_search_cycle():
             if not total_sent and not all_drops:
                 log.info("\n✅ No new listings found this cycle.")
                 try:
-                    await notifier.send_no_changes(sources_ok, sources_error, sources_zero)
+                    pending_count = db.conn.execute("SELECT count(*) FROM pending_alerts").fetchone()[0]
+                    await notifier.send_no_changes(sources_ok, sources_error, sources_zero,
+                                                   error_details=source_issues, pending=pending_count)
                 except Exception as e:
                     log.error(f"Telegram no-changes send error: {e}")
         finally:
@@ -632,11 +687,15 @@ async def main():
 
     hours = _parse_hours(Config.SEARCH_HOURS)
     scheduler = AsyncIOScheduler()
+    scheduler.add_job(notification_tick, "interval", minutes=1, id="telegram-notifications",
+                      max_instances=1, coalesce=True, misfire_grace_time=60)
     # misfire_grace_time: if the loop is busy at 12:00:00 the run must still happen
     # (default grace is 1 s, which silently DROPS the only run of the day).
     job = scheduler.add_job(run_search_cycle, "cron", hour=hours, minute=0, timezone=Config.SEARCH_TIMEZONE,
                             misfire_grace_time=3600, coalesce=True, max_instances=1)
     scheduler.start()
+    log.info("🔔 Telegram reminders: first after %smin, then every %smin until Am văzut; delivery retries every minute",
+             Config.ALERT_FIRST_REMINDER_MINUTES, Config.ALERT_REPEAT_MINUTES)
     log.info(f"⏰ Scheduled daily at {hours}:00 {Config.SEARCH_TIMEZONE} "
              f"(next run {job.next_run_time:%Y-%m-%d %H:%M %Z}); "
              f"Google {Config.GOOGLE_QUERIES_PER_RUN}/run (≤{Config.GOOGLE_DAILY_QUOTA}/day), "

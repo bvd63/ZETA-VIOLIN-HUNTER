@@ -67,12 +67,12 @@ class TelegramCommands:
                 await client.post(f"https://api.telegram.org/bot{self.token}/deleteWebhook",
                                   json={"drop_pending_updates": False})
             except Exception as e:
-                log.debug(f"deleteWebhook failed: {e}")
+                log.debug("deleteWebhook failed (%s)", type(e).__name__)
             log.info("💬 Telegram commands active: /cauta /status /active /help")
             while True:
                 try:
                     resp = await client.get(url, params={"timeout": 50, "offset": self.offset,
-                                                         "allowed_updates": '["message"]'})
+                                                         "allowed_updates": '["message","callback_query"]'})
                     if resp.status_code == 409:
                         # Usually the previous container still polling during a deploy overlap.
                         log.info("Telegram getUpdates 409 (previous container still polling) — retrying in 60s")
@@ -84,12 +84,41 @@ class TelegramCommands:
                         continue
                     updates = resp.json().get("result", [])
                     for update in updates:
+                        await self._dispatch(update)
                         self.offset = max(self.offset, int(update["update_id"]) + 1)
                         self._save_offset()
-                        await self._handle(update.get("message") or {})
                 except Exception as e:
-                    log.warning(f"Telegram polling error: {e}")
+                    log.warning("Telegram polling error (%s)", type(e).__name__)
                     await asyncio.sleep(15)
+
+    async def _dispatch(self, update: dict) -> None:
+        if update.get("callback_query"):
+            await self._handle_callback(update["callback_query"])
+        else:
+            await self._handle(update.get("message") or {})
+
+    async def _handle_callback(self, callback: dict) -> None:
+        import re
+        from alert_receipts import AlertReceipts
+        message = callback.get("message") or {}
+        chat_id = str((message.get("chat") or {}).get("id", ""))
+        data = callback.get("data", "")
+        if chat_id != self.chat_id or not re.fullmatch(r"seen:[a-f0-9]{24}", data):
+            return
+        receipts = AlertReceipts()
+        try:
+            acknowledged = receipts.acknowledge(data[5:], chat_id)
+        finally:
+            receipts.close()
+        await self.notifier._post("answerCallbackQuery", {
+            "callback_query_id": callback.get("id"),
+            "text": "Confirmat. Am oprit reamintirile pentru această vioară." if acknowledged else "Alerta nu mai este disponibilă.",
+        })
+        if acknowledged:
+            await self.notifier._post("editMessageReplyMarkup", {
+                "message_id": message.get("message_id"),
+                "reply_markup": {"inline_keyboard": [[{"text": "✅ Confirmată — Am văzut", "callback_data": data}]]},
+            })
 
     async def _handle(self, message: dict) -> None:
         chat_id = str((message.get("chat") or {}).get("id", ""))
@@ -121,6 +150,7 @@ class TelegramCommands:
                 "/status — starea surselor și ultimul ciclu\n"
                 "/active — viorile Zeta văzute live în ultimele 3 zile\n"
                 "/verifica LINK — verifică un anunț și istoricul notificării\n"
+                "🔔 Alertele cu viori se repetă după 10 min, apoi la 30 min, până apeși «Am văzut».\n"
                 "/help — acest mesaj"
             )
 

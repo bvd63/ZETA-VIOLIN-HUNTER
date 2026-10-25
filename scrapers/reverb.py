@@ -81,7 +81,7 @@ class ReverbScraper(BaseScraper):
                             condition = (item.get("condition") or {}).get("display_name", "")
                             location = self._location(item)
                             description = TAG_RX.sub(" ", item.get("description", "") or "")
-                            description = re.sub(r"\s+", " ", description).strip()[:300]
+                            description = re.sub(r"\s+", " ", description).strip()
 
                             image_url = ""
                             photos = item.get("photos") or []

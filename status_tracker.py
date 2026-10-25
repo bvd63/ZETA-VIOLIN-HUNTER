@@ -186,6 +186,17 @@ class StatusTracker:
             from config import Config
             status["schedule"] = {"hours": Config.SEARCH_HOURS, "timezone": Config.SEARCH_TIMEZONE}
             status["budgets"] = {"google_per_day": min(96, Config.GOOGLE_DAILY_QUOTA), "brave_per_month": Config.BRAVE_MONTHLY_QUOTA}
+            from alert_receipts import AlertReceipts
+            receipts = AlertReceipts()
+            try:
+                status["telegram"] = {
+                    "unacknowledged_alerts": receipts.pending_count(Config.TELEGRAM_CHAT_ID),
+                    "first_reminder_minutes": Config.ALERT_FIRST_REMINDER_MINUTES,
+                    "repeat_minutes": Config.ALERT_REPEAT_MINUTES,
+                    "delivery_retry_seconds": 60,
+                }
+            finally:
+                receipts.close()
 
             row = self.conn.execute("""
                 SELECT COUNT(*), SUM(total_raw), SUM(total_sent) FROM cycle_summary

@@ -10,6 +10,7 @@ def main():
         ("tests.test_apify", []),
         ("tests.test_craigslist", []),
         ("tests.test_reliability", []),
+        ("tests.test_notifications", []),
         ("apify_preview", ["--check"]),
     ):
         print(f"Pre-deploy check: {module}", flush=True)

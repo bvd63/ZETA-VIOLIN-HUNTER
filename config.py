@@ -19,6 +19,8 @@ class Config:
     SEND_NO_CHANGES = _bool("SEND_NO_CHANGES", "true")
     # Attach the listing photo (sendPhoto) when the source provides one
     SEND_PHOTOS = _bool("SEND_PHOTOS", "true")
+    ALERT_FIRST_REMINDER_MINUTES = max(1, int(os.getenv("ALERT_FIRST_REMINDER_MINUTES", "10")))
+    ALERT_REPEAT_MINUTES = max(5, int(os.getenv("ALERT_REPEAT_MINUTES", "30")))
 
     # --- HTTP server ---
     PORT = int(os.getenv("PORT", "8080"))
