@@ -25,6 +25,7 @@ from config import Config
 from database import connect
 from keywords import WEB_KEYWORDS, BASE_WEB_KEYWORDS, MODEL_CODES
 from search_budget import reserve_request
+from source_policy import is_disabled_source
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ SITE_GROUPS = [
     "site:tradera.com OR site:sprzedajemy.pl OR site:allegro.pl OR site:bazos.cz "
     "OR site:sbazar.cz OR site:aukro.cz OR site:bazos.sk OR site:gumtree.pl",
     # Japan / Asia
-    "site:auctions.yahoo.co.jp OR site:paypayfleamarket.yahoo.co.jp OR site:rakuten.co.jp OR site:jmty.jp "
+    "site:rakuten.co.jp OR site:jmty.jp "
     "OR site:digimart.net OR site:j-guitar.com OR site:carousell.sg OR site:bunjang.co.kr",
     # Forums & communities
     "site:maestronet.com OR site:violinist.com OR site:reddit.com OR site:thegearpage.net "
@@ -253,7 +254,7 @@ class GoogleScraper(BaseScraper):
                     for item in items:
                         url = item.get("link", "")
                         unique_id = self._make_id("google", url)
-                        if not url or unique_id in seen_ids:
+                        if not url or is_disabled_source(url) or unique_id in seen_ids:
                             continue
                         seen_ids.add(unique_id)
 

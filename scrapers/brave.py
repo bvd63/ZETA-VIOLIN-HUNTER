@@ -17,6 +17,7 @@ from scrapers.google import GLOBAL_QUERIES, MATRIX_KEYWORDS, SITE_GROUPS, PRIORI
 from config import Config
 from database import connect
 from search_budget import reserve_request
+from source_policy import is_disabled_source
 
 log = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class BraveScraper(BaseScraper):
                     for item in items:
                         url = item.get("url", "")
                         unique_id = self._make_id("brave", url)
-                        if not url or unique_id in seen_ids:
+                        if not url or is_disabled_source(url) or unique_id in seen_ids:
                             continue
                         seen_ids.add(unique_id)
 

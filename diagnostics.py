@@ -16,9 +16,6 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 # (label, url, text that marks a block/challenge page)
 PROBES = [
-    ("Yahoo Auctions JP (web)", "https://auctions.yahoo.co.jp/search/search?p=zeta%20violin", "EEA"),
-    ("Buyee (Yahoo JP proxy)", "https://buyee.jp/item/search/query/zeta%20violin", "Forbidden"),
-    ("ZenMarket", "https://zenmarket.jp/en/yahoo.aspx?q=zeta+violin", "Just a moment"),
     ("OfferUp (US)", "https://offerup.com/search?q=zeta%20violin", "Geolocation"),
     ("Mercari US", "https://www.mercari.com/search/?keyword=zeta%20violin", "Just a moment"),
     ("Etsy", "https://www.etsy.com/search?q=zeta%20electric%20violin", ""),

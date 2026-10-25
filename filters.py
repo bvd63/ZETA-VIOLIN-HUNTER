@@ -17,6 +17,7 @@ import re
 import unicodedata
 from urllib.parse import urlsplit
 from keywords import MODEL_CODES, MODEL_NAMES, ARTISTS, JLP_RX, normalize_identity_text
+from source_policy import DISABLED_SCRAPERS, is_disabled_source
 
 
 def _rx(terms: list) -> "re.Pattern":
@@ -473,6 +474,8 @@ def classify(listing: dict) -> str:
     """Return "" if the listing should be alerted, otherwise a short reason
     (used for per-reason counters in main.py)."""
     from config import Config  # local import keeps filters importable in tests
+    if listing.get("platform") in DISABLED_SCRAPERS or is_disabled_source(str(listing.get("url", ""))):
+        return "disabled_source"
     title, desc = _text(listing)
     if listing.get("source") == "search" and is_editorial_url(str(listing.get("url", ""))):
         return "non_sale"

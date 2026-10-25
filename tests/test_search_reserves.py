@@ -45,6 +45,15 @@ class SearchReservesTests(unittest.TestCase):
         self.assertEqual(used("x", now=100001), 2)
         self.assertTrue(reserve("x", 2, 3, 3, now=100000 + 32 * 86400))
 
+    def test_tavily_and_exa_ignore_yahoo_hits_but_keep_other_japanese_sources(self):
+        for scraper in (TavilyScraper(), ExaScraper()):
+            def handler(request):
+                return httpx.Response(200, json={'results':[
+                    {'title':'Zeta violin', 'url':'https://auctions.yahoo.co.jp/jp/auction/a123'},
+                    {'title':'Zeta violin', 'url':'https://jp.mercari.com/item/m123'}]})
+            found = self.run_scraper(scraper, handler)
+            self.assertEqual([x['url'] for x in found], ['https://jp.mercari.com/item/m123'])
+
     def test_daily_and_rolling_limits_are_independent(self):
         self.assertTrue(reserve("x", 2, 10, 2, now=100000))
         self.assertFalse(reserve("x", 1, 10, 2, now=100001))

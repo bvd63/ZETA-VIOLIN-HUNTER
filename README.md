@@ -12,7 +12,7 @@ sunt în [CLAUDE.md](CLAUDE.md). Acest README e doar harta.
 
 | Direct (API sau HTML) | Prin Google / Brave / Tavily / Exa |
 |---|---|
-| Reverb, eBay (16 piețe), Craigslist (468 zone US+CA), ShopGoodwill, HiBid, GovDeals, AllSurplus, Kijiji, Marktplaats + 2dehands, Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX PL/PT/BG/UA, Subito, Mercari JP, Yahoo Auctions JP, dealeri second-hand (Electric Violin Shop, StringWorks, Guitar Chimp) | OfferUp, Mercari US, Etsy, Facebook Marketplace, Guitar Center, Gardiner Houlgate, Tarisio, Heritage Auctions, PublicSurplus, Catawiki, Proxibid, LiveAuctioneers, Kleinanzeigen, Leboncoin, Wallapop, Allegro, forumuri și restul |
+| Reverb, eBay (16 piețe), Craigslist (468 zone US+CA), ShopGoodwill, HiBid, GovDeals, AllSurplus, Kijiji, Marktplaats + 2dehands, Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX PL/PT/BG/UA, Subito, Mercari JP, dealeri second-hand (Electric Violin Shop, StringWorks, Guitar Chimp) | OfferUp, Mercari US, Etsy, Facebook Marketplace, Guitar Center, Gardiner Houlgate, Tarisio, Heritage Auctions, PublicSurplus, Catawiki, Proxibid, LiveAuctioneers, Kleinanzeigen, Leboncoin, Wallapop, Allegro, forumuri și restul |
 
 Guitar Center și Facebook Marketplace pornesc automat când există `US_PROXY_URL`.
 
@@ -130,10 +130,10 @@ surselor rulate din ciclurile noi exclude modulele omise de guard/configurație.
 Detaliile Craigslist includ candidații verificați, expirați, neverificați și
 amânați de plafon. Un răspuns HTTP reușit nu confirmă că există o vioară eligibilă.
 
-Yahoo poate răspunde cu 404 pentru o pagină validă de căutare fără potriviri exacte.
-Botul verifică titlul, cuvântul căutat și mesajul japonez înainte să o trateze ca
-o căutare reușită; citește și eventualele rezultate parțiale. Paginile lipsă,
-blocările și rezultatele care rămân neîncărcate în JavaScript sunt raportate.
+Yahoo Japonia a fost eliminat la cererea proprietarului: colectorul direct, țintele
+din motoarele de căutare și verificările de pornire. Linkurile Yahoo Japonia
+revenite accidental în rezultate globale nu sunt verificate sau trimise.
+Celelalte surse japoneze rămân active.
 Magazinele Shopify păstrează toate căutările și descrierile complete din
 colecții sau predictive search. Cererile către fiecare magazin sunt distanțate
 cu 1,5 secunde, iar o eroare la un cuvânt nu oprește celelalte căutări.

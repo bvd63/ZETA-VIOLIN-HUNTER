@@ -7,6 +7,7 @@ import hashlib
 import json
 import time
 from database import canonical_url, connect
+from source_policy import is_disabled_source
 
 
 class DiscoveryQueue:
@@ -30,6 +31,8 @@ class DiscoveryQueue:
         now = time.time()
         rows = []
         for item in items:
+            if is_disabled_source(item["url"]):
+                continue
             key = canonical_url(item["url"])
             fingerprint = hashlib.sha256(json.dumps(
                 [item.get(k) for k in ("title", "description", "price", "auction_end", "assetAuctionEndDateUtc")],
@@ -48,6 +51,13 @@ class DiscoveryQueue:
         now = time.time() if now is None else now
         self.conn.execute("BEGIN IMMEDIATE")
         try:
+            # Retire previously queued owner-excluded URLs without deleting
+            # their history or consuming the detail slots of remaining sources.
+            disabled = [key for (key,) in self.conn.execute(
+                "SELECT key FROM discovery_queue WHERE namespace=? AND next_attempt<=?",
+                (self.namespace, now)) if is_disabled_source(key)]
+            self.conn.executemany("UPDATE discovery_queue SET next_attempt=? WHERE namespace=? AND key=?",
+                                  [(253402300799, self.namespace, key) for key in disabled])
             oldest = max(1, limit // 4) if limit > 0 else 0
             rows = self.conn.execute("""SELECT key,payload FROM discovery_queue
                 WHERE namespace=? AND next_attempt<=? ORDER BY next_attempt,created LIMIT ?""",

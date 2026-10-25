@@ -21,6 +21,10 @@ standalone violas, cellos, basses, mandolins — violins only; explicit mixed au
 
 ## 2. CURRENT STATE (2026-10-05 code audit; historical notes follow)
 
+### October 25 — owner explicitly removed Yahoo Japan (supersedes preservation notes)
+- Owner requests Yahoo Japan be removed, not repaired. Removed its direct collector, Yahoo/PayPay Fleamarket site targets and Yahoo-specific startup/proxy probes. Shared source policy rejects Yahoo Japan URLs and known Yahoo auction proxy routes before detail HTTP and delivery, including previously queued hits. Queue history is retained but excluded work cannot consume other sources' detail slots.
+- Historical Yahoo stats remain in SQLite but no longer appear as active source coverage. All other sources, Japanese vocabulary, model/priority aliases, budgets and 10:00/22:00 Europe/Bucharest schedule remain. The coverage contract has exactly this explicit source/domain exception; do not restore Yahoo without a new owner instruction.
+
 ### October 25 continuation: Willhaben/Gumtree repairs and redundant discovery
 - Resumed after completing the requested US-source research first. Reviewed and applied the previously parked retry/extra-Tavily changes; the parked patch is a historical artifact, not an outstanding implementation.
 - Willhaben's numeric category 2001 was PlayStation games despite its misleading instrument slug. The verified music category is `musikinstrumente-noten-6540`. All eight historical German keywords now search globally, plus two category-scoped Zeta/Strados queries. No previous keyword was removed. Missing/invalid Next search data is an access/layout failure, not healthy zero inventory.

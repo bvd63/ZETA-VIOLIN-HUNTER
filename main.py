@@ -45,7 +45,6 @@ from scrapers.olx import OlxScraper  # noqa: E402
 from scrapers.subito import SubitoScraper  # noqa: E402
 from scrapers.shopify_dealers import ShopifyDealersScraper  # noqa: E402
 from scrapers.mercari_jp import MercariJPScraper  # noqa: E402
-from scrapers.yahoo_auctions_jp import YahooAuctionsJPScraper  # noqa: E402
 from scrapers.guitar_center import GuitarCenterScraper  # noqa: E402
 from scrapers.reddit_scraper import RedditScraper  # noqa: E402
 from scrapers.facebook_marketplace import FacebookMarketplaceScraper  # noqa: E402
@@ -110,7 +109,6 @@ def build_scrapers() -> list:
         SubitoScraper(),
         ShopifyDealersScraper(),
         MercariJPScraper(),
-        YahooAuctionsJPScraper(),       # runs only from non-EEA egress (Railway = Singapore)
         GuitarCenterScraper(),          # runs only with US egress
         ApifyFacebookScraper() if Config.APIFY_TOKEN else FacebookMarketplaceScraper(),
         RedditScraper(),
@@ -453,8 +451,6 @@ def source_problem(name: str, error: str) -> str:
         return "Google: API refuză accesul proiectului (403)."
     if name == "Willhaben" and "403" in error:
         return "Willhaben: site-ul blochează accesul serverului (403)."
-    if name == "Yahoo Auctions JP" and "JavaScript" in error:
-        return "Yahoo Japonia: unele pagini nu furnizează rezultatele fără randare JavaScript."
     return f"{name}: {error[:160]}"
 
 
@@ -471,7 +467,7 @@ async def run_search_cycle():
         log.info("=" * 80)
 
         if not Config.EGRESS_COUNTRY:
-            await detect_egress()  # retry — Yahoo JP depends on it
+            await detect_egress()  # retry — remaining regional collectors use it
         await refresh_rates()
         db = Database()
         notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)

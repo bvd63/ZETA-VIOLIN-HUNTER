@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 from filters import is_editorial_url, classify
 from liveness import looks_dead, UA, REVERB_ITEM_RX
+from source_policy import is_disabled_source
 
 GOVDEALS_RX = re.compile(r"^https://(?:(?:www|prod-seo)\.)?(?:govdeals|allsurplus)\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?asset/(\d+)/(\d+)(?:[/?#]|$)", re.I)
 ITEM_PATH = re.compile(r"/(?:item|items|itm|lot|lots|asset|listing|listings|ad|offer|offers|annuncio|anzeige|jp/auction|auction-lot)/|/l/\d+[-/]|/sale/\d+/\d+/|/lot-[\w-]+|/marketplace/item/|/d/[^/]+/\d+\.html", re.I)
@@ -187,6 +188,8 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
 async def verify_offer(listing: dict, client) -> tuple:
     listing.pop("_primary_content_checked", None)
     url = listing.get("url", "")
+    if is_disabled_source(url):
+        return "non_sale", "sursă eliminată la cererea proprietarului"
     if not public_url(url):
         return "non_sale", "URL public invalid"
     if is_editorial_url(url):
@@ -241,6 +244,8 @@ async def verify_offer(listing: dict, client) -> tuple:
     try:
         current = url
         for _ in range(5):
+            if is_disabled_source(current):
+                return "non_sale", "redirecționare către o sursă eliminată"
             if not public_url(current):
                 return "non_sale", "redirect către URL nepublic"
             if current != url and not await public_dns(current):

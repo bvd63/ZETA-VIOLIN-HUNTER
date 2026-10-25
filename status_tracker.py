@@ -7,6 +7,7 @@ import logging
 import json
 from datetime import datetime
 from database import connect
+from source_policy import DISABLED_SCRAPERS
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,8 @@ class StatusTracker:
         try:
             names = [r[0] for r in self.conn.execute("SELECT DISTINCT scraper FROM scraper_stats")]
             for name in names:
+                if name in DISABLED_SCRAPERS:
+                    continue
                 query = """
                     SELECT raw_count, error, details FROM scraper_stats
                     WHERE scraper = ? ORDER BY id DESC
@@ -169,6 +172,8 @@ class StatusTracker:
             streaks = self.get_streaks()
             scrapers = {}
             for row in cur.fetchall():
+                if row[0] in DISABLED_SCRAPERS:
+                    continue  # retained historical rows are not active coverage
                 scrapers[row[0]] = {
                     "raw": row[1],
                     "new": row[2],

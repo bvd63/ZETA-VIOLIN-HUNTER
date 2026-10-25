@@ -16,6 +16,7 @@ from provider_state import read, write, reserve, claim_window
 from scrapers.base import BaseScraper
 from scrapers.google import SITE_GROUPS, AUCTION_GROUPS, US_MARKET_GROUPS
 from keywords import WEB_KEYWORDS, ADDITIONAL_WEB_KEYWORDS, MODEL_CODES, MODEL_NAMES
+from source_policy import is_disabled_source
 
 log = logging.getLogger(__name__)
 GROUPS = US_MARKET_GROUPS + AUCTION_GROUPS + SITE_GROUPS
@@ -103,7 +104,7 @@ class ReserveSearch(BaseScraper):
                         url, title = item.get("url"), item.get("title")
                         if not isinstance(url, str) or not isinstance(title, str):
                             continue
-                        if urlsplit(url).scheme not in ("http", "https") or url in seen:
+                        if urlsplit(url).scheme not in ("http", "https") or is_disabled_source(url) or url in seen:
                             continue
                         seen.add(url)
                         content = item.get("content") or item.get("text") or "\n".join(
