@@ -66,6 +66,15 @@ class NotificationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("burst", text)
         self.assertNotIn("Jean-Luc Ponty signature", text)
 
+    async def test_strados_sunburst_is_delivered_without_owner_priority(self):
+        self.bot._request = AsyncMock(return_value={"ok":True,"result":{"message_id":47}})
+        item = {**self.listing,"title":"Zeta Strados violin","finish":"Sunburst"}
+        self.assertEqual(await self.bot.send_listings([item]),[item])
+        payload=self.bot._request.await_args.args[1]
+        self.assertNotIn("PRIORITATEA TA",payload["text"])
+        self.assertIn("interes redus",payload["text"])
+        self.assertFalse(payload["disable_notification"])
+
     async def test_photo_failure_falls_back_to_text_with_same_confirmation(self):
         self.bot._request = AsyncMock(side_effect=[{}, {"ok": True, "result": {"message_id": 45}}])
         listing = {**self.listing, "image_url": "https://example.com/violin.jpg"}

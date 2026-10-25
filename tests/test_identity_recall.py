@@ -75,6 +75,8 @@ class IdentityRecallTests(unittest.TestCase):
                          ["finisaj sunburst / burst menționat"])
         self.assertEqual(classify(listing(title="Zeta JV5 1997 - Black")), "")
         self.assertEqual(preference_matches(listing(title="Zeta JV5 1997 - Black")), [])
+        self.assertEqual(classify(listing(title="Zeta Strados violin",finish="Sunburst")), "")
+        self.assertEqual(preference_matches(listing(title="Zeta Strados violin",finish="Sunburst")), [])
 
     def test_primary_product_metadata_fills_missing_title_words(self) -> None:
         self.assertEqual(classify(listing(brand="Zeta", categories=["Band and Orchestra / Violins"])), "")

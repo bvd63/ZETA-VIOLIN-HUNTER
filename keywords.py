@@ -25,8 +25,16 @@ def normalize_identity_text(text: str) -> str:
     return SCRIPT_BOUNDARY_RX.sub(" ", unicodedata.normalize("NFKC", text))
 
 
+def is_low_interest(listing: dict) -> bool:
+    """Owner deprioritizes Strados. This never rejects a listing or guesses photos."""
+    primary = normalize_identity_text(" ".join(str(listing.get(k) or "") for k in ("title", "model")))
+    return bool(re.search(r"\bstrados\b", primary, re.I))
+
+
 def preference_matches(listing: dict) -> list:
     """Owner's priorities, never an identity/eligibility gate or authenticity claim."""
+    if is_low_interest(listing):
+        return []
     text = normalize_identity_text(" ".join(str(listing.get(k) or "") for k in
                                           ("title", "description", "model", "finish")))
     matches = []

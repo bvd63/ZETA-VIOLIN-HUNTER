@@ -11,7 +11,7 @@ import html
 from urllib.parse import urlsplit, urlunsplit
 from datetime import datetime
 from config import Config
-from keywords import preference_matches
+from keywords import preference_matches, is_low_interest
 
 log = logging.getLogger(__name__)
 
@@ -214,6 +214,8 @@ class TelegramNotifier:
         preferences = preference_matches(listing)
         if preferences:
             lines.append(f"🎯 <b>PRIORITATEA TA:</b> {html.escape('; '.join(preferences))}")
+        elif is_low_interest(listing):
+            lines.append("ℹ️ Strados — model cu interes redus pentru tine.")
         if listing.get("auction") or "bid)" in price.lower():
             lines.append("🔨 Licitație — suma afișată poate fi oferta curentă, fără comisioane.")
         if listing.get("auction_end"):
