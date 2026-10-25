@@ -29,16 +29,50 @@ def next_page(result):
         'props': {'pageProps': {'searchResult': result}}}) + '</script>'
 
 
-def run(scraper, handler, browser=(0, "")):
+def run(scraper, handler, browser=(0, ""), will_result=None):
     def client(**kwargs):
         return BaseScraper.make_client(scraper, transport=httpx.MockTransport(handler), **kwargs)
     with patch.object(scraper, 'make_client', client), \
          patch('scrapers.gumtree.PublicSearchBrowser.fetch', AsyncMock(return_value=browser)), \
+         patch('scrapers.willhaben.fresh_willhaben_search', AsyncMock(return_value=will_result or {})), \
          patch('asyncio.sleep',AsyncMock()):
         return asyncio.run(scraper.search())
 
 
 class MarketplaceParserTests(unittest.TestCase):
+    def test_willhaben_live_extraction_keeps_real_relative_item_links(self):
+        violin='/iad/kaufen-und-verkaufen/d/zeta-geige-violin-5-strings-zehr-gute-zustand-1363838209/'
+        keyboard='/iad/kaufen-und-verkaufen/d/alesis-q49-midi-keyboard-914382744/'
+        payload={'text':'Musikinstrumente / Noten | willhaben\n\n2 Anzeigen in Musikinstrumente / Noten\nZeta Geige Violin',
+                 'extras':{'links':[keyboard]*4+[violin]*4+['https://evil.example'+violin]}}
+        adverts,complete=WillhabenScraper._extract_exa(payload)
+        self.assertTrue(complete)
+        self.assertEqual(len(adverts),2)
+        self.assertEqual(adverts[-1]['id'],'1363838209')
+        self.assertIn('zeta geige violin',WillhabenScraper._attrs(adverts[-1])['HEADING'])
+        scraper=WillhabenScraper()
+        with patch('scrapers.willhaben.search_plan',return_value=[('zeta',CATEGORY_URL)]):
+            found=run(scraper,lambda r:httpx.Response(403),will_result=payload)
+        self.assertEqual(len(found),1)
+        self.assertEqual(classify(found[0]),'')
+        self.assertEqual(found[0]['url'],'https://www.willhaben.at'+violin)
+        self.assertEqual(scraper.health_error(),'')
+        self.assertEqual(scraper.requests_recovered,1)
+
+    def test_willhaben_partial_extraction_is_not_claimed_as_complete(self):
+        payload={'text':'5.900 Anzeigen\nZeta Geige', 'extras':{'links':[
+            '/iad/kaufen-und-verkaufen/d/zeta-geige-1363838209/']}}
+        scraper=WillhabenScraper()
+        with patch('scrapers.willhaben.search_plan',return_value=[('zeta',SEARCH_URL)]):
+            found=run(scraper,lambda r:httpx.Response(403),will_result=payload)
+        self.assertEqual(len(found),1)
+        self.assertIn('partial',scraper.health_error())
+        for result in ({'text':'Access denied'}, {'text':'2 Anzeigen','extras':{'links':[]}}):
+            with self.assertRaises(ValueError): WillhabenScraper._extract_exa(result)
+        self.assertEqual(WillhabenScraper._extract_exa({'text':'0 Anzeigen'}),([],True))
+        self.assertTrue(WillhabenScraper._extract_exa({'text':'1 Anzeige',
+            'extras':{'links':payload['extras']['links']}})[1])
+
     def test_gumtree_browser_recovers_exact_query_without_false_access_alarm(self):
         scraper=GumtreeScraper()
         calls=[]

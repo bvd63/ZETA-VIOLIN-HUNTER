@@ -11,9 +11,13 @@ from keywords import market_queries
 
 import json
 import logging
+import re
+import httpx
+from urllib.parse import urlsplit, urljoin, unquote
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
 from filters import has_zeta_signal
+from primary_page_reserve import fresh_willhaben_search
 
 log = logging.getLogger(__name__)
 
@@ -42,15 +46,33 @@ class WillhabenScraper(BaseScraper):
         async with self.make_client(headers=headers) as client:
             for kw, search_url in search_plan():
                 try:
+                    failures_before=len(self.failures)
                     resp = await client.get(search_url, params={"keyword": kw})
+                    adverts=None
+                    parse_error=None
                     if resp.status_code != 200:
                         log.warning(f"Willhaben '{kw}' HTTP {resp.status_code}")
-                        continue
-                    try:
-                        adverts = self._extract(resp.text)
-                    except ValueError as exc:
-                        self.content_failures.append(str(exc))
-                        log.warning("Willhaben '%s': %s", kw, exc)
+                    else:
+                        try:
+                            adverts = self._extract(resp.text)
+                        except ValueError as exc:
+                            parse_error=str(exc)
+                    if adverts is None:
+                        recovered=await fresh_willhaben_search(str(httpx.URL(search_url,params={'keyword':kw})),client)
+                        try:
+                            adverts,complete=self._extract_exa(recovered)
+                            if complete:
+                                if resp.status_code != 200:
+                                    self.requests_recovered+=1
+                                del self.failures[failures_before:]
+                            else:
+                                self.content_failures.append('Willhaben: Exa recovered partial result links')
+                            log.info("Willhaben '%s': Exa live recovered %s item links (complete=%s)",kw,len(adverts),complete)
+                        except ValueError as exc:
+                            if parse_error:
+                                self.content_failures.append(parse_error)
+                            self.content_failures.append(str(exc))
+                    if adverts is None:
                         continue
                     self.fetched += len(adverts)
 
@@ -103,6 +125,38 @@ class WillhabenScraper(BaseScraper):
 
         log.info(f"Willhaben: {len(results)} listings found")
         return results
+
+    @staticmethod
+    def _extract_exa(result: dict) -> tuple:
+        text=result.get('text','')
+        # Exa plain text retains the actual result heading; do not mistake an
+        # empty challenge/error shell or missing links for zero advertisements.
+        count=re.search(r'(?:^|\n)\s*(?:#+\s*)?([\d.]+)\s+Anzeige(?:n)?\b',text,re.I)
+        if not count:
+            raise ValueError('Willhaben: live search result count not verified')
+        total=int(count.group(1).replace('.',''))
+        adverts=[];seen=set()
+        for url in (result.get('extras') or {}).get('links',[]):
+            if not isinstance(url,str):
+                continue
+            parts=urlsplit(urljoin('https://www.willhaben.at',url))
+            if parts.scheme!='https' or (parts.hostname or '').lower() not in ('willhaben.at','www.willhaben.at'):
+                continue
+            match=re.fullmatch(r'/iad/kaufen-und-verkaufen/d/(.+)-(\d+)/?',parts.path)
+            if not match or match[2] in seen:
+                continue
+            seen.add(match[2])
+            # Slug supplies preliminary identity only. Primary item description
+            # is still checked at delivery; shared search text never contaminates
+            # another advert's identity. Preserve sparse genuine candidates.
+            title=unquote(match[1]).replace('-',' ')
+            attrs={'HEADING':title,'SEO_URL':parts.path.removeprefix('/iad/'),
+                   'BODY_DYN':'','PRICE_FOR_DISPLAY':'N/A'}
+            adverts.append({'id':match[2],'attributes':{'attribute':[
+                {'name':k,'values':[v]} for k,v in attrs.items()]}})
+        if total>0 and not adverts:
+            raise ValueError('Willhaben: results exist but live item links missing')
+        return adverts,len(adverts)==min(total,30)
 
     @staticmethod
     def _extract(html: str) -> list:

@@ -297,6 +297,32 @@ class RegressionTests(unittest.TestCase):
                 post.assert_not_awaited()
         asyncio.run(run())
 
+    def test_willhaben_exa_query_is_exact_live_and_budgeted(self):
+        from primary_page_reserve import fresh_willhaben_search
+        url='https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=Zeta+Jazz+Fusion'
+        async def run():
+            for source in ('cached','crawled'):
+                async def post(*args,**kwargs):
+                    payload=kwargs['json']
+                    self.assertEqual(payload['urls'],[url])
+                    self.assertEqual(payload['maxAgeHours'],0)
+                    self.assertEqual(payload['extras'],{'links':300})
+                    return httpx.Response(200,json={'statuses':[{'id':url,'status':'success','source':source}],
+                        'results':[{'url':url,'text':'0 Anzeigen','extras':{'links':[]}}]})
+                with patch.object(Config,'EXA_API_KEY','fixture'), \
+                     patch('primary_page_reserve.reserve',return_value=True) as reserved:
+                    async with httpx.AsyncClient() as client:
+                        with patch.object(client,'post',post): result=await fresh_willhaben_search(url,client)
+                    self.assertEqual(bool(result),source=='crawled')
+                    self.assertEqual(reserved.call_count,2)
+            with patch.object(Config,'EXA_API_KEY','fixture'), \
+                 patch('primary_page_reserve.reserve',return_value=False), \
+                 patch('httpx.AsyncClient.post',AsyncMock()) as post:
+                async with httpx.AsyncClient() as client:
+                    self.assertEqual(await fresh_willhaben_search(url,client),{})
+                post.assert_not_awaited()
+        asyncio.run(run())
+
     def test_article_with_affiliate_product_is_not_offer(self):
         page = '<main><h1>Zeta violin</h1><script type="application/ld+json">' + json.dumps([
             {'@type':'Article','headline':'Zeta violin'},

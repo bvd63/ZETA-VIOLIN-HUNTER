@@ -13,7 +13,32 @@ log = logging.getLogger(__name__)
 
 def supported(url: str) -> bool:
     host = (urlsplit(url).hostname or '').lower().removeprefix('www.')
-    return host in ('offerup.com', 'invaluable.com', 'auctions.gardinerhoulgate.co.uk', 'ha.com') or host.endswith('.ha.com')
+    return host in ('offerup.com', 'invaluable.com', 'auctions.gardinerhoulgate.co.uk', 'ha.com', 'willhaben.at') or host.endswith('.ha.com')
+
+
+async def fresh_willhaben_search(url: str, client) -> dict:
+    """Exact public Willhaben query, live text AND actual links, never guessed URLs."""
+    parts = urlsplit(url)
+    if ((parts.hostname or '').lower() not in ('willhaben.at','www.willhaben.at')
+            or not parts.path.startswith('/iad/kaufen-und-verkaufen/marktplatz') or not Config.EXA_API_KEY):
+        return {}
+    if not reserve('exa_will_search',1,620,20):
+        return {}
+    if not reserve('exa',1000,int(Config.EXA_ROLLING_BUDGET_USD*1000000),250000):
+        return {}
+    try:
+        response=await client.post('https://api.exa.ai/contents',headers={'x-api-key':Config.EXA_API_KEY},
+            json={'urls':[url],'text':True,'extras':{'links':300},
+                  'maxAgeHours':0,'livecrawlTimeout':20000},timeout=30)
+        data=response.json()
+        status=next((s for s in data.get('statuses',[]) if canonical_url(str(s.get('id','')))==canonical_url(url)),{})
+        result=next((r for r in data.get('results',[]) if canonical_url(str(r.get('url','')))==canonical_url(url)),{})
+        if (response.status_code==200 and status.get('status')=='success'
+                and status.get('source')=='crawled' and isinstance(result.get('text'),str)):
+            return result
+    except Exception as exc:
+        log.warning('Willhaben live extraction unavailable (%s)',type(exc).__name__)
+    return {}
 
 
 async def fresh_primary_page(url: str, client) -> str:

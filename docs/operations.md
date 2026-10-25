@@ -15,7 +15,7 @@ un fragment web fără identitate suficientă rămâne în coada persistentă.
 Verificările întrerupte rămân pentru reluare; numai livrarea confirmată marchează
 anunțul drept trimis. Verificarea paginii nu garantează inventarul real al vânzătorului.
 
-Pentru paginile blocate Heritage, OfferUp, Gardiner Houlgate și Invaluable, Exa
+Pentru paginile blocate Heritage, OfferUp, Gardiner Houlgate, Invaluable și Willhaben, Exa
 Contents încearcă o extracție live a aceleiași pagini: cel mult20/zi,620/31 zile,
 maximum0,620USD/31 zile, în plafonul Exa existent. Sunt acceptate numai rezultate
 cu URL identic și status success/source crawled. Se păstrează15 minute pentru
@@ -25,6 +25,14 @@ cache păstrează disponibilitatea incertă. Cele șase căutări Exa/ciclu răm
 Gumtree reîncearcă aceeași interogare prin Chromium anonim când HTTP simplu
 întoarce247/403 sau un corp nerecunoscut. Numai anunțuri parsate ori pagina
 explicită0ads recuperează starea sursei. Nu sunt eliminate cuvinte cheie.
+
+Willhaben păstrează toate cele10 căutări HTTP și încearcă aceleași URL-uri prin
+Exa numai la eșec. Rezerva extrage text live și linkurile reale, cel mult20pagini/zi
+și620/31 zile (încă0,620USD). Un număr de anunțuri fără linkuri nu este o căutare
+goală; mai puține linkuri decât rezultatele așteptate sunt acoperire parțială.
+Cele două rezerve de conținut plus căutările Exa înseamnă maximum7,564USD/31zile
+și0,244USD/zi, în limitele existente8USD și0,25USD. Niciun rezultat din cache
+Exa nu este folosit pentru a afirma disponibilitate curentă.
 
 Butoanele „Nu e vioară” și „Vândut / încheiat” salvează corecția și opresc alarmele
 acelui mesaj. Nu introduc automat reguli globale care ar putea elimina alte viori.
