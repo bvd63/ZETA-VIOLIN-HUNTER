@@ -6,19 +6,26 @@ O coadă persistentă trebuie să păstreze paginile încă neverificate. Fiecar
 candidat trece prin aceleași reguli pentru vioară Zeta second-hand și prin
 verificarea disponibilității, indiferent de unde vine.
 
-Acesta este un raport de cercetare și un plan de implementare. Serviciile noi din
-tabele **nu sunt activate**, nu au primit cheile utilizatorului și nu au fost
-testate prin conturi plătite. Codul public și documentația oficială au fost
-inspectate; probele de producție sunt identificate separat mai jos.
+Acesta este un raport de cercetare și implementare. **Tavily, Exa și Pushover sunt
+activate și verificate** în Railway, după ce proprietarul a salvat cheile direct
+acolo. Celelalte servicii din tabele rămân opțiuni evaluate. Nu au fost cumpărate
+abonamente sau credite în timpul acestei implementări. Codul public și
+documentația oficială au fost inspectate; probele de producție sunt identificate
+separat mai jos.
 
 **Implementat în continuarea cercetării, înainte de activarea conturilor:**
 adaptoare Tavily și Exa cu rezervări persistente înainte de HTTP; coadă SQLite
 pentru detalii Craigslist, GovDeals/AllSurplus și rezultate web; comanda
 `/resurse`, consum Apify citit din API și avertismente distincte de 80/95/100%;
 escaladare Pushover cu confirmare comună Telegram. Cele zece suite offline trec.
-Pushover/Tavily/Exa necesită în continuare cheile introduse de proprietar în
-Railway și verificarea activării. Celelalte aplicații din raport rămân opțiuni
-evaluate, nu servicii instalate sau abonamente cumpărate.
+Cheile au fost aplicate de proprietar în Railway. Câte o cerere reală a returnat
+19 pagini Tavily și 10 pagini Exa; acestea sunt rezultate brute, nu viori noi
+confirmate. La cererea explicită a proprietarului s-a trimis un mesaj marcat TEST
+pe fiecare canal Telegram/Pushover. Primirea ambelor a fost confirmată de
+proprietar, iar apăsarea «Am văzut» a oprit ambele canale, verificat în SQLite și
+prin API-ul Pushover. Testul nu a modificat istoricul anunțurilor. Celelalte
+aplicații din raport rămân opțiuni evaluate, nu servicii instalate sau abonamente
+cumpărate.
 
 ## 1. Ce s-a verificat în botul existent
 
