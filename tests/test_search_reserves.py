@@ -193,6 +193,27 @@ class SearchReservesTests(unittest.TestCase):
             db.close()
             prices.close()
 
+    def test_one_hanging_page_cannot_erase_completed_violin_checks(self):
+        import main
+        db = database.Database()
+        items = [{"id": str(i), "title": "Used Zeta Strados violin", "condition": "used",
+                  "url": f"https://reverb.com/item/timeout{i}", "source": "search"} for i in range(2)]
+        async def verify(item, http):
+            if item["id"] == "1":
+                await asyncio.sleep(10)
+            return "live", "fixture"
+        async def run():
+            async with httpx.AsyncClient() as http:
+                dropped = {}
+                found = await main._verify_search_hits(items, db, http, dropped)
+                self.assertEqual([item["id"] for item in found], ["0"])
+                self.assertEqual(dropped["liveness_deferred"], 1)
+        try:
+            with patch("main.verify_offer", side_effect=verify), patch("main.LIVENESS_TIMEOUT_SEC", .01):
+                asyncio.run(run())
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

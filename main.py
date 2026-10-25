@@ -126,30 +126,35 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
     404/410 and Reverb 'not live' are permanent (seen)."""
     sem = asyncio.Semaphore(LIVENESS_CONCURRENCY)
     alive_listings = []
+    if not candidates:
+        return []
 
     async def check(listing: dict):
         async with sem:
             return listing, await verify_offer(listing, http)
 
+    tasks = [asyncio.create_task(check(c)) for c in candidates]
     try:
-        outcomes = await asyncio.wait_for(
-            asyncio.gather(*[check(c) for c in candidates], return_exceptions=True), timeout=LIVENESS_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError:
-        log.warning(f"   liveness checks timed out after {LIVENESS_TIMEOUT_SEC}s — deferring {len(candidates)} hits")
-        dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + len(candidates)
-        return []
+        done, pending = await asyncio.wait(tasks, timeout=LIVENESS_TIMEOUT_SEC)
+        if pending:
+            log.warning("Liveness deadline: preserving completed checks; %s deferred", len(pending))
+            dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + len(pending)
+        outcomes = [task.exception() or task.result() for task in tasks if task in done and not task.cancelled()]
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     for outcome in outcomes:
         if isinstance(outcome, BaseException):
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
         listing, (state, why) = outcome
-        if queue_namespace:
-            complete(queue_namespace, listing, 3600 if state == "unknown" else
-                     10 * 3600 if state == "live" else 7 * 86400)
         if state == "live" or (state == "unknown" and (ITEM_PATH.search(urlsplit(listing.get("url", "")).path) or GOVDEALS_RX.search(listing.get("url", "")))):
             reason = classify(listing)
             if reason:
+                if queue_namespace:
+                    complete(queue_namespace, listing, 10 * 3600)
                 dropped[reason] = dropped.get(reason, 0) + 1
                 continue
             listing["liveness"] = why
@@ -163,10 +168,16 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
                 # between verification and delivery cannot lose this candidate.
                 db.enqueue(listing)
                 alive_listings.append(listing)
+            if queue_namespace:
+                complete(queue_namespace, listing, 3600 if state == "unknown" else 10 * 3600)
             continue
         if state == "unknown":
+            if queue_namespace:
+                complete(queue_namespace, listing, 3600)
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
+        if queue_namespace:
+            complete(queue_namespace, listing, 7 * 86400)
         if state == "non_sale":
             dropped["non_sale"] = dropped.get("non_sale", 0) + 1
             db.mark_dead(listing["id"], why)
