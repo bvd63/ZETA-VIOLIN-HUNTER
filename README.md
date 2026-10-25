@@ -85,6 +85,9 @@ resursele reale, deci abonamentul de 5 USD nu garantează singur un plafon de co
 Tavily și Exa completează motoarele existente după salvarea cheilor în Railway:
 8 căutări Tavily Basic/ciclu și 4 Exa Auto/ciclu, fără filtru de vechime a paginii.
 Termenii comuni și grupurile de domenii se rotesc prin cursori persistenți independenți.
+În Exa, domeniile sunt preferințe în textul căutării, astfel încât rezultatele
+pot veni și de pe alte site-uri; ghidul oficial recomandă evitarea unei liste
+obligatorii de domenii când utilizatorul cere acoperire largă.
 Tavily are plafon local 900 credite/31 zile și 28/zi; Exa rezervă conservator
 0,017 USD/cerere, maximum 8 USD/31 zile și 0,25 USD/zi. Rezervarea precede HTTP,
 inclusiv pentru răspunsuri incerte. Codul nu activează planuri plătite sau reîncărcări.

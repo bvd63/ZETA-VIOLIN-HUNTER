@@ -1,4 +1,4 @@
-"""Independent, bounded indexes. Every hit still passes the normal offer filters.
+"""Independent provider access, bounded searches and shared offer verification.
 
 No per-query automatic HTTP retries: an uncertain response may have been billed.
 Reservations and cursors survive restarts. A 31-day ledger is deliberately more
@@ -149,8 +149,14 @@ class ExaScraper(ReserveSearch):
         return {"x-api-key": Config.EXA_API_KEY}
 
     def payload(self, query, hosts):
-        payload = {"query": query, "type": "auto", "numResults": 10,
-                   "contents": {"highlights": True}}
+        # Exa's build-with-exa skill recommends natural-language intent and
+        # source preferences, rather than turning example sites into a hard
+        # allowlist. Preserve every alias and every rotating source preference.
+        terms = query.removesuffix(" for sale auction").replace(" OR ", ", ")
+        intent = "Vintage and used Zeta electric violin sale and auction listings: " + terms + "."
         if hosts:
-            payload["includeDomains"] = hosts
-        return payload
+            intent += " Source preference: " + ", ".join(hosts) + "."
+        return {"query": intent, "type": "auto",
+                # Intentional product limit: the $0.017 reservation covers ten
+                # results/highlights under the owner's $25 total monthly budget.
+                "numResults": 10, "contents": {"highlights": True}}

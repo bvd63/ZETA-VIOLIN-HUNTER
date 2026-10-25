@@ -78,6 +78,29 @@ class SearchReservesTests(unittest.TestCase):
         self.assertTrue(all(p["type"] == "auto" and p["numResults"] == 10 and
                             p["contents"] == {"highlights": True} for p in calls))
 
+    def test_exa_source_preferences_do_not_exclude_other_marketplaces(self):
+        scraper = ExaScraper()
+        payload = scraper.payload('Zeta Jazz Fusion OR "5-strings" for sale auction',
+                                  ["reverb.com", "govdeals.com"])
+        self.assertEqual(set(payload), {"query", "type", "numResults", "contents"})
+        self.assertIn("reverb.com", payload["query"])
+        self.assertIn("govdeals.com", payload["query"])
+        self.assertIn('"5-strings"', payload["query"])
+        self.assertIn("Zeta Jazz Fusion", payload["query"])
+        self.assertNotIn(" OR ", payload["query"])
+        self.assertNotIn("Source preference", scraper.payload("Strados violin", [])["query"])
+
+    def test_exa_accepts_violin_from_outside_preferred_sources(self):
+        def handler(request):
+            self.assertNotIn("includeDomains", json.loads(request.content))
+            return httpx.Response(200, json={"results": [{
+                "title": "Used Zeta Jazz Fusion violin", "url": "https://another-dealer.example/item/123",
+                "highlights": ["1993 five-string Zeta violin for sale"]}]})
+        found = self.run_scraper(ExaScraper(), handler)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["platform"], "another-dealer.example")
+        self.assertIn("1993 five-string", found[0]["description"])
+
     def test_quota_rejection_keeps_charge_and_does_not_advance_unattempted_queries(self):
         calls = []
         scraper = TavilyScraper()
