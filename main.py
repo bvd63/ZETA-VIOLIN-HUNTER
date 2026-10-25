@@ -5,7 +5,6 @@ Searches globally for Zeta electric violin listings and sends Telegram alerts.
 
 import asyncio
 import logging
-import random
 import warnings
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
@@ -22,6 +21,7 @@ from notifier import TelegramNotifier  # noqa: E402
 from filters import classify  # noqa: E402
 from liveness import is_live  # noqa: E402
 from offer_verifier import verify_offer, ITEM_PATH, GOVDEALS_RX  # noqa: E402
+from discovery_queue import stage, complete  # noqa: E402
 from dedup import is_duplicate  # noqa: E402
 from fx import refresh_rates  # noqa: E402
 from diagnostics import run_reachability  # noqa: E402
@@ -31,6 +31,7 @@ from scrapers.reverb import ReverbScraper  # noqa: E402
 from scrapers.ebay import EbayScraper  # noqa: E402
 from scrapers.google import GoogleScraper  # noqa: E402
 from scrapers.brave import BraveScraper  # noqa: E402
+from scrapers.search_reserves import TavilyScraper, ExaScraper  # noqa: E402
 from scrapers.craigslist import CraigslistScraper  # noqa: E402
 from scrapers.shopgoodwill import ShopGoodwillScraper  # noqa: E402
 from scrapers.hibid import HiBidScraper  # noqa: E402
@@ -93,6 +94,8 @@ def build_scrapers() -> list:
         EbayScraper(Config.EBAY_CLIENT_ID, Config.EBAY_CLIENT_SECRET),
         GoogleScraper(Config.GOOGLE_API_KEY, Config.GOOGLE_CSE_ID),
         BraveScraper(),
+        TavilyScraper(),
+        ExaScraper(),
         CraigslistScraper(),
         ShopGoodwillScraper(),
         HiBidScraper(),
@@ -116,7 +119,8 @@ def build_scrapers() -> list:
     ]
 
 
-async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncClient, dropped: dict) -> list:
+async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncClient, dropped: dict,
+                              queue_namespace: str = None) -> list:
     """Liveness-check search-engine hits concurrently. Returns the live ones.
     Dead pages go to liveness_cache (re-checked after DEAD_CACHE_DAYS); hard
     404/410 and Reverb 'not live' are permanent (seen)."""
@@ -140,6 +144,9 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
         listing, (state, why) = outcome
+        if queue_namespace:
+            complete(queue_namespace, listing, 3600 if state == "unknown" else
+                     10 * 3600 if state == "live" else 7 * 86400)
         if state == "live" or (state == "unknown" and (ITEM_PATH.search(urlsplit(listing.get("url", "")).path) or GOVDEALS_RX.search(listing.get("url", "")))):
             reason = classify(listing)
             if reason:
@@ -152,6 +159,9 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             else:
                 dropped["unverified"] = dropped.get("unverified", 0) + 1
             if not db.was_url_alerted(listing.get("url", ""), listing.get("auction_end", "")):
+                # Persist before returning to the cycle's sender. A process exit
+                # between verification and delivery cannot lose this candidate.
+                db.enqueue(listing)
                 alive_listings.append(listing)
             continue
         if state == "unknown":
@@ -203,6 +213,11 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
 
                 for listing in listings:
                     reason = classify(listing)
+                    if reason == "non_zeta" and listing.get("source") == "search":
+                        # An index snippet is not the complete listing. Identity
+                        # is checked again against the actual item page below.
+                        listing["_discovery_priority"] = 2
+                        reason = None
                     if reason:
                         dropped[reason] = dropped.get(reason, 0) + 1
                         log.debug(f"   drop[{reason}] {listing.get('title', '')[:70]}")
@@ -236,15 +251,17 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                         continue
                     new_listings.append(listing)
 
-                if to_verify:
-                    # Random order so a permanently long tail cannot starve the same hits every day
-                    random.shuffle(to_verify)
-                    to_verify.sort(key=lambda item: db.was_url_alerted(item.get("url", ""), item.get("auction_end", "")))
-                    if len(to_verify) > MAX_LIVENESS_CHECKS:
-                        dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + len(to_verify) - MAX_LIVENESS_CHECKS
-                        to_verify = to_verify[:MAX_LIVENESS_CHECKS]
+                if to_verify or getattr(scraper, "search_engine", False):
+                    namespace = "search:" + scraper.name
+                    for item in to_verify:
+                        if db.was_url_alerted(item.get("url", ""), item.get("auction_end", "")):
+                            item["_discovery_priority"] = 3
+                    to_verify, deferred = stage(namespace, to_verify, MAX_LIVENESS_CHECKS)
+                    dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + deferred
+                    if to_verify and fetched < 0:
+                        fetched = 0  # index skipped, but saved detail work resumed
                     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
-                        new_listings.extend(await _verify_search_hits(to_verify, db, http, dropped))
+                        new_listings.extend(await _verify_search_hits(to_verify, db, http, dropped, namespace))
 
                 # Same instrument already alerted from another platform / relisted?
                 # Two sellers can list the same model at similar prices, so NEVER
@@ -382,6 +399,24 @@ async def notification_tick() -> None:
             db.close()
 
 
+async def pushover_tick() -> None:
+    # Separate scheduler job: a slow/unreachable backup provider cannot delay
+    # Telegram retries/reminders, and search never holds this job's lock.
+    try:
+        from pushover_notifier import PushoverNotifier
+        await PushoverNotifier().tick(Config.TELEGRAM_CHAT_ID)
+    except Exception as exc:
+        log.warning("Pushover notification tick failed (%s)", type(exc).__name__)
+
+
+async def resource_tick() -> None:
+    try:
+        from resource_monitor import tick
+        await tick(TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID))
+    except Exception as exc:
+        log.warning("Resource monitor failed (%s); search remains active", type(exc).__name__)
+
+
 def source_problem(name: str, error: str) -> str:
     if name == "Google Search" and "403" in error:
         return "Google: API refuză accesul proiectului (403)."
@@ -514,6 +549,7 @@ async def run_search_cycle():
                 await _watchdog(scrapers, notifier)
             except Exception as e:
                 log.error(f"Watchdog error: {e}")
+            await resource_tick()
             try:
                 await _maybe_weekly_digest(notifier)
             except Exception as e:
@@ -687,7 +723,11 @@ async def main():
 
     hours = _parse_hours(Config.SEARCH_HOURS)
     scheduler = AsyncIOScheduler()
+    scheduler.add_job(resource_tick, "interval", hours=1, id="resource-monitor", max_instances=1, coalesce=True)
+    asyncio.create_task(resource_tick(), name="resource-monitor").add_done_callback(_log_task_exception)
     scheduler.add_job(notification_tick, "interval", minutes=1, id="telegram-notifications",
+                      max_instances=1, coalesce=True, misfire_grace_time=60)
+    scheduler.add_job(pushover_tick, "interval", minutes=1, id="pushover-notifications",
                       max_instances=1, coalesce=True, misfire_grace_time=60)
     # misfire_grace_time: if the loop is busy at 12:00:00 the run must still happen
     # (default grace is 1 s, which silently DROPS the only run of the day).

@@ -101,6 +101,7 @@ def _db():
 
 class GoogleScraper(BaseScraper):
     name = "Google Search"
+    search_engine = True
 
     def __init__(self, api_key: str, cse_id: str):
         self.api_key = api_key

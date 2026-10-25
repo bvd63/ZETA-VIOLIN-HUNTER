@@ -11,6 +11,8 @@ def main():
         ("tests.test_craigslist", []),
         ("tests.test_reliability", []),
         ("tests.test_notifications", []),
+        ("tests.test_search_reserves", []),
+        ("tests.test_pushover", []),
         ("apify_preview", ["--check"]),
     ):
         print(f"Pre-deploy check: {module}", flush=True)

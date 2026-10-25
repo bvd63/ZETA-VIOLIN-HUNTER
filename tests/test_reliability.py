@@ -41,6 +41,10 @@ ASSET = {'assetId':370, 'accountId':12180, 'auctionId':2, 'assetShortDesc':TITLE
 
 class RegressionTests(unittest.TestCase):
     def setUp(self):
+        from discovery_queue import DiscoveryQueue
+        with DiscoveryQueue("fixture") as queue:
+            queue.conn.execute("DELETE FROM discovery_queue")
+            queue.conn.commit()
         self.dns_patch = patch('offer_verifier.public_dns', AsyncMock(return_value=True))
         self.dns_patch.start()
         self.addCleanup(self.dns_patch.stop)

@@ -1,6 +1,6 @@
 # 🎻 Zeta Violin Hunter
 
-Bot care caută zilnic viori electrice **Zeta** second-hand prin 22 de module de colectare,
+Bot care caută zilnic viori electrice **Zeta** second-hand prin 24 de module de colectare (pornesc cele configurate),
 unele cu mai multe platforme și sute de regiuni, plus căutări web pe alte domenii,
 și trimite alerte pe Telegram, cu poză, preț în euro, semn „livrează în România”
 și marcaje pentru modele rare. Rulează pe Railway, la **10:00 și 22:00, ora României** (inclusiv schimbarea orei de vară).
@@ -10,7 +10,7 @@ sunt în [CLAUDE.md](CLAUDE.md). Acest README e doar harta.
 
 ## Surse
 
-| Direct (API sau HTML) | Prin Google / Brave |
+| Direct (API sau HTML) | Prin Google / Brave / Tavily / Exa |
 |---|---|
 | Reverb, eBay (16 piețe), Craigslist (468 zone US+CA), ShopGoodwill, HiBid, GovDeals, AllSurplus, Kijiji, Marktplaats + 2dehands, Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX PL/PT/BG/UA, Subito, Mercari JP, Yahoo Auctions JP, dealeri second-hand (Electric Violin Shop, StringWorks, Guitar Chimp) | OfferUp, Mercari US, Etsy, Facebook Marketplace, Guitar Center, Gardiner Houlgate, Tarisio, Heritage Auctions, PublicSurplus, Catawiki, Proxibid, LiveAuctioneers, Kleinanzeigen, Leboncoin, Wallapop, Allegro, forumuri și restul |
 
@@ -36,7 +36,16 @@ sunet. Telefonul trebuie să aibă notificările grupului și sunetul activate.
 Livrările eșuate sunt reîncercate în fiecare minut, fără căutări Brave/Apify noi.
 Istoricul vechi nu este importat ca necitit, pentru a nu retrimite oferte încheiate.
 
-`/cauta` pornește o căutare acum · `/status` starea surselor · `/active` viorile văzute live în ultimele 3 zile · `/verifica LINK` explică starea actuală a unui anunț · `/help`
+Canalul suplimentar **Pushover** este opțional: `PUSHOVER_APP_TOKEN` și
+`PUSHOVER_USER_KEY`. După 10 minute fără confirmare (sau imediat la eșecul Telegram),
+trimite o alertă de urgență repetată la 2 minute. Fiecare sesiune durează o oră și
+este reînnoită cât timp alerta rămâne neconfirmată. Confirmarea în oricare aplicație
+oprește ambele canale; sincronizarea Pushover este verificată la fiecare minut.
+Joburile de notificare sunt independente de căutări și unul de celălalt.
+Configurarea fără mesaj de test verifică existența unui dispozitiv înregistrat,
+nu dovedește că telefonul a afișat notificarea. Permisiunile se verifică pe telefon.
+
+`/cauta` pornește o căutare acum · `/status` starea surselor · `/resurse` consum și rezerve · `/active` viorile văzute live în ultimele 3 zile · `/verifica LINK` explică starea actuală a unui anunț · `/help`
 
 ## Rulare locală
 
@@ -72,6 +81,29 @@ Brave 32/zi și 960/lună, rezervate în SQLite înaintea cererii, inclusiv la r
 Creditul Brave și limitele contului trebuie să rămână disponibile; Railway facturează
 resursele reale, deci abonamentul de 5 USD nu garantează singur un plafon de consum.
 `DB_PATH=/data/zeta_listings.db` trebuie păstrat pe volumul existent.
+
+Tavily și Exa completează motoarele existente după salvarea cheilor în Railway:
+8 căutări Tavily Basic/ciclu și 4 Exa Auto/ciclu, fără filtru de vechime a paginii.
+Termenii comuni și grupurile de domenii se rotesc prin cursori persistenți independenți.
+Tavily are plafon local 900 credite/31 zile și 28/zi; Exa rezervă conservator
+0,017 USD/cerere, maximum 8 USD/31 zile și 0,25 USD/zi. Rezervarea precede HTTP,
+inclusiv pentru răspunsuri incerte. Codul nu activează planuri plătite sau reîncărcări.
+Conturile pot avea alte utilizări; la refuzul furnizorului celelalte surse continuă.
+
+`/resurse` și `/status` disting rezervările locale de consumul real al contului
+Apify (citire la maximum 6 ore). Avertismentele de 80%, 95%, epuizare și refuz de
+acces sunt distincte și persistente; o eroare nouă nu este ascunsă de un avertisment
+anterior. Plafonul de cont Apify nu este prezentat ca sold de credit gratuit.
+
+Paginile amânate de Craigslist (150/ciclu), GovDeals/AllSurplus (30/ciclu) și
+motoarele web (60/sursă/ciclu) rămân în coada SQLite. Reluarea nu depinde de
+reapariția lor în index, iar lease-urile expiră după o întrerupere. Un sfert dintre
+sloturi revine celor mai vechi pagini eligibile pentru a evita blocarea cozii de
+titluri generice. Descrierile complete pot confirma o Zeta absentă din fragmentul
+indexului; accesoriile/articolele și disponibilitatea rămân verificate înaintea alertei.
+
+Cercetarea furnizorilor, aplicațiilor și codului open-source folosit ca referință
+este în [raportul din 25 octombrie](docs/search-research-2026-10-25.md).
 
 Craigslist folosește tot patru căutări pe regiune, dar trei caută acum în toate
 categoriile de vânzări, inclusiv estate/garage sales. Citește descrierea completă,

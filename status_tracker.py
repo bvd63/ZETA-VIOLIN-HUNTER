@@ -186,6 +186,8 @@ class StatusTracker:
             from config import Config
             status["schedule"] = {"hours": Config.SEARCH_HOURS, "timezone": Config.SEARCH_TIMEZONE}
             status["budgets"] = {"google_per_day": min(96, Config.GOOGLE_DAILY_QUOTA), "brave_per_month": Config.BRAVE_MONTHLY_QUOTA}
+            from resource_monitor import snapshot
+            status["resources"] = snapshot()
             from alert_receipts import AlertReceipts
             receipts = AlertReceipts()
             try:

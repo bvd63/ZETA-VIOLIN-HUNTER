@@ -23,3 +23,5 @@ jobs:
       - run: python -m tests.test_apify
       - run: python -m tests.test_craigslist
       - run: python -m tests.test_notifications
+      - run: python -m tests.test_search_reserves
+      - run: python -m tests.test_pushover

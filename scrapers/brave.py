@@ -25,6 +25,7 @@ BRAVE_API = "https://api.search.brave.com/res/v1/web/search"
 
 class BraveScraper(BaseScraper):
     name = "Brave Search"
+    search_engine = True
 
     def is_configured(self) -> bool:
         return bool(Config.BRAVE_API_KEY)

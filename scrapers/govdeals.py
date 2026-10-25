@@ -9,9 +9,10 @@ from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
-from filters import has_zeta_signal, has_violin_word
+from filters import has_zeta_signal
 from keywords import market_queries
 from scrapers.base import BaseScraper, BROWSER_HEADERS
+from discovery_queue import stage, complete
 
 log = logging.getLogger(__name__)
 HOME = "https://www.govdeals.com/"
@@ -99,7 +100,7 @@ def parse_asset(asset: dict, row: dict = None, *, now: datetime = None,
         "price": f"{bid} {currency} (current bid)" if bid is not None else "See listing",
         "url": f"https://{host}/en/asset/{asset_id}/{account_id}",
         "location": ", ".join(str(asset.get(k) or row.get(k) or "") for k in ("city", "state", "country")).strip(", "),
-        "description": description[:1200], "condition": "Brand New" if asset.get("assetConditionCd") in ("NW", "NEW") else "Used/See Description",
+        "description": description, "condition": "Brand New" if asset.get("assetConditionCd") in ("NW", "NEW") else "Used/See Description",
         "seller": asset.get("companyName", ""), "auction": True, "auction_end": end,
         "pickup_only": asset.get("willShip") is False, "ships_to_ro": None,
         "image_url": photo, "relevance_score": BaseScraper()._relevance_score(title, description),
@@ -115,13 +116,18 @@ class GovDealsScraper(BaseScraper):
 
     async def search(self) -> list:
         results, seen = [], set()
-        enriched = 0
+        candidates = []
         async with self.make_client(headers=BROWSER_HEADERS) as http:
             api = GovDealsClient(http, self.business_id, self.site_id)
             await api.initialize()
             for query in market_queries(broad=True, limit=6, extra=("electric violin",)):
                 for page in (1, 2):
-                    rows = await api.search(query, page)
+                    try:
+                        rows = await api.search(query, page)
+                    except Exception as exc:
+                        self.content_failures.append("auction search " + type(exc).__name__)
+                        log.warning("%s query failed (%s); continuing other queries", self.name, type(exc).__name__)
+                        continue
                     self.fetched += len(rows)
                     for row in rows:
                         identity = (row.get("accountId"), row.get("assetId"))
@@ -129,18 +135,30 @@ class GovDealsScraper(BaseScraper):
                             continue
                         seen.add(identity)
                         title = row.get("assetShortDescription", "")
-                        if not (has_zeta_signal(title) or has_violin_word(title) or query in ("zeta", "strados")):
-                            continue
-                        if enriched >= 30:
-                            log.warning("GovDeals detail budget reached; remaining candidates deferred")
-                            break
-                        enriched += 1
-                        detail = await api.asset(str(identity[1]), str(identity[0]))
-                        listing = parse_asset(detail, row, platform=self.name, host=self.host)
-                        if listing and has_zeta_signal(listing["title"] + " " + listing["description"]):
-                            results.append(listing)
-                    if len(rows) < 100 or enriched >= 30:
+                        # Search may match a model/violin only inside a mixed
+                        # lot's description. Queue it; the detail + final shared
+                        # classifier decides identity, never a title-only gate.
+                        candidates.append({**row, "title": title,
+                            "url": f"https://{self.host}/en/asset/{identity[1]}/{identity[0]}",
+                            "_discovery_priority": 0 if has_zeta_signal(title) else 1})
+                    if len(rows) < 100:
                         break
+            selected, deferred = stage(self.name, candidates, 30)
+            self.coverage_stats = {"candidates": len(candidates), "detail_deferred": deferred,
+                                   "detail_checked": 0, "detail_unverified": 0}
+            for row in selected:
+                try:
+                    detail = await api.asset(str(row["assetId"]), str(row["accountId"]))
+                    listing = parse_asset(detail, row, platform=self.name, host=self.host)
+                    self.coverage_stats["detail_checked"] += 1
+                    complete(self.name, row, 10 * 3600)
+                    if listing and has_zeta_signal(listing["title"] + " " + listing["description"]):
+                        results.append(listing)
+                except Exception as exc:
+                    complete(self.name, row, 3600)
+                    self.coverage_stats["detail_unverified"] += 1
+                    self.content_failures.append("auction detail " + type(exc).__name__)
+                    log.warning("%s detail failed (%s); retained for retry", self.name, type(exc).__name__)
         return results
 
 

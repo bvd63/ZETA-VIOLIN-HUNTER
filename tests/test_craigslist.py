@@ -41,6 +41,10 @@ def page(body: str, dates: str = "", extra: str = "") -> str:
 
 class CraigslistTests(unittest.TestCase):
     def setUp(self):
+        from discovery_queue import DiscoveryQueue
+        with DiscoveryQueue("Craigslist") as queue:
+            queue.conn.execute("DELETE FROM discovery_queue")
+            queue.conn.commit()
         self.config = patch.multiple(Config, FILTER_TEXT_YEARS=False, CONDITION="used",
                                      MIN_PRICE=0, MAX_PRICE=99999, GOOGLE_QUERIES_PER_RUN=48,
                                      CRAIGSLIST_MAX_US_CITIES=0, CRAIGSLIST_COUNTRIES="US,CA")
@@ -77,6 +81,14 @@ class CraigslistTests(unittest.TestCase):
         self.assertEqual([r.url.params["searchPath"] for r in searches].count("sss"), 3)
         self.assertEqual(scraper.coverage_stats["areas"], 1)
         self.assertIn("violin", searches[0].url.params["query"])
+
+    def test_deferred_details_resume_when_next_index_is_empty(self):
+        _, first, _ = self.search([f"Zeta Strados electric violin {i}" for i in range(5)], {}, cap=2)
+        _, second, requests = self.search([], {}, cap=2)
+        self.assertEqual(len(first), 2)
+        self.assertEqual(len(second), 2)
+        self.assertTrue(set(item["url"] for item in first).isdisjoint(item["url"] for item in second))
+        self.assertEqual(len([r for r in requests if r.url.path.endswith("/search/full")]), 4)
 
     def test_unbranded_title_keeps_zeta_after_character_600(self):
         body = "Instrument details. " * 60 + "This electric violin was made by Zeta Music Systems."

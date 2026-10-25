@@ -36,6 +36,7 @@ from scrapers.base import BaseScraper, BROWSER_UA
 from config import Config
 from filters import has_zeta_signal, has_violin_word, is_zeta_violin, is_other_brand, has_noise, classify
 from liveness import looks_dead
+from discovery_queue import stage, complete
 
 log = logging.getLogger(__name__)
 
@@ -155,8 +156,11 @@ class CraigslistScraper(BaseScraper):
             candidates.sort(key=lambda x: 0 if is_zeta_violin(x["title"]) else
                             1 if SALE_EVENT_RX.search(x["title"]) else
                             2 if has_violin_word(x["title"]) else 3)
-            to_enrich = candidates[:MAX_ENRICH]
-            self.coverage_stats["detail_deferred"] = max(0, len(candidates) - len(to_enrich))
+            for item in candidates:
+                item["_discovery_priority"] = (0 if is_zeta_violin(item["title"]) else
+                    1 if SALE_EVENT_RX.search(item["title"]) else 2)
+            to_enrich, deferred = stage(self.name, candidates, MAX_ENRICH)
+            self.coverage_stats["detail_deferred"] = deferred
             self.coverage_stats["areas"] = len(areas)
             self.coverage_stats["candidates"] = len(candidates)
             log.info(f"Craigslist: {len(candidates)} candidates; fetching {len(to_enrich)} pages; "
@@ -170,6 +174,10 @@ class CraigslistScraper(BaseScraper):
             verified = await asyncio.gather(*[enrich(item) for item in to_enrich], return_exceptions=True)
 
             for item, success in zip(to_enrich, verified):
+                # An unavailable detail page is retried, even when it disappears
+                # from tomorrow's search. The 10h refresh keeps the normal
+                # twice-daily recheck, including unchanged index snippets.
+                complete(self.name, item, 10 * 3600 if success is True else 3600)
                 if success is not True:
                     if isinstance(success, BaseException):
                         log.warning("Craigslist detail failed for %s: %s", item["url"], type(success).__name__)

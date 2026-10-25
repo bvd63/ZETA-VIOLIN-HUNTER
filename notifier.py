@@ -78,7 +78,7 @@ class TelegramNotifier:
         receipts = AlertReceipts()
         try:
             receipt_id = receipts.prepare(self.chat_id, listing, text, event)
-            options = {"parse_mode": "HTML", "disable_notification": False,
+            options = {"parse_mode": "HTML", "disable_notification": not receipts.is_pending(receipt_id),
                        "reply_markup": self._alert_buttons(receipt_id, self._normalize_url(listing.get("url", "")))}
             image_url = self._normalize_url(str(listing.get("image_url", "") or ""))
             data = {}
@@ -87,6 +87,7 @@ class TelegramNotifier:
             if not data:
                 data = await self._request("sendMessage", {**options, "text": text, "disable_web_page_preview": False})
             if not data:
+                receipts.push_immediately(receipt_id)
                 return False
             receipts.delivered(receipt_id, (data.get("result") or {}).get("message_id"))
             log.info("Telegram accepted violin alert %s: %s", receipt_id, listing.get("url", ""))

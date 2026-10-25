@@ -115,6 +115,8 @@ class TelegramCommands:
             "text": "Confirmat. Am oprit reamintirile pentru această vioară." if acknowledged else "Alerta nu mai este disponibilă.",
         })
         if acknowledged:
+            from pushover_notifier import PushoverNotifier
+            await PushoverNotifier().cancel(data[5:])
             await self.notifier._post("editMessageReplyMarkup", {
                 "message_id": message.get("message_id"),
                 "reply_markup": {"inline_keyboard": [[{"text": "✅ Confirmată — Am văzut", "callback_data": data}]]},
@@ -135,6 +137,9 @@ class TelegramCommands:
             asyncio.create_task(self._search_and_report())
         elif cmd == "/status":
             await self.notifier.send(self._status_text())
+        elif cmd in ("/resurse", "/resources"):
+            from resource_monitor import text as resource_text
+            await self.notifier.send(resource_text())
         elif cmd in ("/active", "/activ", "/live"):
             await self.notifier.send(self._active_text())
         elif cmd in ("/verifica", "/verify"):
@@ -148,6 +153,7 @@ class TelegramCommands:
                 "🎻 <b>Comenzi</b>\n"
                 "/cauta — pornește o căutare acum\n"
                 "/status — starea surselor și ultimul ciclu\n"
+                "/resurse — consum, limite și starea rezervelor\n"
                 "/active — viorile Zeta văzute live în ultimele 3 zile\n"
                 "/verifica LINK — verifică un anunț și istoricul notificării\n"
                 "🔔 Alertele cu viori se repetă după 10 min, apoi la 30 min, până apeși «Am văzut».\n"

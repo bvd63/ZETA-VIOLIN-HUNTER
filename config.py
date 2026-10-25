@@ -21,6 +21,12 @@ class Config:
     SEND_PHOTOS = _bool("SEND_PHOTOS", "true")
     ALERT_FIRST_REMINDER_MINUTES = max(1, int(os.getenv("ALERT_FIRST_REMINDER_MINUTES", "10")))
     ALERT_REPEAT_MINUTES = max(5, int(os.getenv("ALERT_REPEAT_MINUTES", "30")))
+    PUSHOVER_APP_TOKEN = os.getenv("PUSHOVER_APP_TOKEN", "")
+    PUSHOVER_USER_KEY = os.getenv("PUSHOVER_USER_KEY", "")
+    PUSHOVER_DELAY_MINUTES = max(1, int(os.getenv("PUSHOVER_DELAY_MINUTES", "10")))
+    # At most 30 repeats/hour, within Pushover's 50-repeat ceiling.
+    PUSHOVER_RETRY_SECONDS = 120
+    PUSHOVER_EXPIRE_SECONDS = 3600
 
     # --- HTTP server ---
     PORT = int(os.getenv("PORT", "8080"))
@@ -69,6 +75,15 @@ class Config:
     BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "10"))
     # Hard monthly ceiling within the published $5 free credit, including retries.
     BRAVE_MONTHLY_QUOTA = min(1000, max(0, int(os.getenv("BRAVE_MONTHLY_QUOTA", "960"))))
+
+    # Independent search indexes. No subscription/automatic recharge is enabled
+    # by this code. Local reservations include failed/uncertain paid requests.
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+    TAVILY_QUERIES_PER_RUN = min(16, max(1, int(os.getenv("TAVILY_QUERIES_PER_RUN", "8"))))
+    TAVILY_ROLLING_CREDITS = min(900, max(0, int(os.getenv("TAVILY_ROLLING_CREDITS", "900"))))
+    EXA_API_KEY = os.getenv("EXA_API_KEY", "")
+    EXA_QUERIES_PER_RUN = min(8, max(1, int(os.getenv("EXA_QUERIES_PER_RUN", "4"))))
+    EXA_ROLLING_BUDGET_USD = min(8, max(0, float(os.getenv("EXA_ROLLING_BUDGET_USD", "8"))))
 
     # Apify Facebook: invoked by the existing scheduler, never a second cron.
     APIFY_TOKEN = os.getenv("APIFY_TOKEN", "")

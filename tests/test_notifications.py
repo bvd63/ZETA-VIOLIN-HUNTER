@@ -11,6 +11,8 @@ import httpx
 
 TEMP = tempfile.TemporaryDirectory()
 os.environ["DB_PATH"] = str(Path(TEMP.name) / "bot.db")
+os.environ["PUSHOVER_APP_TOKEN"] = ""
+os.environ["PUSHOVER_USER_KEY"] = ""
 from config import Config
 import database
 database.DB_PATH = os.environ["DB_PATH"]
