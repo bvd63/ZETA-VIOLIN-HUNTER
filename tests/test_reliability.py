@@ -429,6 +429,11 @@ class RegressionTests(unittest.TestCase):
 
     def test_queue_retains_failed_delivery_and_deduplicates_success(self):
         import main
+        # This test isolates delivery retry/dedup. Availability has its own
+        # mocked regressions; example.com must never become a real HTTP fixture.
+        verification = patch('main.verify_offer', AsyncMock(return_value=('live', 'offline fixture')))
+        verification.start()
+        self.addCleanup(verification.stop)
         pt=PriceTracker()
         listing=self.listing()
         try:
