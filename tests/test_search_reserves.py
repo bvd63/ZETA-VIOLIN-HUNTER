@@ -29,6 +29,7 @@ class SearchReservesTests(unittest.TestCase):
             queue.conn.commit()
         p = patch.multiple(Config, TAVILY_API_KEY="fake", EXA_API_KEY="fake",
                            TAVILY_QUERIES_PER_RUN=8, TAVILY_EXTRA_QUERIES_PER_RUN=6, EXA_QUERIES_PER_RUN=4,
+                           EXA_EXTRA_QUERIES_PER_RUN=0,
                            TAVILY_ROLLING_CREDITS=900, EXA_ROLLING_BUDGET_USD=8)
         p.start()
         self.addCleanup(p.stop)
@@ -44,6 +45,45 @@ class SearchReservesTests(unittest.TestCase):
         self.assertFalse(reserve("x", 2, 3, 3, now=100000))
         self.assertEqual(used("x", now=100001), 2)
         self.assertTrue(reserve("x", 2, 3, 3, now=100000 + 32 * 86400))
+
+    def test_additive_facebook_queries_keep_all_original_slots_and_fit_budget(self):
+        with patch.multiple(Config,TAVILY_EXTRA_QUERIES_PER_RUN=8,TAVILY_ROLLING_CREDITS=1000,EXA_EXTRA_QUERIES_PER_RUN=2):
+            tavily=TavilyScraper(); extras=tavily.extra_queries(0)
+            self.assertEqual(len(extras),8)
+            self.assertEqual(extras[4][1],['willhaben.at'])
+            self.assertEqual(extras[5][1],['gumtree.com'])
+            self.assertEqual([x[1] for x in extras[-2:]],[['facebook.com'],['facebook.com']])
+            self.assertLessEqual((8+len(extras))*62,1000)
+            self.assertEqual(len(ExaScraper().extra_queries(0)),2)
+            self.assertLessEqual(6*62*17000,8_000_000)
+            self.assertLessEqual(6*2*17000,ExaScraper.daily_limit)
+            seen=[]
+            for engine,expected in ((TavilyScraper(),16),(ExaScraper(),6)):
+                def handler(request):
+                    seen.append(json.loads(request.content))
+                    return httpx.Response(200,json={'results':[]})
+                before=len(seen)
+                self.run_scraper(engine,handler)
+                self.assertEqual(len(seen)-before,expected)
+            self.assertEqual([p['query'] for p in seen[:8]],[q for q,_ in plan(0,8)])
+
+    def test_public_facebook_leads_enter_existing_detail_queue_without_actor_calls(self):
+        from facebook_discovery import seed_detail_candidates,queries,US_REGIONS
+        from scrapers.apify_facebook import store as apify_store
+        with patch.object(Config,'APIFY_TOKEN','fake'):
+            for candidate in ({'url':'https://www.facebook.com/marketplace/item/123456/','title':'Zeta JLP5 violin','source':'search'},
+                              {'url':'https://www.facebook.com/marketplace/nyc/','title':'Zeta violin'},
+                              {'url':'https://facebook.com.evil.test/marketplace/item/123/','title':'Zeta violin'}):
+                seed_detail_candidates([candidate])
+            with apify_store() as conn:
+                row=conn.execute('SELECT candidate,checked FROM apify_items WHERE url=?',
+                                 ('https://www.facebook.com/marketplace/item/123456/',)).fetchone()
+                self.assertIsNotNone(row)
+                self.assertEqual(row[1],0)
+        planned=' '.join(q for cursor in range(100) for q,_ in queries(cursor,2))
+        self.assertTrue(all(region in planned for region in US_REGIONS))
+        self.assertIn('Zeta JLP',planned)
+        self.assertIn('Strados',planned)
 
     def test_tavily_and_exa_ignore_yahoo_hits_but_keep_other_japanese_sources(self):
         for scraper in (TavilyScraper(), ExaScraper()):

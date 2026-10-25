@@ -43,5 +43,9 @@ test-results/
 # If a future task moves the DB to a Railway volume, add it here.
 
 # Logs
+backups/
+*.db.gz
+*.db-wal
+*.db-shm
 *.log
 logs/

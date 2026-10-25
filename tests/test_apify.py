@@ -44,7 +44,7 @@ class ApifyTests(unittest.TestCase):
         self.config.start()
         self.addCleanup(self.config.stop)
         with store() as conn:
-            for table in ("apify_jobs", "apify_items", "apify_state"):
+            for table in ("apify_jobs", "apify_items", "apify_state", "apify_costs"):
                 conn.execute(f"DELETE FROM {table}")
             conn.commit()
 
@@ -54,6 +54,71 @@ class ApifyTests(unittest.TestCase):
         original = scraper.make_client
         scraper.make_client = lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs)
         return scraper
+
+    def test_verified_terminal_cost_releases_only_known_unused_reservation(self):
+        from apify_costs import settle, spent_micro
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime('%Y-%m')
+        with store() as conn:
+            conn.execute('INSERT INTO apify_jobs VALUES (?,?,?,?,?,?,?)',
+                         ('one','details','knownRun',month,20000,time.time(),1))
+            conn.commit()
+        for data in ({'status':'RUNNING','usageTotalUsd':.001}, {'status':'SUCCEEDED'},
+                     {'status':'SUCCEEDED','usageTotalUsd':float('nan')},
+                     {'status':'FAILED','usageTotalUsd':-1}):
+            self.assertFalse(settle('knownRun', data))
+        with store() as conn:
+            self.assertEqual(spent_micro(conn, month), 20000)
+        self.assertTrue(settle('knownRun', {'status':'SUCCEEDED','usageTotalUsd':.0124}))
+        with store() as conn:
+            self.assertEqual(spent_micro(conn, month), 12400)
+            self.assertEqual(conn.execute('SELECT cap FROM apify_jobs').fetchone()[0], 20000)
+        settle('knownRun', {'status':'SUCCEEDED','usageTotalUsd':0})
+        with store() as conn:
+            self.assertEqual(spent_micro(conn, month), 12400)  # no later undercount
+
+    def test_unknown_post_response_keeps_full_cost_and_terminal_read_settles(self):
+        from apify_costs import spent_micro
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime('%Y-%m')
+        with store() as conn:
+            conn.execute('INSERT INTO apify_jobs VALUES (?,?,?,?,?,?,?)',
+                         ('uncertain','details',None,month,20000,time.time(),0))
+            conn.execute('INSERT INTO apify_jobs VALUES (?,?,?,?,?,?,?)',
+                         ('known','details','knownRun',month,20000,time.time(),0))
+            conn.commit()
+        def handler(request):
+            if '/actor-runs/' in request.url.path:
+                return httpx.Response(200,json={'data':{'status':'SUCCEEDED','usageTotalUsd':.0124,'defaultDatasetId':'dataset'}})
+            return httpx.Response(200,json=[])
+        async def read():
+            scraper = self.scraper(handler)
+            async with scraper.make_client() as client:
+                await scraper.read_run(client, 'knownRun')
+        asyncio.run(read())
+        with store() as conn:
+            self.assertEqual(spent_micro(conn, month), 32400)
+
+    def test_reconcile_old_finished_runs_uses_only_metadata_gets(self):
+        from apify_costs import reconcile, spent_micro
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime('%Y-%m')
+        with store() as conn:
+            conn.execute('INSERT INTO apify_jobs VALUES (?,?,?,?,?,?,?)',
+                         ('done','discovery','oldRun',month,65000,time.time(),1))
+            conn.commit()
+        calls=[]
+        def handler(request):
+            calls.append(request.method)
+            return httpx.Response(200,json={'data':{'status':'SUCCEEDED','usageTotalUsd':.062}})
+        async def check():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                self.assertEqual(await reconcile(client),1)
+                self.assertEqual(await reconcile(client),0)
+        asyncio.run(check())
+        self.assertEqual(calls,['GET'])
+        with store() as conn:
+            self.assertEqual(spent_micro(conn, month),62000)
 
     def test_both_real_schemas_and_strict_availability(self):
         fenton = normalize(FENTON)

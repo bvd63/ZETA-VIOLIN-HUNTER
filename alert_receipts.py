@@ -27,6 +27,20 @@ class AlertReceipts:
                 self.conn.execute(f"ALTER TABLE alert_receipts ADD COLUMN {name} {kind}")
         self.conn.commit()
 
+    def feedback(self, receipt_id: str, chat_id: str, label: str) -> bool:
+        """Owner correction, separate from identity rules and explicit reading."""
+        if label not in ('not_violin', 'ended'):
+            return False
+        if not self.conn.execute('SELECT 1 FROM alert_receipts WHERE id=? AND chat_id=?',
+                                 (receipt_id, str(chat_id))).fetchone():
+            return False
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS alert_feedback (
+            receipt_id TEXT PRIMARY KEY, label TEXT NOT NULL, updated_at REAL NOT NULL)''')
+        self.conn.execute('INSERT OR REPLACE INTO alert_feedback VALUES (?,?,?)',
+                          (receipt_id, label, time.time()))
+        self.conn.commit()
+        return self.acknowledge(receipt_id, chat_id)
+
     def prepare(self, chat_id: str, listing: dict, text: str, event: str = "new") -> str:
         identity = "|".join((str(chat_id), canonical_url(listing.get("url", "")),
                              str(listing.get("auction_end", "")), event))

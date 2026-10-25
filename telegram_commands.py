@@ -103,23 +103,26 @@ class TelegramCommands:
         message = callback.get("message") or {}
         chat_id = str((message.get("chat") or {}).get("id", ""))
         data = callback.get("data", "")
-        if chat_id != self.chat_id or not re.fullmatch(r"seen:[a-f0-9]{24}", data):
+        if chat_id != self.chat_id or not re.fullmatch(r"(?:seen|not_violin|ended):[a-f0-9]{24}", data):
             return
+        action, receipt_id = data.split(':', 1)
         receipts = AlertReceipts()
         try:
-            acknowledged = receipts.acknowledge(data[5:], chat_id)
+            acknowledged = (receipts.acknowledge(receipt_id, chat_id) if action == 'seen' else
+                            receipts.feedback(receipt_id, chat_id, action))
         finally:
             receipts.close()
         await self.notifier._post("answerCallbackQuery", {
             "callback_query_id": callback.get("id"),
-            "text": "Confirmat. Am oprit reamintirile pentru această vioară." if acknowledged else "Alerta nu mai este disponibilă.",
+            "text": ("Confirmat. Am oprit reamintirile." if action == 'seen' else
+                     "Corecție salvată. Am oprit reamintirile acestui anunț.") if acknowledged else "Alerta nu mai este disponibilă.",
         })
         if acknowledged:
             from pushover_notifier import PushoverNotifier
-            await PushoverNotifier().cancel(data[5:])
+            await PushoverNotifier().cancel(receipt_id)
             await self.notifier._post("editMessageReplyMarkup", {
                 "message_id": message.get("message_id"),
-                "reply_markup": {"inline_keyboard": [[{"text": "✅ Confirmată — Am văzut", "callback_data": data}]]},
+                "reply_markup": {"inline_keyboard": [[{"text": "✅ Confirmată" if action == 'seen' else "✅ Corecție salvată", "callback_data": data}]]},
             })
 
     async def _handle(self, message: dict) -> None:

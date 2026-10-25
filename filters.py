@@ -105,7 +105,13 @@ NOISE_OBJECT_RX = _rx([
 # evidence and descriptions of a real violin photographed near furniture.
 OTHER_PRODUCT_RX = _rx([
     "coffee table", "dining table", "side table", "armchair", "sofa",
+    "bookshelf", "bookcase", "cabinet", "shelving", "desk", "chandelier",
     "stroller", "pushchair", "pram", "bicycle", "mountain bike", "motorcycle", "motorbike",
+])
+DESIGN_BRAND_RX = _rx(["studio zeta", "zeta studio"])
+ACCESSORY_CLAUSE_RX = _rx([
+    "pickup", "bridge", "amplifier", "amp", "controller", "interface", "pedal",
+    "synthony", "bow", "case", "cover", "string set",
 ])
 # A case listing can contain both "Zeta" and "violin" without selling a violin.
 # Require explicit bundle language to treat a case in the title as included gear.
@@ -265,7 +271,8 @@ def has_primary_identity(listing: dict) -> bool:
 
 
 def sells_other_product(title: str, description: str, metadata: dict) -> bool:
-    if not OTHER_PRODUCT_RX.search(title):
+    if not (OTHER_PRODUCT_RX.search(title) or DESIGN_BRAND_RX.search(title)
+            or DESIGN_BRAND_RX.search(str(metadata.get("brand") or ""))):
         return False
     if has_violin_word(title) or _violin_category(metadata.get("categories")):
         return False
@@ -277,6 +284,27 @@ def sells_other_product(title: str, description: str, metadata: dict) -> bool:
                 and is_zeta_violin(title, clause, **metadata)):
             return False
     return True
+
+
+def instrument_sale_title(title: str) -> str:
+    """Identify a complete instrument inside an explicit equipment bundle.
+
+    Never waive a brand/accessory check merely because the whole title contains
+    a model or 'violin': 'Yamaha violin with Zeta pickup' is still Yamaha.
+    A recording's 'with Zeta violin' credit is not a physical instrument bundle.
+    """
+    parts = re.split(r"\s*[+&;,]\s*|\b(?:with|includes?|including|plus|and|mit|avec|con|cu|met)\b|\bw/", title, flags=re.I)
+    if len(parts) < 2:
+        return title
+    for index, part in enumerate(parts):
+        if (is_zeta_violin(part) and not OTHER_BRAND_RX.search(part)
+                and not NOISE_RX.search(part) and not NOISE_OBJECT_RX.search(part)
+                and not NOISE_TITLE_MEDIA_RX.search(part) and not ACCESSORY_CLAUSE_RX.search(part)
+                and not INTENT_RX.search(part)):
+            if any(NOISE_TITLE_MEDIA_RX.search(p) for p in parts[:index]):
+                continue
+            return part.strip()
+    return title
 
 
 def is_zeta_violin(title: str, description: str = "", *, brand: str = "", model: str = "",
@@ -482,6 +510,7 @@ def classify(listing: dict) -> str:
     metadata = _identity_metadata(listing)
     if sells_other_product(title, desc, metadata):
         return "noise"
+    object_title = instrument_sale_title(title)
     title_conclusive = is_zeta_violin(title, **metadata)
     # Recording liner notes may mention Zeta instruments. The CD category
     # plus an artist-only title identifies the actual object being sold.
@@ -490,14 +519,16 @@ def classify(listing: dict) -> str:
     media_host = (urlsplit(str(listing.get("url", ""))).hostname or "").removeprefix("www.")
     if media_host in ("2dehands.be", "2ememain.be") and media_path and not title_conclusive:
         return "noise"
-    if is_other_brand(title):
+    if is_other_brand(object_title):
         return "other_brand"
     if is_new_stock(listing, Config.CONDITION, Config.EXCLUDED_SELLERS):
         return "new_stock"
     inventory_evidence = estate_violin_evidence(title, desc)
     body_for_noise = inventory_evidence or desc
     body_conclusive = title_conclusive or description_identifies_instrument(f"{title} {body_for_noise}")
-    if INSTRUMENT_ABSENT_RX.search(desc) or has_noise(title, body_for_noise, body_conclusive, metadata=metadata):
+    if (INSTRUMENT_ABSENT_RX.search(desc) or INSTRUMENT_ABSENT_RX.search(title)
+            or NOISE_RX.search(title)
+            or has_noise(object_title, body_for_noise, body_conclusive, metadata=metadata)):
         return "noise"
     if is_excluded_intent(title, desc, body_conclusive):
         return "intent"

@@ -17,6 +17,7 @@ from scrapers.base import BaseScraper
 from scrapers.google import SITE_GROUPS, AUCTION_GROUPS, US_MARKET_GROUPS
 from keywords import WEB_KEYWORDS, ADDITIONAL_WEB_KEYWORDS, MODEL_CODES, MODEL_NAMES
 from source_policy import is_disabled_source
+from facebook_discovery import queries as facebook_queries
 
 log = logging.getLogger(__name__)
 GROUPS = US_MARKET_GROUPS + AUCTION_GROUPS + SITE_GROUPS
@@ -130,30 +131,31 @@ class TavilyScraper(ReserveSearch):
     name, engine = "Tavily Search", "tavily"
     api = "https://api.tavily.com/search"
     key_setting, count_setting = "TAVILY_API_KEY", "TAVILY_QUERIES_PER_RUN"
-    units, daily_limit, offset = 1, 28, 0
+    units, daily_limit, offset = 1, 32, 0
 
     def extra_queries(self, cursor: int) -> list:
         # Additional slots, never replacements for the eight original queries.
-        # Default 14/cycle * 62 cycles = 868 basic credits within the existing
-        # 900-credit ledger and 1000-credit free account allowance.
+        # 16/cycle * 62 = 992 Basic credits; original fourteen calls preserved.
         count = min(Config.TAVILY_EXTRA_QUERIES_PER_RUN,
                     max(0, self.daily_limit // Config.RUNS_PER_DAY - Config.TAVILY_QUERIES_PER_RUN))
         aliases = list(MODEL_CODES) + ["Zeta " + name for name in MODEL_NAMES]
         result = []
         for i in range(count):
             slot = cursor + i
-            phase = slot % 6
+            phase = slot % 8
             if phase < 2:
                 result.append((ADDITIONAL_WEB_KEYWORDS[phase] + " for sale auction", []))
             elif phase < 4:
-                term = aliases[((slot // 6) * 2 + phase - 2) % len(aliases)]
+                term = aliases[((slot // 8) * 2 + phase - 2) % len(aliases)]
                 result.append((term + " used violin sale auction", []))
-            else:
+            elif phase < 6:
                 # Extra index coverage while direct fetches are blocked. This
                 # does not claim access to unindexed/private listings, and it
                 # does not remove a single direct collector query.
                 query = 'Zeta OR Zetta OR Strados OR ' + ' OR '.join(MODEL_CODES)
                 result.append((query, ['willhaben.at' if phase == 4 else 'gumtree.com']))
+            else:
+                result.extend(facebook_queries((slot // 8) * 2 + phase - 6, 1))
         return result
 
     def rolling_limit(self):
@@ -174,6 +176,10 @@ class ExaScraper(ReserveSearch):
     key_setting, count_setting = "EXA_API_KEY", "EXA_QUERIES_PER_RUN"
     # Micro-USD reservations: $0.007 search + up to ten $0.001 highlights.
     units, daily_limit, offset = 17000, 250000, 7
+
+    def extra_queries(self, cursor: int) -> list:
+        # Existing four source/model queries keep their cursor and cadence.
+        return facebook_queries(cursor, Config.EXA_EXTRA_QUERIES_PER_RUN, offset=7)
 
     def rolling_limit(self):
         return int(Config.EXA_ROLLING_BUDGET_USD * 1000000)

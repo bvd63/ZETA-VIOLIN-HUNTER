@@ -71,6 +71,8 @@ class TelegramNotifier:
         rows = []
         if url:
             rows.append([{"text": "🎻 Deschide anunțul", "url": url}])
+        rows.append([{"text": "Nu e vioară", "callback_data": "not_violin:" + receipt_id},
+                     {"text": "Vândut / încheiat", "callback_data": "ended:" + receipt_id}])
         rows.append([{"text": "✅ Am văzut — oprește reamintirile", "callback_data": "seen:" + receipt_id}])
         return {"inline_keyboard": rows}
 

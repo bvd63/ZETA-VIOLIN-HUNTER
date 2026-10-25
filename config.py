@@ -30,7 +30,7 @@ class Config:
 
     # --- HTTP server ---
     PORT = int(os.getenv("PORT", "8080"))
-    # If set, POST /search requires header X-Search-Token or ?token=
+    # Required for POST /search and GET /status; only X-Search-Token is accepted.
     SEARCH_TOKEN = os.getenv("SEARCH_TOKEN", "")
 
     # --- Storage ---
@@ -70,20 +70,21 @@ class Config:
 
     # --- Brave Search API (Google replacement; $5 monthly credit ≈ 1000 queries) ---
     BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
-    # 32 queries/day × 30 days ≈ 960/month, split across the day's runs
+    # 32 queries/day × 31 days = 992/month, split across the day's runs
     BRAVE_QUERIES_PER_RUN = int(os.getenv("BRAVE_QUERIES_PER_RUN", str(max(1, 32 // RUNS_PER_DAY))))
     BRAVE_GUARD_HOURS = int(os.getenv("BRAVE_GUARD_HOURS", "10"))
     # Hard monthly ceiling within the published $5 free credit, including retries.
-    BRAVE_MONTHLY_QUOTA = min(1000, max(0, int(os.getenv("BRAVE_MONTHLY_QUOTA", "960"))))
+    BRAVE_MONTHLY_QUOTA = min(1000, max(0, int(os.getenv("BRAVE_MONTHLY_QUOTA", "1000"))))
 
     # Independent search indexes. No subscription/automatic recharge is enabled
     # by this code. Local reservations include failed/uncertain paid requests.
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
     TAVILY_QUERIES_PER_RUN = min(16, max(1, int(os.getenv("TAVILY_QUERIES_PER_RUN", "8"))))
-    TAVILY_EXTRA_QUERIES_PER_RUN = min(6, max(0, int(os.getenv("TAVILY_EXTRA_QUERIES_PER_RUN", "6"))))
-    TAVILY_ROLLING_CREDITS = min(900, max(0, int(os.getenv("TAVILY_ROLLING_CREDITS", "900"))))
+    TAVILY_EXTRA_QUERIES_PER_RUN = min(8, max(0, int(os.getenv("TAVILY_EXTRA_QUERIES_PER_RUN", "8"))))
+    TAVILY_ROLLING_CREDITS = min(1000, max(0, int(os.getenv("TAVILY_ROLLING_CREDITS", "1000"))))
     EXA_API_KEY = os.getenv("EXA_API_KEY", "")
     EXA_QUERIES_PER_RUN = min(8, max(1, int(os.getenv("EXA_QUERIES_PER_RUN", "4"))))
+    EXA_EXTRA_QUERIES_PER_RUN = min(2, max(0, int(os.getenv("EXA_EXTRA_QUERIES_PER_RUN", "2"))))
     EXA_ROLLING_BUDGET_USD = min(8, max(0, float(os.getenv("EXA_ROLLING_BUDGET_USD", "8"))))
 
     # Apify Facebook: invoked by the existing scheduler, never a second cron.
@@ -94,7 +95,7 @@ class Config:
     # Optional existing run read during a one-off deployment verification.
     APIFY_VALIDATION_RUN_ID = os.getenv("APIFY_VALIDATION_RUN_ID", "")
     # Conservative ledger reserves each run's full cap before starting it.
-    APIFY_MONTHLY_LIMIT_USD = max(0, float(os.getenv("APIFY_MONTHLY_LIMIT_USD", "4")))
+    APIFY_MONTHLY_LIMIT_USD = max(0, float(os.getenv("APIFY_MONTHLY_LIMIT_USD", "5")))
     APIFY_DISCOVERY_CAP_USD = max(0, float(os.getenv("APIFY_DISCOVERY_CAP_USD", "0.065")))
     APIFY_DETAILS_CAP_USD = max(0, float(os.getenv("APIFY_DETAILS_CAP_USD", "0.02")))
     APIFY_GUARD_HOURS = max(1, float(os.getenv("APIFY_GUARD_HOURS", "10")))

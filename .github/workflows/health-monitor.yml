@@ -1,0 +1,37 @@
+name: external health monitor
+on:
+  schedule:
+    - cron: '13 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: external-health-monitor
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check public readiness without triggering searches
+        env:
+          HEALTH_URL: ${{ vars.ZETA_HEALTH_URL }}
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          url = os.environ['HEALTH_URL']
+          if not url.startswith('https://') or not url.endswith('/health/ready'):
+              raise SystemExit('ZETA_HEALTH_URL must point to the public readiness endpoint')
+          for attempt in range(3):
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as response:
+                      if response.status != 200 or json.load(response).get('status') != 'ready':
+                          raise ValueError('Bot search schedule is stale')
+                  print('Bot reachable; latest scheduled search is current.')
+                  break
+              except Exception as exc:
+                  print('Health check failed:', type(exc).__name__)
+                  if attempt == 2:
+                      raise SystemExit('Bot is unreachable or search schedule is stale. Check Railway.')
+                  time.sleep(15)
+          PY

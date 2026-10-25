@@ -1,6 +1,6 @@
 # 🎻 Zeta Violin Hunter
 
-Bot care caută zilnic viori electrice **Zeta** second-hand prin 24 de module de colectare (pornesc cele configurate),
+Bot care caută zilnic viori electrice **Zeta** second-hand prin 23 de module de colectare (pornesc cele configurate),
 unele cu mai multe platforme și sute de regiuni, plus căutări web pe alte domenii,
 și trimite alerte pe Telegram, cu poză, preț în euro, semn „livrează în România”
 și marcaje pentru modele rare. Rulează pe Railway, la **10:00 și 22:00, ora României** (inclusiv schimbarea orei de vară).
@@ -14,7 +14,7 @@ sunt în [CLAUDE.md](CLAUDE.md). Acest README e doar harta.
 |---|---|
 | Reverb, eBay (16 piețe), Craigslist (468 zone US+CA), ShopGoodwill, HiBid, GovDeals, AllSurplus, Kijiji, Marktplaats + 2dehands, Willhaben, FINN/Tori/DBA/Blocket, Gumtree UK, OLX PL/PT/BG/UA, Subito, Mercari JP, dealeri second-hand (Electric Violin Shop, StringWorks, Guitar Chimp) | OfferUp, Mercari US, Etsy, Facebook Marketplace, Guitar Center, Gardiner Houlgate, Tarisio, Heritage Auctions, PublicSurplus, Catawiki, Proxibid, LiveAuctioneers, Kleinanzeigen, Leboncoin, Wallapop, Allegro, forumuri și restul |
 
-Guitar Center și Facebook Marketplace pornesc automat când există `US_PROXY_URL`.
+Guitar Center și colectorul Facebook nativ necesită `US_PROXY_URL`. Cu tokenul și cele două taskuri Apify configurate, Facebook folosește Apify în locul colectorului nativ. Căutările web suplimentare nu oferă acces complet la Marketplace.
 
 ## Ce face la fiecare ciclu
 
@@ -77,22 +77,23 @@ Loturile cu viori și viole sunt acceptate numai dacă titlul identifică explic
 Alertele disting oferta curentă de prețul final și indică ridicarea personală când sursa o declară.
 
 Nu sunt adăugate servicii plătite, AI sau proxy-uri. Google are plafon de 96 cereri/zi,
-Brave 32/zi și 960/lună, rezervate în SQLite înaintea cererii, inclusiv la restart.
+Brave 32/zi și 1000/lună, rezervate în SQLite înaintea cererii, inclusiv la restart.
 Creditul Brave și limitele contului trebuie să rămână disponibile; Railway facturează
 resursele reale, deci abonamentul de 5 USD nu garantează singur un plafon de consum.
 `DB_PATH=/data/zeta_listings.db` trebuie păstrat pe volumul existent.
 
 Tavily și Exa completează motoarele existente după salvarea cheilor în Railway:
-8 căutări Tavily Basic/ciclu plus 6 căutări suplimentare și 4 Exa Auto/ciclu,
-fără filtru de vechime a paginii. Cele 6 suplimentare acoperă termeni noi,
+8 căutări Tavily Basic/ciclu plus 8 căutări suplimentare și 4 Exa Auto/ciclu plus 2 suplimentare,
+fără filtru de vechime a paginii. Cele 8 suplimentare acoperă termeni noi,
 priorități și alte aliasuri de modele, fără înlocuirea celor 8 căutări existente. Două dintre cele suplimentare verifică
 indexul Willhaben și Gumtree UK; eventualele blocaje directe 403/247 rămân raportate.
-Implicit, Tavily folosește cel mult 868 credite într-o lună de 31 zile.
+Cele două suplimentare noi caută Facebook în SUA; și Exa adaugă două căutări Facebook.
+Implicit, Tavily folosește cel mult 992 credite într-o lună de 31 zile.
 Termenii comuni și grupurile de domenii se rotesc prin cursori persistenți independenți.
 În Exa, domeniile sunt preferințe în textul căutării, astfel încât rezultatele
 pot veni și de pe alte site-uri; ghidul oficial recomandă evitarea unei liste
 obligatorii de domenii când utilizatorul cere acoperire largă.
-Tavily are plafon local 900 credite/31 zile și 28/zi; Exa rezervă conservator
+Tavily are plafon local 1000 credite/31 zile și 32/zi; Exa rezervă conservator
 0,017 USD/cerere, maximum 8 USD/31 zile și 0,25 USD/zi. Rezervarea precede HTTP,
 inclusiv pentru răspunsuri incerte. Codul nu activează planuri plătite sau reîncărcări.
 Conturile pot avea alte utilizări; la refuzul furnizorului celelalte surse continuă.
@@ -148,3 +149,8 @@ alerte de vânzare activă. Testele sunt offline; probele live opționale din li
 se activează separat prin `RUN_LIVE_TESTS=1`.
 
 Codurile și artiștii sunt indicii de căutare: `JV44` apare și pe machete, iar Jean-Luc Ponty pe discuri. Codurile cer context de vioară în titlu; numele unui artist nu confirmă marca Zeta, chiar dacă titlul spune „violin”. Pentru artiști trebuie și indicii de brand sau model. `JLP5` este tratat drept cod de model. Formatele CD/LP/DVD sunt respinse și când sunt lipite de caractere japoneze sau scrise cu litere full-width. Exemplele reale din probele live sunt teste de regresie.
+
+## Siguranță operațională
+
+Vezi [operarea și recuperarea](docs/operations.md) pentru bugete, copiile SQLite,
+monitorizare și limitele cunoscute. Niciun scor numeric nu decide dacă primești vioara.

@@ -233,6 +233,12 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                 seen_in_run = set()
                 recent_alerts = db.recent_alerts(days=60)
 
+                if getattr(scraper, 'search_engine', False):
+                    from facebook_discovery import seed_detail_candidates
+                    seeded = seed_detail_candidates(listings)
+                    if seeded:
+                        log.info('   %s public Facebook leads queued for existing detail budget', seeded)
+
                 for listing in listings:
                     reason = classify(listing)
                     if reason == "non_zeta" and listing.get("source") == "search":
@@ -371,12 +377,49 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
         unique.append(listing)
     if not unique:
         return 0
-    delivered = await notifier.send_listings(unique)
+    # Every new direct offer now gets a primary-page/API availability check.
+    # Persist first: interrupted checks are recovered by the minute delivery job.
+    ready = []
+    semaphore = asyncio.Semaphore(LIVENESS_CONCURRENCY)
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
+        async def check(item):
+            if item.get('verification') in ('live','unknown'):
+                return item
+            async with semaphore:
+                if item.get('source') != 'search':
+                    item['_direct_item_candidate'] = True
+                state, why = await verify_offer(item, http)
+                if state in ('dead','non_sale') or classify(item):
+                    db.discard_pending(item.get('url',''))
+                    if state == 'dead':
+                        db.mark_dead(item['id'],why)
+                    return None
+                if _needs_primary_identity(item,state):
+                    return None  # keep the delivery pending, never mark it seen
+                item['verification'],item['liveness'] = state,why
+                if state == 'live':
+                    db.touch_active(item)
+                return item
+        tasks = [asyncio.create_task(check(item)) for item in unique]
+        try:
+            done, _ = await asyncio.wait(tasks,timeout=LIVENESS_TIMEOUT_SEC)
+            for task in tasks:
+                if task in done and not task.cancelled():
+                    if task.exception():
+                        log.warning('Offer check deferred (%s)',type(task.exception()).__name__)
+                    elif task.result():
+                        ready.append(task.result())
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks,return_exceptions=True)
+    delivered = await notifier.send_listings(ready) if ready else []
     for listing in delivered:
         db.mark_seen(listing["id"], listing)
         db.record_alert(listing, listing.get("price_usd"))
     if len(delivered) < len(unique):
-        log.warning(f"   {len(unique) - len(delivered)} listing(s) not delivered — kept unseen for the next cycle")
+        log.warning(f"   {len(unique) - len(delivered)} listing(s) not delivered; unresolved eligible offers remain queued")
     return len(delivered)
 
 
@@ -552,7 +595,20 @@ async def run_search_cycle():
                     all_drops = list(unique_drops.values())
                     for listing, info in all_drops:
                         db.enqueue_price_drop(listing, info)
-                    delivered_drops = await notifier.send_price_drops(all_drops)
+                    checked_drops = []
+                    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
+                        for listing, info in all_drops:
+                            if listing.get('source') != 'search':
+                                listing['_direct_item_candidate'] = True
+                            state, why = await verify_offer(listing, http)
+                            if state in ('dead', 'non_sale') or classify(listing):
+                                db.finish_price_drop(listing.get('url', ''))
+                                continue
+                            if _needs_primary_identity(listing, state):
+                                continue
+                            listing['verification'], listing['liveness'] = state, why
+                            checked_drops.append((listing, info))
+                    delivered_drops = await notifier.send_price_drops(checked_drops) if checked_drops else []
                     for listing, info in delivered_drops:
                         db.finish_price_drop(listing.get("url", ""))
                 except Exception as e:
@@ -637,14 +693,15 @@ async def send_weekly_digest(notifier: TelegramNotifier = None):
 
 
 def _authorized(request) -> bool:
+    import hmac
     if not Config.SEARCH_TOKEN:
-        return True
-    supplied = request.headers.get("X-Search-Token") or request.query.get("token", "")
-    return supplied == Config.SEARCH_TOKEN
+        return False
+    supplied = request.headers.get("X-Search-Token", "")
+    return hmac.compare_digest(supplied.encode(), Config.SEARCH_TOKEN.encode())
 
 
 async def handle_search(request):
-    """HTTP endpoint to trigger manual search (protected by SEARCH_TOKEN if set)."""
+    """HTTP endpoint to trigger manual search (always authenticated)."""
     if not _authorized(request):
         return web.json_response({"status": "error", "message": "unauthorized"}, status=401)
     if search_cycle_lock.locked():
@@ -663,6 +720,13 @@ async def handle_search(request):
 
 async def handle_health(request):
     return web.json_response({"status": "healthy"})
+
+
+async def handle_ready(request):
+    from operations import readiness
+    # Public, deliberately contains no listings, chat IDs, quotas or credentials.
+    state = readiness(status_tracker.last_cycle_started())
+    return web.json_response(state, status=200 if state['status'] == 'ready' else 503)
 
 
 async def handle_status(request):
@@ -738,6 +802,7 @@ async def main():
     app = web.Application()
     app.router.add_post('/search', handle_search)
     app.router.add_get('/health', handle_health)
+    app.router.add_get('/health/ready', handle_ready)
     app.router.add_get('/status', handle_status)
 
     runner = web.AppRunner(app)
@@ -755,6 +820,9 @@ async def main():
     hours = _parse_hours(Config.SEARCH_HOURS)
     scheduler = AsyncIOScheduler()
     scheduler.add_job(resource_tick, "interval", hours=1, id="resource-monitor", max_instances=1, coalesce=True)
+    from operations import backup_tick
+    scheduler.add_job(backup_tick, "interval", hours=24, id="sqlite-backup", max_instances=1, coalesce=True)
+    asyncio.create_task(backup_tick(), name="sqlite-backup").add_done_callback(_log_task_exception)
     asyncio.create_task(resource_tick(), name="resource-monitor").add_done_callback(_log_task_exception)
     scheduler.add_job(notification_tick, "interval", minutes=1, id="telegram-notifications",
                       max_instances=1, coalesce=True, misfire_grace_time=60)

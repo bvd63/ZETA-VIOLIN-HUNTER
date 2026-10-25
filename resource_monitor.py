@@ -33,8 +33,12 @@ def snapshot() -> dict:
             data["brave"] = {"configured": bool(Config.BRAVE_API_KEY), "reserved": int(row[0]) if row else 0,
                              "limit": Config.BRAVE_MONTHLY_QUOTA, "unit": "cereri", "period": f"{now:%Y-%m} UTC"}
         if "apify_jobs" in tables:
-            amount = conn.execute("SELECT coalesce(sum(cap),0) FROM apify_jobs WHERE period=?",
-                                  (f"{now:%Y-%m}",)).fetchone()[0]
+            if 'apify_costs' in tables:
+                from apify_costs import spent_micro
+                amount = spent_micro(conn, f'{now:%Y-%m}')
+            else:
+                amount = conn.execute("SELECT coalesce(sum(cap),0) FROM apify_jobs WHERE period=?",
+                                      (f"{now:%Y-%m}",)).fetchone()[0]
             data["apify"] = {"configured": bool(Config.APIFY_TOKEN), "reserved": amount / 1000000,
                              "limit": Config.APIFY_MONTHLY_LIMIT_USD, "unit": "USD",
                              "period": f"{now:%Y-%m} UTC"}
@@ -55,6 +59,7 @@ def snapshot() -> dict:
                       "limit": limit, "unit": "credite" if name == "tavily" else "USD",
                       "period": "ultimele 31 zile", "health": read(name + ":health", {})}
     data["apify_account"] = read("apify:account", {})
+    data['backup'] = read('operations:backup', {})
     data["pushover"] = {"configured": bool(Config.PUSHOVER_APP_TOKEN and Config.PUSHOVER_USER_KEY),
                         "health": read("pushover:health", {}), "quota": read("pushover:quota", {})}
     return data
@@ -82,6 +87,10 @@ async def refresh_accounts() -> None:
                     "account_usage_ceiling_usd": (lim.get("limits") or {}).get("maxMonthlyUsageUsd"),
                     "checked": time.time(), "error": ""}
                 write("apify:account", value)
+                from apify_costs import reconcile
+                # Reuse the authenticated metadata client; GETs spend no Actor
+                # credits and do not replace a single discovery/detail request.
+                await reconcile(client)
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
                 cached.update({"error": type(exc).__name__, "failed_at": time.time()})
                 write("apify:account", cached)
@@ -98,6 +107,9 @@ async def refresh_accounts() -> None:
 
 def warning_events(data: dict) -> list:
     result = []
+    backup = data.get('backup', {})
+    if backup.get('error'):
+        result.append(('backup:failed', 'Copia SQLite sau testul de restaurare a eșuat; verificare necesară.'))
     for name in ("brave", "apify", "tavily", "exa"):
         row = data.get(name, {})
         if not row.get("configured"):
@@ -151,6 +163,16 @@ def text() -> str:
     lines.append("🔔 Pushover: " + ("configurat" if push["configured"] else "neconfigurat; Telegram rămâne activ"))
     if push.get("quota"):
         lines.append(f"Pushover: {push['quota'].get('remaining', '?')} mesaje API rămase la ultima verificare.")
+    backup = data.get('backup', {})
+    if backup.get('checked'):
+        lines.append('💾 Copie SQLite cu restaurare verificată: ' +
+                     datetime.fromtimestamp(backup['checked'], timezone.utc).strftime('%d.%m %H:%M UTC'))
+    cycles = Config.RUNS_PER_DAY * 31
+    brave = cycles * Config.BRAVE_QUERIES_PER_RUN
+    tavily = cycles * (Config.TAVILY_QUERIES_PER_RUN + Config.TAVILY_EXTRA_QUERIES_PER_RUN)
+    exa = cycles * (Config.EXA_QUERIES_PER_RUN + Config.EXA_EXTRA_QUERIES_PER_RUN) * .017
+    lines.append(f'Plan la 31 zile: Brave {brave} cereri; Tavily {tavily} credite; Exa ≤ ${exa:.2f}. '
+                 'Apify: costurile confirmate înlocuiesc rezervările; cele incerte rămân integral rezervate.')
     lines += [html.escape(s) for s in warnings(data)]
     return "\n".join(lines)[:3900]
 

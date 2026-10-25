@@ -5,6 +5,20 @@
 
 ---
 
+## Current implementation — October 26, reliability follow-up
+
+- Owner authorized the ordered implementation: contextual filtering, 31-day budget continuity, additive Facebook/US discovery, final offer checks/feedback, backup/monitoring. Preserve all searches except explicitly removed Yahoo Japan. No new subscriptions, recharge, proxies or region moves.
+- Explicit equipment bundles identify the independently named Zeta instrument before checking another brand/accessory, preserving Yamaha amp and Synthony bundles without accepting Yamaha violins with Zeta pickups. Studio Zeta furniture is rejected; actual instrument evidence remains eligible.
+- Apify terminal `usageTotalUsd` from authenticated metadata reconciles the separate `apify_costs` table without overwriting original job caps. Unknown POSTs/costs retain their entire reservation; later costs never decrease the recorded amount. Periodic GET-only reconciliation revisits old costs. Monthly local cap is $5; observed real runs were $0.062 discovery/10 results and $0.0124 details/2 items. This does not guarantee future pricing or account balance.
+- Brave 1000/month,32/day preserves16/cycle in 31-day months (992). Tavily keeps original8+6/cycle and adds2 Marketplace queries; local1000/31 days,32/day. Exa keeps4 and adds2 Marketplace queries ($6.324/31 days conservative reservation, within existing$8/.25 daily caps). Twenty US index-search regions/all shared model codes augment, never replace, the original two Apify region URLs and two-detail budget. Public eligible FB leads enter the existing detail queue. Index coverage is not complete native Marketplace access.
+- New direct alerts and price-drop alerts verify the primary offer. Confirmed ended/non-sale is withheld; access247/challenge/login returns unknown before changing identity. Clearly identified violins remain eligible when access is uncertain; weak snippets stay durable. Interrupted checks survive for delivery retry. No relevance score gate or new live TEST alerts.
+- New per-message feedback buttons persist not_violin/ended and stop only that alert, including Pushover cancellation. They never create automatic global exclusions.
+- Daily online SQLite backups include WAL, gzip, mode600, last10, and isolated restore/integrity verification before atomic publication. Copies remain on the same Railway volume. Railway UI explicitly gates native backups/schedules behind Pro; no upgrade and no production restore performed. Off-volume recovery remains outstanding.
+- `/search` and `/status` fail closed without SEARCH_TOKEN; header only, constant-time comparison, no token query parameter. Public `/health/ready` exposes only ready/stale after 90min grace for the latest 10/22 Bucharest search including DST. Hourly external read-only GitHub Actions monitor is configured via public ZETA_HEALTH_URL repo variable; no Telegram/Pushover/provider secrets go to GitHub. GH scheduling/notification preferences and 60-day public-repo inactivity limits apply.
+- Offline validation: all14 suites pass (new operations suite7); extended finite audit400 labelled cases has zero current mismatches,1600 score checks,40/40 mocked delivery after14 transient failures,1000/1000 persisted queue recovery. Baseline2be9a1a had3 contextual mismatches. This is not measured real-web recall or physical phone sound verification. Live deployment/running verification must be recorded separately after rollout.
+
+---
+
 ## 1. WHAT THIS PROJECT IS
 
 A Python bot that:

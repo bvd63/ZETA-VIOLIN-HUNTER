@@ -21,6 +21,7 @@ from database import connect
 from filters import classify, has_zeta_signal, has_violin_word
 from keywords import STRING_VARIANTS, preference_matches
 from scrapers.base import BaseScraper
+from apify_costs import ensure_table, spent_micro, settle
 
 log = logging.getLogger(__name__)
 API = "https://api.apify.com/v2"
@@ -114,6 +115,7 @@ def store():
     conn = connect()
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS apify_state (key TEXT PRIMARY KEY, value TEXT)")
+        ensure_table(conn)
         conn.execute("""CREATE TABLE IF NOT EXISTS apify_jobs (
             id TEXT PRIMARY KEY, phase TEXT, run_id TEXT, period TEXT,
             cap INTEGER, created REAL, done INTEGER DEFAULT 0)""")
@@ -147,7 +149,7 @@ class ApifyFacebookScraper(BaseScraper):
         with store() as conn:
             conn.execute("BEGIN IMMEDIATE")
             period = datetime.now(timezone.utc).strftime("%Y-%m")
-            used = conn.execute("SELECT COALESCE(SUM(cap),0) FROM apify_jobs WHERE period=?", (period,)).fetchone()[0]
+            used = spent_micro(conn, period)
             units = _money(cap)
             if units <= 0 or used + units > _money(Config.APIFY_MONTHLY_LIMIT_USD):
                 self.failures.append("Apify monthly budget reserved; collection skipped")
@@ -193,6 +195,7 @@ class ApifyFacebookScraper(BaseScraper):
             raise TimeoutError("Apify run still pending; will resume its ID")
         if run["status"] != "SUCCEEDED":
             self.failures.append("Apify partial run: " + str(run["status"]))
+        settle(run_id, run)
         message = str(run.get("statusMessage", "")).lower()
         if "maximum" in message and any(word in message for word in ("charge", "cost", "budget")):
             self.failures.append("Apify run cost cap reached; partial coverage")

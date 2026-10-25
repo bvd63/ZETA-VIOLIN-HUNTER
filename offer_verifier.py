@@ -6,6 +6,7 @@ import ipaddress
 import json
 import re
 import socket
+import time
 from urllib.parse import urlsplit
 from datetime import datetime, timezone
 
@@ -79,11 +80,19 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
         return "dead", reason
     if status >= 400:
         return "unknown", f"HTTP {status}; disponibilitatea nu poate fi verificată"
+    if status not in (200, 203):
+        return 'unknown', f'HTTP {status}; pagina ofertei nu poate fi verificată'
     if is_editorial_url(final_url):
         return "non_sale", "pagină editorială"
     if ARCHIVE_PATH.search(urlsplit(final_url).path):
         return "dead", "arhivă cu licitații încheiate"
     soup = BeautifulSoup(text[:500000], "lxml")
+    page_title = soup.title.get_text(' ',strip=True).casefold() if soup.title else ''
+    if (page_title in ('just a moment...', 'just a moment', 'access denied', 'security check',
+                       'facebook – log in or sign up', 'facebook - log in or sign up', 'log in to facebook')
+            or soup.select_one('[class*="gv-Skeleton"], #challenge-running, #cf-challenge-running')):
+        return 'unknown', 'pagină de acces / autentificare; oferta nu poate fi verificată'
+    item_page = is_item_url(final_url) or bool(listing.get('_direct_item_candidate'))
     host = (urlsplit(final_url).hostname or "").lower()
     if host == "craigslist.org" or host.endswith(".craigslist.org"):
         # Estate/garage events can end while the posting still returns HTTP 200.
@@ -168,19 +177,19 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     if description:
         listing["description"] = description.get_text(" \n", strip=True)
         listing["_primary_content_checked"] = True
-    elif (main is not soup or h1 is not None) and is_item_url(final_url):
+    elif (main is not soup or h1 is not None) and item_page:
         listing["description"] = scoped.get_text(" \n", strip=True)
         listing["_primary_content_checked"] = True
-    if is_item_url(final_url) and re.search(
+    if item_page and re.search(
             r"\b(?:auction ended|auction closed|sold for\s*:|sold amount\s*:|closed\s+auction date\s*:)", body, re.I):
         return "dead", "rezultat de licitație încheiată"
     if re.search(r"\b(?:closed|auction ended|sold amount)\s*[:(]", body, re.I) and listing.get("auction"):
         return "dead", "licitație încheiată"
     if SALE_WORDS.search(body):
         # Dedicated item URLs or classifieds sales text + monetary amount.
-        if is_item_url(final_url) or re.search(r"[€$£¥]\s*\d|\d\s*(?:USD|EUR|GBP|JPY)\b", body):
+        if item_page or re.search(r"[€$£¥]\s*\d|\d\s*(?:USD|EUR|GBP|JPY)\b", body):
             return "live", "pagină de vânzare / licitație"
-    if is_item_url(final_url):
+    if item_page:
         return "unknown", "pagină de anunț; ofertă neverificată"
     return "non_sale", "nu am găsit o ofertă de vânzare"
 
@@ -192,6 +201,20 @@ async def verify_offer(listing: dict, client) -> tuple:
         return "non_sale", "sursă eliminată la cererea proprietarului"
     if not public_url(url):
         return "non_sale", "URL public invalid"
+    from facebook_discovery import cached_offer
+    facebook = cached_offer(url)
+    if facebook and facebook['checked'] >= time.time() - 6 * 3600:
+        verified = facebook['listing']
+        if verified.get('apify_is_sold') is True:
+            return 'dead', 'Facebook: vândut la verificarea detaliilor'
+        from scrapers.apify_facebook import available
+        if available(verified):
+            origin = listing.get('source')
+            listing.update(verified)
+            if origin:
+                listing['source'] = origin
+            listing['_primary_content_checked'] = True
+            return 'live', 'Facebook: detalii verificate prin Apify'
     if is_editorial_url(url):
         return "non_sale", "pagină editorială"
     if ARCHIVE_PATH.search(urlsplit(url).path):

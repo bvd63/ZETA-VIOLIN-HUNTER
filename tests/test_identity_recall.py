@@ -31,6 +31,35 @@ def listing(**fields: object) -> dict:
 
 
 class IdentityRecallTests(unittest.TestCase):
+    def test_complete_violin_with_other_brand_or_midi_equipment_is_retained(self) -> None:
+        titles = [
+            'Zeta JV5 electric violin + Yamaha amplifier',
+            'Zeta Jazz Fusion violin + Synthony II MIDI controller',
+            'Zeta JV5 with Fender amp', 'Yamaha amplifier + Zeta JV5 violin',
+            'Zeta violon avec Yamaha ampli', 'Zeta Geige mit Synthony II',
+            'Zeta viool met MIDI controller', 'Zeta violino con Yamaha amplificatore',
+            'Zeta 5 strings + Synthony II', 'ZETAバイオリン + YAMAHA amp',
+            'Zeta JV5 with original manual and Yamaha amplifier',
+        ]
+        for title in titles:
+            with self.subTest(title=title):
+                self.assertEqual(classify(listing(title=title)), '')
+
+    def test_accessory_and_recording_bundles_do_not_borrow_instrument_identity(self) -> None:
+        for title in ('Yamaha violin with Zeta pickup', 'Yamaha violin + Zeta JV5 pickup',
+                      'Zeta Synthony II MIDI controller with power adapter',
+                      'Jean Luc Ponty CD with Zeta violin', 'Case for Zeta JV5 violin',
+                      'Zeta JV5 violin + case, instrument not included'):
+            with self.subTest(title=title):
+                self.assertNotEqual(classify(listing(title=title)), '')
+
+    def test_design_brand_and_furniture_are_not_modernist_violins(self) -> None:
+        for title in ('Vintage Studio Zeta Modernist bookshelf', 'Studio Zeta Modernist cabinet',
+                      'Zeta Modernist bookshelf', 'Studio Zeta Modernist shelving'):
+            self.assertEqual(classify(listing(title=title)), 'noise', title)
+        for title in ('Zeta Modernist', 'Zeta Modernist violin', 'Studio Zeta violin 5 strings'):
+            self.assertEqual(classify(listing(title=title)), '', title)
+
     def test_real_gumtree_studio_zeta_table_is_not_a_modernist_violin(self) -> None:
         item = listing(title='Italian Modernist flat bar chrome glass coffee table Studio Zeta Cidue style',
                        description='Vintage chrome and glass coffee table. Studio Zeta design.',
