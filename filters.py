@@ -379,10 +379,18 @@ def is_editorial_url(url: str) -> bool:
 def is_excluded_intent(title: str, description: str = "", title_conclusive: bool = None) -> bool:
     if INTENT_RX.search(title) or INTENT_TITLE_RX.search(title):
         return True
-    if description and INTENT_RX.search(description):
-        return True
     if title_conclusive is None:
         title_conclusive = is_zeta_violin(title)
+    body = description
+    if title_conclusive:
+        # 'case only has scratches' describes included gear, not a case-only
+        # sale. Explicit 'case only' / 'violin not for sale' must still reject.
+        body = re.sub(r"\b(?:case|bow|gig\s+bag|cover|bag)\s+only\s+(?:has|have|needs?|shows?|looks?)\b",
+                      "included accessory condition", body, flags=re.I)
+        body = re.sub(r"\b(?:stand|pedal|amplifier|amp|controller)\s+(?:is\s+)?not\s+for\s+sale\b",
+                      "accessory unavailable", body, flags=re.I)
+    if body and INTENT_RX.search(body):
+        return True
     if description and not title_conclusive and INTENT_TITLE_RX.search(description):
         return True
     return False
@@ -448,7 +456,7 @@ def classify(listing: dict) -> str:
         return "new_stock"
     inventory_evidence = estate_violin_evidence(title, desc)
     body_for_noise = inventory_evidence or desc
-    body_conclusive = title_conclusive or description_identifies_instrument(body_for_noise)
+    body_conclusive = title_conclusive or description_identifies_instrument(f"{title} {body_for_noise}")
     if INSTRUMENT_ABSENT_RX.search(desc) or has_noise(title, body_for_noise, body_conclusive, metadata=metadata):
         return "noise"
     if is_excluded_intent(title, desc, body_conclusive):

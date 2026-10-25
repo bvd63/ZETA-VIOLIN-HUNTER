@@ -110,6 +110,18 @@ class IdentityRecallTests(unittest.TestCase):
         self.assertNotEqual(classify(listing(title="Electric violin", description=
                             "Zeta Synthony II, violin not included.")), "")
 
+    def test_accessory_condition_is_not_accessory_only_sale_intent(self) -> None:
+        for body in ("Case only has minor scuffs.", "The bow only needs rosin.",
+                     "Stand not for sale. Violin and case included."):
+            with self.subTest(body=body):
+                self.assertEqual(classify(listing(title="Zeta JV5 1997", description=body)), "")
+        self.assertEqual(classify(listing(title="Zeta", description=
+                         "This is a 5-string with a volume pedal included.")), "")
+        for body in ("Case only. Instrument not included.", "Violin not for sale.",
+                     "Bow only.", "For parts only."):
+            with self.subTest(body=body):
+                self.assertNotEqual(classify(listing(title="Zeta JV5", description=body)), "")
+
     def test_reverb_search_keeps_primary_metadata(self) -> None:
         item = {"id": 123, "title": "Rare black instrument", "make": "Zeta", "model": "JV5",
                 "categories": [{"full_name": "Band and Orchestra / Violins"}],
