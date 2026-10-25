@@ -16,7 +16,7 @@ title-only — sellers mention them in bodies of perfectly good listings.
 import re
 import unicodedata
 from urllib.parse import urlsplit
-from keywords import MODEL_CODES, MODEL_NAMES, ARTISTS, JLP_RX
+from keywords import MODEL_CODES, MODEL_NAMES, ARTISTS, JLP_RX, normalize_identity_text
 
 
 def _rx(terms: list) -> "re.Pattern":
@@ -198,25 +198,25 @@ NEW_STOCK_TITLE_RX = _rx([
 # helpers
 # ---------------------------------------------------------------------------
 def _text(listing: dict) -> tuple:
-    title = unicodedata.normalize("NFKC", str(listing.get("title", "") or ""))
-    desc = unicodedata.normalize("NFKC", str(listing.get("description", "") or ""))
+    title = normalize_identity_text(str(listing.get("title", "") or ""))
+    desc = normalize_identity_text(str(listing.get("description", "") or ""))
     return title, desc
 
 
 def has_zeta_brand(text: str) -> bool:
-    text = unicodedata.normalize("NFKC", text)
+    text = normalize_identity_text(text)
     return bool(ZETA_BRAND_RX.search(text)) or any(j in text for j in ZETA_BRAND_JP)
 
 
 def has_violin_word(text: str) -> bool:
-    text = unicodedata.normalize("NFKC", text)
+    text = normalize_identity_text(text)
     return bool(VIOLIN_RX.search(text)) or any(j in text for j in VIOLIN_JP)
 
 
 def has_zeta_signal(text: str) -> bool:
     """Broad pre-filter for scrapers that query generic terms: anything that
     could be a Zeta (brand, unique code, signature artist, Strados)."""
-    text = unicodedata.normalize("NFKC", text)
+    text = normalize_identity_text(text)
     return (
         has_zeta_brand(text)
         or bool(MODEL_CODE_RX.search(text))
@@ -253,7 +253,7 @@ def _identity_metadata(listing: dict) -> dict:
 def is_zeta_violin(title: str, description: str = "", *, brand: str = "", model: str = "",
                    categories: object = ()) -> bool:
     """Identity evidence may span title, full description and primary product fields."""
-    text = unicodedata.normalize("NFKC", f"{title} {description} {brand if isinstance(brand, str) else ''} {model if isinstance(model, str) else ''}")
+    text = normalize_identity_text(f"{title} {description} {brand if isinstance(brand, str) else ''} {model if isinstance(model, str) else ''}")
     has_code = bool(MODEL_CODE_RX.search(text))
     has_violin = has_violin_word(text) or _violin_category(categories)
     # JV44 also identifies aircraft kits. A bare code or artist is insufficient;

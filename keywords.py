@@ -16,12 +16,19 @@ ARTISTS = ("Jean-Luc Ponty", "Boyd Tinsley", "Eileen Ivers")
 PREFERRED_QUERIES = ("Zeta JLP", "Zeta sunburst", "Zeta tobacco burst", "Zeta JLP Burst")
 JLP_RX = re.compile(r"\bjlp(?:[\s-]?[45])?\b|\bjean[\s-]*luc[\s-]*ponty\b", re.I)
 BURST_RX = re.compile(r"\b(?:sun[\s-]*burst|(?:tobacco|honey|jlp)[\s-]*burst)\b", re.I)
+CJK = r"\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af"
+SCRIPT_BOUNDARY_RX = re.compile(r"(?<=[a-z0-9])(?=[" + CJK + r"])|(?<=[" + CJK + r"])(?=[a-z0-9])", re.I)
+
+
+def normalize_identity_text(text: str) -> str:
+    """Separate script boundaries: ZETAバイオリン / JV5小提琴 need no seller spaces."""
+    return SCRIPT_BOUNDARY_RX.sub(" ", unicodedata.normalize("NFKC", text))
 
 
 def preference_matches(listing: dict) -> list:
     """Owner's priorities, never an identity/eligibility gate or authenticity claim."""
-    text = unicodedata.normalize("NFKC", " ".join(str(listing.get(k) or "") for k in
-                                               ("title", "description", "model", "finish")))
+    text = normalize_identity_text(" ".join(str(listing.get(k) or "") for k in
+                                          ("title", "description", "model", "finish")))
     matches = []
     if JLP_RX.search(text):
         matches.append("Jean-Luc Ponty / JLP menționat")

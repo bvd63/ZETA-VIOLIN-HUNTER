@@ -51,6 +51,15 @@ class IdentityRecallTests(unittest.TestCase):
         self.assertEqual(classify(listing(title="Rare black instrument", description="Zeta JV5, 1997.")), "")
         self.assertEqual(classify(listing(title="ＺＥＴＡ ＪＶ５ 1997")), "")
 
+    def test_latin_brand_and_model_touching_asian_script_are_recognized(self) -> None:
+        for title in ("ZETAバイオリン", "ZETA小提琴", "ZETA바이올린", "JV5バイオリン",
+                      "小提琴ZETA", "ＺＥＴＡバイオリン", "JLP5バイオリン"):
+            with self.subTest(title=title):
+                self.assertEqual(classify(listing(title=title)), "")
+        self.assertTrue(preference_matches(listing(title="JLP5バイオリン")))
+        self.assertNotEqual(classify(listing(title="YAMAHAバイオリン")), "")
+        self.assertNotEqual(classify(listing(title="ZETABETA violin")), "")
+
     def test_configuration_can_identify_instrument_without_literal_name(self) -> None:
         for title in ("Zeta 4-strings 1993", "Zeta 5 strings MIDI", "Zeta 5 cordes",
                       "Zeta 4 Saiten", "ゼータ 5弦"):
