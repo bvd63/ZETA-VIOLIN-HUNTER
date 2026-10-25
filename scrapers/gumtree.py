@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
 from filters import has_zeta_signal
+from browser_fetch import PublicSearchBrowser
 
 log = logging.getLogger(__name__)
 
@@ -36,23 +37,47 @@ class GumtreeScraper(BaseScraper):
         seen_ids = set()
         headers = {**BROWSER_HEADERS, "Accept-Language": "en-GB,en;q=0.9"}
 
-        async with self.make_client(headers=headers) as client:
+        async with self.make_client(headers=headers) as client, PublicSearchBrowser() as browser:
             for kw in market_queries("en", broad=True, limit=8, extra=("electric violin",)):
                 try:
+                    attempted_before, ok_before = self.requests_attempted, self.requests_ok
+                    failures_before = len(self.failures)
                     resp = await client.get(SEARCH_URL, params={"search_category": "all", "q": kw})
                     if resp.status_code != 200:
-                        # Gumtree's anti-bot answers odd codes (247, 403) intermittently — one retry
                         import asyncio
                         await asyncio.sleep(3)
                         resp = await client.get(SEARCH_URL, params={"search_category": "all", "q": kw})
-                    if resp.status_code != 200:
-                        log.warning(f"Gumtree '{kw}' HTTP {resp.status_code}")
-                        continue
-                    try:
-                        tiles = self._extract(resp.text)
-                    except ValueError as exc:
-                        self.content_failures.append(str(exc))
-                        log.warning("Gumtree '%s': %s", kw, exc)
+                    tiles = None
+                    parse_error = None
+                    if resp.status_code == 200:
+                        try:
+                            tiles = self._extract(resp.text)
+                        except ValueError as exc:
+                            parse_error = str(exc)
+                    if tiles is None and (resp.status_code in (200, 247, 403)):
+                        # Same exact query through ordinary Chromium. No login,
+                        # CAPTCHA solving, proxy or reduced keyword coverage.
+                        self.requests_attempted += 1
+                        try:
+                            code, html = await browser.fetch(str(httpx.URL(SEARCH_URL,
+                                params={"search_category":"all", "q":kw})))
+                            if code == 200:
+                                self.requests_ok += 1
+                                tiles = self._extract(html)
+                                recovered = self.requests_attempted-attempted_before-(self.requests_ok-ok_before)
+                                self.requests_recovered += max(0,recovered)
+                                del self.failures[failures_before:]
+                                log.info("Gumtree '%s': browser recovered query after HTTP %s (%s tiles)",
+                                         kw,resp.status_code,len(tiles))
+                            else:
+                                self.failures.append(f"Browser HTTP {code} (gumtree.com)")
+                        except Exception as exc:
+                            self.content_failures.append('Gumtree browser fallback '+type(exc).__name__)
+                            log.warning("Gumtree browser fallback failed (%s)",type(exc).__name__)
+                    if tiles is None:
+                        if parse_error:
+                            self.content_failures.append(parse_error)
+                        log.warning("Gumtree '%s' unresolved HTTP %s",kw,resp.status_code)
                         continue
                     self.fetched += len(tiles)
 

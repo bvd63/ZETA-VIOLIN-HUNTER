@@ -73,6 +73,41 @@ def _nodes(value):
         yield from _nodes(value.get("@graph", []))
 
 
+def primary_closed_reason(soup, host: str) -> str:
+    """Marketplace-specific primary status, never generic 'sold' in a sidebar."""
+    if host == 'invaluable.com' or host.endswith('.invaluable.com'):
+        if soup.select_one('.closed-bid-lot-detail') or (soup.title and
+                soup.title.get_text(' ',strip=True).casefold().startswith('sold at auction:')):
+            return 'Invaluable: lot încheiat'
+    if host == 'auctions.gardinerhoulgate.co.uk':
+        for status in soup.select('span.h4.text-warning, strong'):
+            if status.get_text(' ', strip=True).casefold() == 'closed':
+                return 'Gardiner Houlgate: lot încheiat'
+    if host == 'ha.com' or host.endswith('.ha.com'):
+        for node in soup.find_all(string=re.compile(r'^\s*Sold on [A-Za-z]+ \d{1,2}, \d{4} for\s*:', re.I)):
+            if node.parent.name not in ('script', 'style'):
+                return 'Heritage: lot vândut, cu dată explicită'
+    if host in ('8notes.com', 'www.8notes.com'):
+        posts = soup.select('div.mmessage')
+        if posts:
+            original = posts[0].get_text('\n', strip=True).splitlines()
+            signature = original[-1].strip() if original else ''
+            if re.fullmatch(r'[A-Za-z][A-Za-z .-]{1,35}', signature):
+                closed_index = -1
+                for index, post in enumerate(posts[1:], 1):
+                    lines = post.get_text('\n', strip=True).splitlines()
+                    if lines and lines[-1].strip() == signature and re.search(
+                        r'\b(?:just sold them both|the Zeta.{0,10}have (?:long )?been sold)\b',
+                        ' '.join(lines[:-1]), re.I):
+                        closed_index = index
+                # A later explicit new offer can reopen the thread. Merely
+                # being old/archived or discussing another sale never closes it.
+                if closed_index >= 0 and not any(re.search(r'\b(?:for sale|I am selling|I have .{0,50}to sell)\b',
+                        post.get_text(' ', strip=True), re.I) for post in posts[closed_index+1:]):
+                    return 'forum: autorul anunțului confirmă vânzarea'
+    return ''
+
+
 def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple:
     """(state, reason). live/dead/non_sale/unknown; enrich only listing content."""
     reason = looks_dead(status, listing["url"], final_url, text)
@@ -94,6 +129,9 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
         return 'unknown', 'pagină de acces / autentificare; oferta nu poate fi verificată'
     item_page = is_item_url(final_url) or bool(listing.get('_direct_item_candidate'))
     host = (urlsplit(final_url).hostname or "").lower()
+    closed = primary_closed_reason(soup, host)
+    if closed:
+        return 'dead', closed
     if host == "craigslist.org" or host.endswith(".craigslist.org"):
         # Estate/garage events can end while the posting still returns HTTP 200.
         from scrapers.craigslist import CraigslistScraper, SALE_EVENT_RX
@@ -170,6 +208,10 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     scoped = BeautifulSoup(str(main), "lxml")
     for related in scoped.select('aside, [class*="recommend"], [id*="recommend"], [class*="related"], [id*="related"]'):
         related.decompose()
+    if host in ('offerup.com', 'www.offerup.com') and any(
+            node.get_text(' ', strip=True) == 'SOLD' for node in scoped.find_all(['span','div','strong','p'])
+            if not node.find(['span','div','strong','p'])):
+        return 'dead', 'OfferUp: anunț marcat SOLD'
     body = scoped.get_text(" ", strip=True)
     # Read the item body, not just the search-engine snippet. Never borrow
     # footer/recommended-product text as identity evidence.
@@ -197,6 +239,9 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
 async def verify_offer(listing: dict, client) -> tuple:
     listing.pop("_primary_content_checked", None)
     url = listing.get("url", "")
+    if (urlsplit(url).hostname or '').lower() == 'auctions.gardinerhoulgate.co.uk':
+        from database import canonical_url
+        url = listing['url'] = canonical_url(url)
     if is_disabled_source(url):
         return "non_sale", "sursă eliminată la cererea proprietarului"
     if not public_url(url):
@@ -278,7 +323,14 @@ async def verify_offer(listing: dict, client) -> tuple:
                 from urllib.parse import urljoin
                 current = urljoin(current, response.headers["location"])
                 continue
-            return inspect_page(listing, response.text, response.status_code, current)
+            state, reason = inspect_page(listing, response.text, response.status_code, current)
+            if state == 'unknown':
+                from primary_page_reserve import fresh_primary_page
+                recovered = await fresh_primary_page(current, client)
+                if recovered:
+                    state, reason = inspect_page(listing, recovered, 200, current)
+                    reason = 'Exa live: ' + reason
+            return state, reason
         return "unknown", "prea multe redirecționări"
     except Exception:
         return "unknown", "pagina nu a putut fi accesată"

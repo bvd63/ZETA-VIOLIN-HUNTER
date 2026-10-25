@@ -15,6 +15,17 @@ un fragment web fără identitate suficientă rămâne în coada persistentă.
 Verificările întrerupte rămân pentru reluare; numai livrarea confirmată marchează
 anunțul drept trimis. Verificarea paginii nu garantează inventarul real al vânzătorului.
 
+Pentru paginile blocate Heritage, OfferUp, Gardiner Houlgate și Invaluable, Exa
+Contents încearcă o extracție live a aceleiași pagini: cel mult20/zi,620/31 zile,
+maximum0,620USD/31 zile, în plafonul Exa existent. Sunt acceptate numai rezultate
+cu URL identic și status success/source crawled. Se păstrează15 minute pentru
+a evita dubla taxare la verificarea finală. Un eșec sau un rezultat doar din
+cache păstrează disponibilitatea incertă. Cele șase căutări Exa/ciclu rămân.
+
+Gumtree reîncearcă aceeași interogare prin Chromium anonim când HTTP simplu
+întoarce247/403 sau un corp nerecunoscut. Numai anunțuri parsate ori pagina
+explicită0ads recuperează starea sursei. Nu sunt eliminate cuvinte cheie.
+
 Butoanele „Nu e vioară” și „Vândut / încheiat” salvează corecția și opresc alarmele
 acelui mesaj. Nu introduc automat reguli globale care ar putea elimina alte viori.
 „Am văzut” și confirmarea Pushover opresc reamintirile ambelor canale. Telegram

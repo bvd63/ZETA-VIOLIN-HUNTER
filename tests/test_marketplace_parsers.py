@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import httpx
 
@@ -29,14 +29,43 @@ def next_page(result):
         'props': {'pageProps': {'searchResult': result}}}) + '</script>'
 
 
-def run(scraper, handler):
+def run(scraper, handler, browser=(0, "")):
     def client(**kwargs):
         return BaseScraper.make_client(scraper, transport=httpx.MockTransport(handler), **kwargs)
-    with patch.object(scraper, 'make_client', client):
+    with patch.object(scraper, 'make_client', client), \
+         patch('scrapers.gumtree.PublicSearchBrowser.fetch', AsyncMock(return_value=browser)), \
+         patch('asyncio.sleep',AsyncMock()):
         return asyncio.run(scraper.search())
 
 
 class MarketplaceParserTests(unittest.TestCase):
+    def test_gumtree_browser_recovers_exact_query_without_false_access_alarm(self):
+        scraper=GumtreeScraper()
+        calls=[]
+        def blocked(request):
+            calls.append(str(request.url));return httpx.Response(247)
+        with patch('scrapers.gumtree.market_queries',return_value=['Zeta violin','Zeta JV5']):
+            found=run(scraper,blocked,browser=(200,CARDS))
+        self.assertTrue(any(not classify(item) for item in found))
+        self.assertEqual(scraper.health_error(),'')
+        self.assertEqual(scraper.requests_recovered,4)
+        self.assertEqual(scraper.requests_attempted,6)
+        self.assertTrue(any('JV5' in url for url in calls))
+
+    def test_gumtree_browser_challenge_stays_an_access_error(self):
+        scraper=GumtreeScraper()
+        with patch('scrapers.gumtree.market_queries',return_value=['Zeta violin']):
+            self.assertEqual(run(scraper,lambda r:httpx.Response(247),browser=(200,'<h1>Access denied</h1>')),[])
+        self.assertIn('247',scraper.health_error())
+        self.assertEqual(scraper.requests_recovered,0)
+
+    def test_gumtree_browser_explicit_empty_page_is_a_valid_completed_query(self):
+        scraper=GumtreeScraper()
+        with patch('scrapers.gumtree.market_queries',return_value=['Zeta violin']):
+            self.assertEqual(run(scraper,lambda r:httpx.Response(247),browser=(200,'<h1>0 ads for Zeta violin</h1>')),[])
+        self.assertEqual(scraper.health_error(),'')
+        self.assertEqual(scraper.requests_recovered,2)
+
     def test_marketplace_item_routes_are_host_scoped(self):
         paths = [('www.willhaben.at', '/iad/kaufen-und-verkaufen/d/zeta-geige-123/'),
                  ('www.gumtree.com', '/p/violins/zeta-jv5/123')]

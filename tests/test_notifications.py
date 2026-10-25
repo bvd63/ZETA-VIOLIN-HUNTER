@@ -75,6 +75,27 @@ class NotificationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("interes redus",payload["text"])
         self.assertFalse(payload["disable_notification"])
 
+    async def test_jazz_jv5_priority_is_audible_with_any_year_or_no_year(self):
+        self.bot._request=AsyncMock(return_value={'ok':True,'result':{'message_id':48}})
+        for year in ('1993','2001',''):
+            item={**self.listing,'title':f'Zeta jazz fusion 5-string violon (JV5) {year} - NOIRE',
+                  'model':'jazz fusion 5-string violon (JV5)','finish':'NOIRE','year':year,
+                  'url':'https://reverb.com/item/103084523-zeta-jazz-fusion-5-string-violon-jv5-1993-noire'}
+            self.assertEqual(await self.bot.send_listings([item]),[item])
+            payload=self.bot._request.await_args.args[1]
+            self.assertIn('PRIORITATEA TA',payload['text'])
+            self.assertIn('Jazz / JV',payload['text'])
+            self.assertNotRegex(payload['text'],r'\b\d{1,2}/10\b')
+            self.assertFalse(payload['disable_notification'])
+
+    async def test_priority_keeps_all_owner_aliases_without_year_keywords(self):
+        from keywords import preference_matches, WEB_KEYWORDS, ADDITIONAL_WEB_KEYWORDS
+        for alias in ('Jazz Fusion','JV5','JV45','JV44','JLP','JLP5','Jean Luc Ponty','Jean-Luc Ponty'):
+            with self.subTest(alias=alias):
+                self.assertTrue(preference_matches({'title':'Zeta '+alias}))
+        self.assertFalse(preference_matches({'title':'Zeta violin 1993'}))
+        self.assertFalse(any('1993' in q for q in WEB_KEYWORDS+ADDITIONAL_WEB_KEYWORDS))
+
     async def test_photo_failure_falls_back_to_text_with_same_confirmation(self):
         self.bot._request = AsyncMock(side_effect=[{}, {"ok": True, "result": {"message_id": 45}}])
         listing = {**self.listing, "image_url": "https://example.com/violin.jpg"}

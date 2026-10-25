@@ -429,7 +429,10 @@ def estate_violin_evidence(title: str, description: str) -> str:
 
 
 def is_editorial_url(url: str) -> bool:
-    path = urlsplit(url).path.lower()
+    parts = urlsplit(url)
+    path = parts.path.lower()
+    if (parts.hostname or '').lower().removeprefix('www.') == 'equipboard.com' and path.startswith('/items/'):
+        return True  # Gear catalog/reviews with affiliate offers, not a seller's listing.
     return bool(re.search(r"/(?:blog|blogs|news|article|articles|magazine|magazines|reviews?|press|authors?)(?:/|$)", path))
 
 

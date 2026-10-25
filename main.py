@@ -316,6 +316,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                     "duration": (datetime.utcnow() - started).total_seconds(),
                     "error": scraper.health_error(),
                     "details": {"requests_ok": scraper.requests_ok, "requests_attempted": scraper.requests_attempted,
+                                "requests_recovered": getattr(scraper, "requests_recovered", 0),
                                 "rejected": dropped, "coverage": getattr(scraper, "coverage_stats", {}),
                                 "discovery_queries_attempted": getattr(scraper, "discovery_queries_attempted", 0),
                                 "manual_fresh": getattr(scraper, "manual_fresh", False)},

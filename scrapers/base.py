@@ -40,6 +40,7 @@ class BaseScraper:
     def reset_health(self) -> None:
         self.requests_attempted = 0
         self.requests_ok = 0
+        self.requests_recovered = 0
         self.failures = []
         self.content_failures = []
         self.discovery_queries_attempted = 0
@@ -82,7 +83,7 @@ class BaseScraper:
 
     def health_error(self) -> str:
         errors = list(getattr(self, "failures", []))
-        missing = getattr(self, "requests_attempted", 0) - getattr(self, "requests_ok", 0) - len(errors)
+        missing = getattr(self, "requests_attempted", 0) - getattr(self, "requests_ok", 0) - len(errors) - getattr(self, "requests_recovered", 0)
         if missing > 0:
             errors.append(f"{missing} request(s) without response")
         errors.extend(getattr(self, "content_failures", []))

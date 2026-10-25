@@ -23,6 +23,8 @@ def canonical_url(url: str) -> str:
     parts = urlsplit(url or "")
     host = (parts.hostname or "").lower().removeprefix("www.")
     path = parts.path.rstrip("/")
+    if host == 'auctions.gardinerhoulgate.co.uk' and path.startswith('/catalogue/lot/'):
+        path = path.removesuffix('/share-email')
     if host == "reverb.com":
         import re
         match = re.search(r"/(?:[a-z]{2}(?:-[a-z]{2})?/)?item/(\d+)", path, re.I)

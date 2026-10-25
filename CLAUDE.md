@@ -5,6 +5,15 @@
 
 ---
 
+## October 26 — fresh-run primary-offer audit and access recovery
+
+- The genuine01:18 Bucharest fresh run on330c32e completed149.58s, attempted16Brave/16Tavily/6Exa/2Facebook queries and preserved every scheduled guard. Ten messages were delivered; audit found seven inappropriate alerts: two Equipboard gear catalogs, an explicitly seller-closed8notes thread, and closed OfferUp/Heritage/Gardiner/Invaluable offers. Technical closures have separate reasons and are not owner-read evidence. Old-but-still-buyable Reverb2673122 and two eBay offers remain eligible; no age cutoff introduced.
+- Host-scoped catalog and primary closed-status checks cover the actual errors, including matching the8notes seller's signature and preserving subsequent explicit new offers. Gardiner share-email action URLs canonicalize to the actual lot before fetching and deduplication. Unknown/access-blocked real violins remain eligible; no score gate, query removal or global forum exclusion.
+- Anonymous Chromium retries the identical Gumtree search only after native247/403/unrecognized content; only parsed cards or explicit0ads recover health. Same eight queries, no proxy/login/CAPTCHA. Browser lifecycle and navigations are bounded. Offline tests mock browser fetches, including in the Playwright-enabled deployment image.
+- Existing Exa Contents provides live-only fallback for blocked Heritage/OfferUp/Gardiner/Invaluable primary pages. Official build-with-exa skill reread in full; top-level text/includeHtmlTags, maxAgeHours0,20s livecrawl timeout. A200 response must also have matching successful status/source=crawled and matching URL.15min cache avoids duplicate checks. Up to20pages/day ($0.020),620/31days ($0.620), shares the unchanged$0.25/day/$8 rolling Exa cap; six original queries/cycle retain planned$0.204/day. No summaries/highlights billed on this endpoint. Failed/cached-only extraction keeps unknown, never hides a violin.
+- Owner reaffirmed JazzFusion/JV5 Reverb103084523 as a preferred example and explicitly clarified that1993 is NOT a keyword or priority condition. Offline regressions verify identical Jazz/JV priority with any year/no year, the other JLP/JV aliases, audible delivery, no numeric relevance badge and no sunburst-only condition. Example now sold per Reverb API; do not resend as active or call it a proven JLP signature model.
+- Owner completed one-time$5Brave top-up. Observed balance$5.92, automatic reloadOFF; paid monthly usage ceiling$1 above$5free enables purchased safety reserve, no subscription/recharge. Do not buy more without approval.
+
 ## October 26 — owner explicitly requested fresh discovery now
 
 - Adds authenticated `POST /search?fresh=1` for the owner's requested fresh validation. Default cron, startup and ordinary search behavior stay guarded. Only the per-cycle time guard is bypassed; scheduled guard timestamps are never advanced by the extra test. All spending reservations remain active, cursors advance for queries actually spent, and the real process lock/delivery pipeline is used.

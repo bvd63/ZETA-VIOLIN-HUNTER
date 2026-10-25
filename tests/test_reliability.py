@@ -83,6 +83,7 @@ class RegressionTests(unittest.TestCase):
         url='https://auctions.gardinerhoulgate.co.uk/catalogue/lot/abcdef/musical-instruments-lot-3457/'
         page='<main><h1>Rare four string Zeta electric violin</h1>Hammer £3,400 Watch Lot Closed Auction Date: 12th Jun 2026</main>'
         self.assertEqual(inspect_page(self.listing(url=url),page,200,url)[0],'dead')
+        self.assertEqual(inspect_page(self.listing(url=url),page.replace('<div>SOLD</div>','<p>SOLD</p>'),200,url)[0],'dead')
 
     def test_historical_marketplace_models(self):
         for title in ('SV244 Strados electric violin', 'Zeta Imbus Fusion JVS-4', 'ZETA Modernist Electric Violin'):
@@ -214,6 +215,87 @@ class RegressionTests(unittest.TestCase):
 
     def test_editorial_url_without_title_hint(self):
         self.assertEqual(classify(self.listing(source='search',url='https://site.com/en/blog/zeta-violin')), 'non_sale')
+
+    def test_equipboard_catalog_is_not_an_offer_even_when_access_is_blocked(self):
+        url='https://equipboard.com/items/zeta-strados-4-string-electric-violin'
+        self.assertEqual(classify(self.listing(source='search',url=url)), 'non_sale')
+        self.assertEqual(inspect_page(self.listing(),'<h1>Zeta violin</h1>Add to cart',200,url)[0],'non_sale')
+        # The same path at an actual seller remains eligible.
+        self.assertEqual(inspect_page(self.listing(),'<main><h1>Zeta JV5</h1>For sale $1800</main>',200,
+            'https://dealer.example/items/zeta-jv5')[0],'live')
+
+    def test_primary_auction_status_precedes_recommended_purchase_buttons(self):
+        cases=[('https://entertainment.ha.com/itm/violin/a/7144-89626.s',
+                '<p>Sold on Jun 25, 2016 for:</p>'),
+               ('https://www.invaluable.com/auction-lot/zeta-301-c-abc',
+                '<div class="closed-bid-lot-detail"><strong>Sold:</strong></div>'),
+               ('https://auctions.gardinerhoulgate.co.uk/catalogue/lot/abc/def/music/',
+                '<span class="h4 text-warning"><strong>Closed</strong></span>')]
+        for url, status in cases:
+            self.assertEqual(inspect_page(self.listing(url=url),
+                '<main><h1>Zeta violin</h1>'+status+'</main><aside>Add to cart</aside>',200,url)[0],'dead')
+
+    def test_offerup_sold_badge_not_seller_name_or_related_item(self):
+        url='https://offerup.com/item/detail/abc'
+        page='<main><h1>Zeta violin</h1><div>SOLD</div><p>Price $900</p></main>'
+        self.assertEqual(inspect_page(self.listing(url=url),page,200,url)[0],'dead')
+        live='<main><h1>Zeta violin</h1><h2>Sold by Frances</h2><p>Price $900</p><aside><span>SOLD</span></aside></main>'
+        self.assertEqual(inspect_page(self.listing(url=url),live,200,url)[0],'live')
+
+    def test_forum_only_same_seller_closure_without_later_offer_closes_thread(self):
+        url='https://www.8notes.com/f/31_2471.asp'
+        sale='<div class="mmessage">Zeta violins for sale $1500<br>Thanks,<br>Terry</div>'
+        closed='<div class="mmessage">Sorry the Zeta`s have long been sold.<br>Terry</div>'
+        page='<h1>Zeta Violins For sale</h1>'+sale
+        self.assertEqual(inspect_page(self.listing(url=url),page+closed,200,url)[0],'dead')
+        self.assertEqual(inspect_page(self.listing(url=url),page+closed.replace('Terry','John'),200,url)[0],'live')
+        reopened='<div class="mmessage">Another Zeta JV5 for sale $1600<br>Terry</div>'
+        self.assertEqual(inspect_page(self.listing(url=url),page+closed+reopened,200,url)[0],'live')
+
+    def test_gardiner_share_action_canonicalizes_to_lot(self):
+        url='https://auctions.gardinerhoulgate.co.uk/catalogue/lot/abc/def/music/'
+        self.assertEqual(canonical_url(url+'share-email/'),canonical_url(url))
+
+    def test_old_but_buyable_violin_is_not_filtered_by_age(self):
+        page='<main><h1>Zeta JV5 violin</h1>Listed 10 years ago. Buy it now. $1800.</main>'
+        self.assertEqual(inspect_page(self.listing(),page,200,self.listing()['url'])[0],'live')
+
+    def test_live_primary_recovery_never_uses_failed_or_cached_extraction(self):
+        from primary_page_reserve import fresh_primary_page
+        url='https://www.invaluable.com/auction-lot/zeta-123'
+        async def run():
+            for source,status in [('cached','success'),('crawled','error'),('crawled','success')]:
+                async def post(*args,**kwargs):
+                    self.assertEqual(kwargs['json']['maxAgeHours'],0)
+                    self.assertNotIn('highlights',kwargs['json'])
+                    return httpx.Response(200,json={'statuses':[{'id':url,'source':source,'status':status}],
+                        'results':[{'url':url,'title':'Sold at Auction: Zeta JV5',
+                                    'text':'<h1>Zeta JV5</h1><strong>Sold:</strong>'}]})
+                with patch.object(Config,'EXA_API_KEY','fixture'), \
+                     patch('primary_page_reserve.read',return_value={}), \
+                     patch('primary_page_reserve.write'), \
+                     patch('primary_page_reserve.reserve',return_value=True) as reserved:
+                    async with httpx.AsyncClient() as client:
+                        with patch.object(client,'post',post):
+                            page=await fresh_primary_page(url,client)
+                    self.assertEqual(bool(page),source=='crawled' and status=='success')
+                    self.assertEqual(reserved.call_count,2)
+                    if page:
+                        self.assertEqual(inspect_page(self.listing(url=url),page,200,url)[0],'dead')
+        asyncio.run(run())
+
+    def test_primary_recovery_respects_cap_and_preserves_unknown(self):
+        from primary_page_reserve import fresh_primary_page
+        url='https://offerup.com/item/detail/abc'
+        async def run():
+            with patch.object(Config,'EXA_API_KEY','fixture'), \
+                 patch('primary_page_reserve.read',return_value={}), \
+                 patch('primary_page_reserve.reserve',return_value=False), \
+                 patch('httpx.AsyncClient.post',AsyncMock()) as post:
+                async with httpx.AsyncClient() as client:
+                    self.assertEqual(await fresh_primary_page(url,client),'')
+                post.assert_not_awaited()
+        asyncio.run(run())
 
     def test_article_with_affiliate_product_is_not_offer(self):
         page = '<main><h1>Zeta violin</h1><script type="application/ld+json">' + json.dumps([
