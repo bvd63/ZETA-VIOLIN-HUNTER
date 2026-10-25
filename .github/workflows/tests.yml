@@ -22,6 +22,7 @@ jobs:
       - run: python -m tests.test_reliability
       - run: python -m tests.test_identity_recall
       - run: python -m tests.test_coverage_contract
+      - run: python -m tests.test_marketplace_parsers
       - run: python -m tests.test_apify
       - run: python -m tests.test_craigslist
       - run: python -m tests.test_notifications

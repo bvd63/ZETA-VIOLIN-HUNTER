@@ -18,10 +18,17 @@ from filters import has_zeta_signal
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz"
-# Musikinstrumente category — bare brand query without the non-music noise
-CATEGORY_URL = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/musikinstrumente-2001"
+# Verified on the primary site, 2026-10-25. Numeric ID controls the category:
+# 2001 is PlayStation games even if the slug says "musikinstrumente".
+CATEGORY_URL = SEARCH_URL + "/musikinstrumente-noten-6540"
 
-# (keyword, category-scoped)
+
+def search_plan() -> list:
+    # Keep every historical keyword globally (including miscategorized items),
+    # then add focused brand searches so unrelated "Zeta" products cannot bury
+    # instruments below the first page of the broad search.
+    return [(kw, SEARCH_URL) for kw in market_queries("de", broad=True)] + [
+        (kw, CATEGORY_URL) for kw in ("zeta", "strados")]
 
 
 class WillhabenScraper(BaseScraper):
@@ -33,13 +40,18 @@ class WillhabenScraper(BaseScraper):
         headers = {**BROWSER_HEADERS, "Accept-Language": "de-AT,de;q=0.9,en;q=0.8"}
 
         async with self.make_client(headers=headers) as client:
-            for kw, in_category in [(q, q.lower() in ("zeta", "strados")) for q in market_queries("de", broad=True)]:
+            for kw, search_url in search_plan():
                 try:
-                    resp = await client.get(CATEGORY_URL if in_category else SEARCH_URL, params={"keyword": kw})
+                    resp = await client.get(search_url, params={"keyword": kw})
                     if resp.status_code != 200:
                         log.warning(f"Willhaben '{kw}' HTTP {resp.status_code}")
                         continue
-                    adverts = self._extract(resp.text)
+                    try:
+                        adverts = self._extract(resp.text)
+                    except ValueError as exc:
+                        self.content_failures.append(str(exc))
+                        log.warning("Willhaben '%s': %s", kw, exc)
+                        continue
                     self.fetched += len(adverts)
 
                     for ad in adverts:
@@ -97,15 +109,28 @@ class WillhabenScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         el = soup.find("script", id="__NEXT_DATA__")
         if not el or not el.string:
-            log.warning("Willhaben: __NEXT_DATA__ not found (blocked or layout change)")
-            return []
+            raise ValueError("Willhaben search data missing (access or layout change)")
         try:
             data = json.loads(el.string)
-        except json.JSONDecodeError as e:
-            log.warning(f"Willhaben: __NEXT_DATA__ JSON error: {e}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("Willhaben search data invalid JSON") from exc
+        try:
+            sr = data["props"]["pageProps"]["searchResult"]
+        except (KeyError, TypeError) as exc:
+            raise ValueError("Willhaben searchResult missing (access or layout change)") from exc
+        if not isinstance(sr, dict):
+            raise ValueError("Willhaben searchResult missing (access or layout change)")
+        summary = sr.get("advertSummaryList") or {}
+        if not isinstance(summary, dict):
+            raise ValueError("Willhaben advert list invalid")
+        adverts = summary.get("advertSummary")
+        if adverts is None and sr.get("rowsFound") == 0:
             return []
-        sr = data.get("props", {}).get("pageProps", {}).get("searchResult", {}) or {}
-        return (sr.get("advertSummaryList") or {}).get("advertSummary") or []
+        if not isinstance(adverts, list) or any(not isinstance(ad, dict) for ad in adverts):
+            raise ValueError("Willhaben advert list missing or invalid")
+        if not adverts and sr.get("rowsFound") != 0:
+            raise ValueError("Willhaben results reported but no adverts parsed")
+        return adverts
 
     @staticmethod
     def _attrs(ad: dict) -> dict:

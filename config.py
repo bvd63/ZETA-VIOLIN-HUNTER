@@ -80,7 +80,7 @@ class Config:
     # by this code. Local reservations include failed/uncertain paid requests.
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
     TAVILY_QUERIES_PER_RUN = min(16, max(1, int(os.getenv("TAVILY_QUERIES_PER_RUN", "8"))))
-    TAVILY_EXTRA_QUERIES_PER_RUN = min(4, max(0, int(os.getenv("TAVILY_EXTRA_QUERIES_PER_RUN", "4"))))
+    TAVILY_EXTRA_QUERIES_PER_RUN = min(6, max(0, int(os.getenv("TAVILY_EXTRA_QUERIES_PER_RUN", "6"))))
     TAVILY_ROLLING_CREDITS = min(900, max(0, int(os.getenv("TAVILY_ROLLING_CREDITS", "900"))))
     EXA_API_KEY = os.getenv("EXA_API_KEY", "")
     EXA_QUERIES_PER_RUN = min(8, max(1, int(os.getenv("EXA_QUERIES_PER_RUN", "4"))))

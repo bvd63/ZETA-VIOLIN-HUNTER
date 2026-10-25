@@ -245,6 +245,30 @@ class NotificationsTests(unittest.IsolatedAsyncioTestCase):
         finally:
             db.close()
 
+    async def test_full_cycle_pending_recovery_uses_same_primary_identity_policy(self):
+        import main
+        item = {**self.listing, 'title':'Vintage instrument', 'description':'Zeta electric violin with case.',
+                'source':'search', 'url':'https://dealer.example/item/uncertain'}
+        db = database.Database()
+        db.enqueue(item)
+        db.close()
+        send = AsyncMock()
+        with patch.object(TelegramNotifier, 'send_listings', send), \
+                patch.object(TelegramNotifier, 'send_no_changes', AsyncMock()), \
+                patch('main.verify_offer', AsyncMock(return_value=('unknown','access unavailable'))), \
+                patch('main.build_scrapers', return_value=[]), \
+                patch('main.refresh_rates', AsyncMock()), patch('main.detect_egress', AsyncMock()), \
+                patch('main._watchdog', AsyncMock()), patch('main.resource_tick', AsyncMock()), \
+                patch('main._maybe_weekly_digest', AsyncMock()):
+            await main.run_search_cycle()
+        send.assert_not_awaited()
+        db = database.Database()
+        try:
+            self.assertEqual([x['url'] for x in db.pending()], [item['url']])
+            self.assertFalse(db.is_seen(item['id']))
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

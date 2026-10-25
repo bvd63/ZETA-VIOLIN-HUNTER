@@ -133,7 +133,7 @@ class TavilyScraper(ReserveSearch):
 
     def extra_queries(self, cursor: int) -> list:
         # Additional slots, never replacements for the eight original queries.
-        # Default 12/cycle * 62 cycles = 744 basic credits within the existing
+        # Default 14/cycle * 62 cycles = 868 basic credits within the existing
         # 900-credit ledger and 1000-credit free account allowance.
         count = min(Config.TAVILY_EXTRA_QUERIES_PER_RUN,
                     max(0, self.daily_limit // Config.RUNS_PER_DAY - Config.TAVILY_QUERIES_PER_RUN))
@@ -141,11 +141,18 @@ class TavilyScraper(ReserveSearch):
         result = []
         for i in range(count):
             slot = cursor + i
-            if slot % 4 < 2:
-                result.append((ADDITIONAL_WEB_KEYWORDS[slot % 4] + " for sale auction", []))
-            else:
-                term = aliases[((slot // 4) * 2 + slot % 4 - 2) % len(aliases)]
+            phase = slot % 6
+            if phase < 2:
+                result.append((ADDITIONAL_WEB_KEYWORDS[phase] + " for sale auction", []))
+            elif phase < 4:
+                term = aliases[((slot // 6) * 2 + phase - 2) % len(aliases)]
                 result.append((term + " used violin sale auction", []))
+            else:
+                # Extra index coverage while direct fetches are blocked. This
+                # does not claim access to unindexed/private listings, and it
+                # does not remove a single direct collector query.
+                query = 'Zeta OR Zetta OR Strados OR ' + ' OR '.join(MODEL_CODES)
+                result.append((query, ['willhaben.at' if phase == 4 else 'gumtree.com']))
         return result
 
     def rolling_limit(self):

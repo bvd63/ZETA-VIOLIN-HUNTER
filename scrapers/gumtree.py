@@ -1,9 +1,8 @@
 """
 Gumtree UK scraper — server-rendered result tiles.
 
-Verified 2026-09-07: reachable from EU IPs; results are
-<article data-q="search-result"> tiles with an anchor to /p/... and the
-title/description/location/price as text.
+Supports both legacy article tiles and the 2026 div/anchor/article cards.
+Reachability from a Romanian connection does not imply Railway access.
 """
 
 from keywords import market_queries
@@ -11,6 +10,7 @@ from keywords import market_queries
 import logging
 import re
 import httpx
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
 from filters import has_zeta_signal
@@ -48,7 +48,12 @@ class GumtreeScraper(BaseScraper):
                     if resp.status_code != 200:
                         log.warning(f"Gumtree '{kw}' HTTP {resp.status_code}")
                         continue
-                    tiles = self._extract(resp.text)
+                    try:
+                        tiles = self._extract(resp.text)
+                    except ValueError as exc:
+                        self.content_failures.append(str(exc))
+                        log.warning("Gumtree '%s': %s", kw, exc)
+                        continue
                     self.fetched += len(tiles)
 
                     for tile in tiles:
@@ -90,15 +95,23 @@ class GumtreeScraper(BaseScraper):
     def _extract(html: str) -> list:
         soup = BeautifulSoup(html, "lxml")
         tiles = []
-        for art in soup.select("article[data-q='search-result']"):
-            a = art.select_one("a[href]")
+        seen = set()
+        for art in soup.select("[data-q='search-result'], [data-testid='rh-standard-card-listing']"):
+            a = next((link for link in art.select("a[href]")
+                      if re.match(r"^/p/(?:[^/]+/)+\d+/?$",
+                                  urlsplit(urljoin(SEARCH_URL, link['href'])).path)), None)
             if not a:
                 continue
-            href = a.get("href", "")
-            url = href if href.startswith("http") else f"https://www.gumtree.com{href}"
-            title_el = art.select_one("[data-q='tile-title'], h2, h3")
+            parsed = urlsplit(urljoin(SEARCH_URL, a['href']))
+            if parsed.hostname not in ("gumtree.com", "www.gumtree.com"):
+                continue
+            url = urlunsplit(('https', 'www.gumtree.com', parsed.path.rstrip('/'), '', ''))
+            if url in seen:
+                continue
+            seen.add(url)
+            title_el = art.select_one("[data-q='tile-title'], [data-testid='rh-standard-card-title'], h2, h3")
             title = title_el.get_text(" ", strip=True) if title_el else ""
-            desc_el = art.select_one("[data-q='tile-description'], p")
+            desc_el = art.select_one("[data-q='tile-description'], [data-testid='rh-standard-card-description'], p")
             description = desc_el.get_text(" ", strip=True) if desc_el else ""
             loc_el = art.select_one("[data-q='tile-location']")
             location = loc_el.get_text(" ", strip=True) if loc_el else ""
@@ -106,7 +119,8 @@ class GumtreeScraper(BaseScraper):
             if not title:
                 # First sentence of the tile text is the title
                 title = text.split(" £")[0][:120]
-            price_m = PRICE_RX.search(text)
+            price_el = art.select_one("[data-q='tile-price'], [data-testid='rh-standard-card-price']")
+            price_m = PRICE_RX.search(price_el.get_text(" ", strip=True) if price_el else text)
             img = art.select_one("img")
             image = (img.get("src") or img.get("data-src") or "") if img else ""
             tiles.append({
@@ -114,4 +128,10 @@ class GumtreeScraper(BaseScraper):
                 "location": location, "price": price_m.group(0) if price_m else "N/A",
                 "image": image if image.startswith("http") else "", "text": text,
             })
+        if not tiles:
+            # The current public empty page explicitly says "0 ads for ...".
+            # A JS/challenge shell or another layout must remain an error.
+            h1 = soup.find('h1')
+            if not h1 or not re.match(r'^0 ads\b', h1.get_text(' ', strip=True), re.I):
+                raise ValueError("Gumtree results unrecognized (access or layout change)")
         return tiles

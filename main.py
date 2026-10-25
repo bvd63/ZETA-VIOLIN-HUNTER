@@ -119,6 +119,11 @@ def build_scrapers() -> list:
     ]
 
 
+def _needs_primary_identity(listing: dict, state: str) -> bool:
+    return (state == "unknown" and listing.get("source") == "search"
+            and not listing.get("_primary_content_checked") and not has_primary_identity(listing))
+
+
 async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncClient, dropped: dict,
                               queue_namespace: str = None) -> list:
     """Liveness-check search-engine hits concurrently. Returns the live ones.
@@ -150,8 +155,7 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
         listing, (state, why) = outcome
-        if (state == "unknown" and listing.get("source") == "search"
-                and not listing.get("_primary_content_checked") and not has_primary_identity(listing)):
+        if _needs_primary_identity(listing, state):
             # Index text may describe a recommendation for a different lot.
             # Retain the candidate, but do not call that primary-item proof.
             if queue_namespace:
@@ -403,8 +407,7 @@ async def notification_tick() -> None:
                     if classify(listing):
                         db.discard_pending(listing.get("url", ""))
                         continue
-                    if (state == "unknown" and listing.get("source") == "search"
-                            and not listing.get("_primary_content_checked") and not has_primary_identity(listing)):
+                    if _needs_primary_identity(listing, state):
                         continue  # keep pending; a search snippet is not item proof
                     listing["verification"], listing["liveness"] = state, why
                     await _deliver(notifier, db, prices, [listing])
@@ -413,8 +416,10 @@ async def notification_tick() -> None:
                         db.finish_price_drop(listing.get("url", ""))
                         continue
                     state, _ = await verify_offer(listing, http)
-                    if state in ("dead", "non_sale"):
+                    if state in ("dead", "non_sale") or classify(listing):
                         db.finish_price_drop(listing.get("url", ""))
+                        continue
+                    if _needs_primary_identity(listing, state):
                         continue
                     if await notifier.send_price_drops([(listing, info)]):
                         db.finish_price_drop(listing.get("url", ""))
@@ -486,8 +491,10 @@ async def run_search_cycle():
                     continue
                 async with httpx.AsyncClient(timeout=15) as http:
                     state, _ = await verify_offer(listing, http)
-                if state in ("dead", "non_sale"):
+                if state in ("dead", "non_sale") or classify(listing):
                     db.finish_price_drop(listing.get("url", ""))
+                elif _needs_primary_identity(listing, state):
+                    continue
                 else:
                     all_drops.append((listing, info))
             # Retry durable messages even if their source disappears this cycle.
@@ -501,6 +508,8 @@ async def run_search_cycle():
                         state, why = await verify_offer(listing, http)
                         if state in ("dead", "non_sale") or classify(listing):
                             db.discard_pending(listing.get("url", ""))
+                            continue
+                        if _needs_primary_identity(listing, state):
                             continue
                         listing["verification"] = state
                         listing["liveness"] = why

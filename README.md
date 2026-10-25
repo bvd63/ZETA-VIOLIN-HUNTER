@@ -83,10 +83,11 @@ resursele reale, deci abonamentul de 5 USD nu garantează singur un plafon de co
 `DB_PATH=/data/zeta_listings.db` trebuie păstrat pe volumul existent.
 
 Tavily și Exa completează motoarele existente după salvarea cheilor în Railway:
-8 căutări Tavily Basic/ciclu plus 4 căutări suplimentare și 4 Exa Auto/ciclu,
-fără filtru de vechime a paginii. Cele 4 suplimentare acoperă termeni noi,
-priorități și alte aliasuri de modele, fără înlocuirea celor 8 căutări existente.
-Implicit, Tavily folosește cel mult 744 credite într-o lună de 31 zile.
+8 căutări Tavily Basic/ciclu plus 6 căutări suplimentare și 4 Exa Auto/ciclu,
+fără filtru de vechime a paginii. Cele 6 suplimentare acoperă termeni noi,
+priorități și alte aliasuri de modele, fără înlocuirea celor 8 căutări existente. Două dintre cele suplimentare verifică
+indexul Willhaben și Gumtree UK; eventualele blocaje directe 403/247 rămân raportate.
+Implicit, Tavily folosește cel mult 868 credite într-o lună de 31 zile.
 Termenii comuni și grupurile de domenii se rotesc prin cursori persistenți independenți.
 În Exa, domeniile sunt preferințe în textul căutării, astfel încât rezultatele
 pot veni și de pe alte site-uri; ghidul oficial recomandă evitarea unei liste

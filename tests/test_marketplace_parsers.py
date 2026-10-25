@@ -1,0 +1,121 @@
+"""Regressions for observed Willhaben category and Gumtree DOM failures.
+
+Reduced public DOM structure; synthetic items; no network or real alerts.
+"""
+import asyncio
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import httpx
+
+TEMP = tempfile.TemporaryDirectory()
+os.environ['DB_PATH'] = str(Path(TEMP.name) / 'parsers.db')
+from filters import classify
+from keywords import market_queries
+from scrapers.base import BaseScraper
+from scrapers.gumtree import GumtreeScraper
+from scrapers.willhaben import WillhabenScraper, SEARCH_URL, CATEGORY_URL, search_plan
+
+CARDS = (Path(__file__).parent / 'fixtures/gumtree_cards_2026.html').read_text()
+
+
+def next_page(result):
+    return '<script id="__NEXT_DATA__" type="application/json">' + json.dumps({
+        'props': {'pageProps': {'searchResult': result}}}) + '</script>'
+
+
+def run(scraper, handler):
+    def client(**kwargs):
+        return BaseScraper.make_client(scraper, transport=httpx.MockTransport(handler), **kwargs)
+    with patch.object(scraper, 'make_client', client):
+        return asyncio.run(scraper.search())
+
+
+class MarketplaceParserTests(unittest.TestCase):
+    def test_new_div_cards_and_legacy_articles_both_parse(self):
+        cards = GumtreeScraper._extract(CARDS)
+        self.assertEqual(len(cards), 2)
+        self.assertEqual(cards[0]['title'], 'Zeta JLP 5 Strings')
+        self.assertEqual(cards[0]['price'], '£ 1,850')
+        self.assertEqual(cards[0]['location'], 'London')
+        self.assertEqual(cards[0]['description'], 'Violon électrique ancien. Case only has minor scuffs.')
+        self.assertEqual(cards[0]['url'], 'https://www.gumtree.com/p/violins/zeta-jlp/9000000001')
+        self.assertEqual(cards[1]['title'], 'Zeta JV5')
+
+    def test_new_testids_work_without_legacy_data_q(self):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(CARDS, 'lxml')
+        for el in soup.select('[data-q]'):
+            del el['data-q']
+        self.assertEqual(GumtreeScraper._extract(str(soup))[0]['title'], 'Zeta JLP 5 Strings')
+
+    def test_duplicate_urls_are_one_item(self):
+        self.assertEqual(len(GumtreeScraper._extract(CARDS + CARDS)), 2)
+
+    def test_gumtree_retains_description_tail_and_multilingual_identity(self):
+        long = 'Historical notes. ' * 100 + ' Zeta Geige Jazz Fusion, gebraucht.'
+        html = CARDS.replace('Violon électrique ancien. Case only has minor scuffs.', long)
+        scraper = GumtreeScraper()
+        found = run(scraper, lambda request: httpx.Response(200, text=html))
+        self.assertEqual(len(found), 2)
+        self.assertEqual(found[0]['description'], long)
+        self.assertEqual(classify(found[0]), '')
+        self.assertEqual(scraper.requests_attempted, len(market_queries('en', broad=True, limit=8, extra=('electric violin',))))
+        self.assertEqual(scraper.health_error(), '')
+
+    def test_external_ad_links_are_not_instruments(self):
+        bad = '<div data-q="search-result"><a href="https://ads.example/p/violin/zeta/123">Zeta</a></div>'
+        with self.assertRaises(ValueError):
+            GumtreeScraper._extract(bad)
+
+    def test_empty_search_is_healthy_but_challenge_or_layout_is_not(self):
+        self.assertEqual(GumtreeScraper._extract('<h1>0 ads for zeta violin in All Classifieds</h1>'), [])
+        scraper = GumtreeScraper()
+        self.assertEqual(run(scraper, lambda request: httpx.Response(200, text='<h1>Please enable JavaScript</h1>')), [])
+        self.assertIn('layout change', scraper.health_error())
+
+    def test_willhaben_correct_music_category_plus_every_global_query(self):
+        plan = search_plan()
+        self.assertEqual(plan[:len(plan)-2], [(q, SEARCH_URL) for q in market_queries('de', broad=True)])
+        self.assertEqual(plan[-2:], [('zeta', CATEGORY_URL), ('strados', CATEGORY_URL)])
+        self.assertTrue(CATEGORY_URL.endswith('/musikinstrumente-noten-6540'))
+
+    def test_willhaben_detail_fields_and_duplicate_global_category_results(self):
+        attrs = {'HEADING':'Zeta 5 Strings', 'BODY_DYN':'a' * 1000 + ' Geige Jazz Fusion, gebraucht.',
+                 'SEO_URL':'kaufen-und-verkaufen/d/zeta-123/', 'PRICE_FOR_DISPLAY':'€ 1.900', 'LOCATION':'Wien'}
+        ad = {'id':'123', 'attributes':{'attribute':[{'name':k,'values':[v]} for k,v in attrs.items()]}}
+        html = next_page({'rowsFound':1, 'advertSummaryList':{'advertSummary':[ad]}})
+        scraper = WillhabenScraper()
+        calls = []
+        def handler(request):
+            calls.append((str(request.url).split('?')[0], request.url.params['keyword']))
+            return httpx.Response(200, text=html)
+        found = run(scraper, handler)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['description'], attrs['BODY_DYN'])
+        self.assertEqual(classify(found[0]), '')
+        self.assertEqual(calls, [(url, q) for q, url in search_plan()])
+        self.assertEqual(scraper.health_error(), '')
+
+    def test_willhaben_empty_search_and_unrecognized_200_are_distinct(self):
+        self.assertEqual(WillhabenScraper._extract(next_page({'rowsFound':0})), [])
+        for html in ('<h1>Access denied</h1>', '<script id="__NEXT_DATA__">{}</script>',
+                     next_page({'rowsFound':1, 'advertSummaryList':{'advertSummary':[]}})):
+            with self.subTest(html=html), self.assertRaises(ValueError):
+                WillhabenScraper._extract(html)
+        scraper = WillhabenScraper()
+        self.assertEqual(run(scraper, lambda request: httpx.Response(200, text='<h1>Access denied</h1>')), [])
+        self.assertIn('search data missing', scraper.health_error())
+
+    def test_willhaben_403_remains_visible(self):
+        scraper = WillhabenScraper()
+        self.assertEqual(run(scraper, lambda request: httpx.Response(403)), [])
+        self.assertIn('HTTP 403', scraper.health_error())
+
+
+if __name__ == '__main__':
+    unittest.main()

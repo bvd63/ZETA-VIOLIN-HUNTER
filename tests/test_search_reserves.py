@@ -28,7 +28,7 @@ class SearchReservesTests(unittest.TestCase):
             queue.conn.execute("DELETE FROM discovery_queue")
             queue.conn.commit()
         p = patch.multiple(Config, TAVILY_API_KEY="fake", EXA_API_KEY="fake",
-                           TAVILY_QUERIES_PER_RUN=8, TAVILY_EXTRA_QUERIES_PER_RUN=4, EXA_QUERIES_PER_RUN=4,
+                           TAVILY_QUERIES_PER_RUN=8, TAVILY_EXTRA_QUERIES_PER_RUN=6, EXA_QUERIES_PER_RUN=4,
                            TAVILY_ROLLING_CREDITS=900, EXA_ROLLING_BUDGET_USD=8)
         p.start()
         self.addCleanup(p.stop)
@@ -61,14 +61,16 @@ class SearchReservesTests(unittest.TestCase):
             calls.append(json.loads(request.content))
             return httpx.Response(200, json={"results": [{"title": "Zeta violin", "url": "https://reverb.com/item/123", "content": "Used Zeta"}]})
         found = self.run_scraper(TavilyScraper(), handler)
-        self.assertEqual(len(calls), 12)
+        self.assertEqual(len(calls), 14)
         self.assertEqual(len(found), 1)
         self.assertTrue(all(p["search_depth"] == "basic" and p["auto_parameters"] is False and
                             p["include_answer"] is False for p in calls))
         self.assertEqual([p["query"] for p in calls[:8]], [q for q,_ in plan(0,8)])
-        self.assertEqual(read("tavily:extra_cursor"), 4)
+        self.assertEqual(read("tavily:extra_cursor"), 6)
+        self.assertEqual(calls[-2]["include_domains"], ["willhaben.at"])
+        self.assertEqual(calls[-1]["include_domains"], ["gumtree.com"])
         self.assertEqual(read("tavily:cursor"), 8)
-        self.assertEqual(used("tavily"), 12)
+        self.assertEqual(used("tavily"), 14)
 
     def test_exa_has_bounded_result_and_content_cost(self):
         calls = []
