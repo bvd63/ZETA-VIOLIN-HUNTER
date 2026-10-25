@@ -31,6 +31,24 @@ def listing(**fields: object) -> dict:
 
 
 class IdentityRecallTests(unittest.TestCase):
+    def test_real_gumtree_studio_zeta_table_is_not_a_modernist_violin(self) -> None:
+        item = listing(title='Italian Modernist flat bar chrome glass coffee table Studio Zeta Cidue style',
+                       description='Vintage chrome and glass coffee table. Studio Zeta design.',
+                       url='https://www.gumtree.com/p/coffee-table/italian-modernist-flat-bar-chrome-glass-coffee-table-studio-zeta-cidue-style/1804020876')
+        self.assertEqual(classify(item), 'noise')
+        self.assertEqual(classify(listing(title='Zeta Modernist')), '')
+
+    def test_furniture_context_does_not_hide_real_instrument(self) -> None:
+        for item in (
+            listing(title='Zeta JV5 violin photographed on coffee table'),
+            listing(title='Zeta Modernist', description='Five strings. Photographed next to my coffee table.'),
+            listing(title='Zeta near coffee table', description='Verkaufe Zeta Geige, 5 Saiten.'),
+            listing(title='Zeta near coffee table', description='Zeta JV5, 5 strings, used.'),
+            listing(title='Zeta Modernist', categories=['Electric Violins']),
+        ):
+            with self.subTest(item=item):
+                self.assertEqual(classify(item), '')
+
     def test_real_archived_jv5_without_instrument_word(self) -> None:
         # Historical positive identity, NOT an active sale or notification.
         # https://reverb.com/item/97447559-zeta-jv5-1997-black

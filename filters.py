@@ -99,6 +99,13 @@ NOISE_OBJECT_RX = _rx([
     "copia", "copy", "kopie", "kopia", "copie", "clone",
     "fx", "effects", "effect processor", "preamp only", "pickup system only",
 ])
+# Homonymous furniture/vehicle brands also use "Zeta" and "Modernist".
+# These identify another object, not a violin model. Keep explicit instrument
+# evidence and descriptions of a real violin photographed near furniture.
+OTHER_PRODUCT_RX = _rx([
+    "coffee table", "dining table", "side table", "armchair", "sofa",
+    "stroller", "pushchair", "pram", "bicycle", "mountain bike", "motorcycle", "motorbike",
+])
 # A case listing can contain both "Zeta" and "violin" without selling a violin.
 # Require explicit bundle language to treat a case in the title as included gear.
 CASE_RX = _rx(["case", "cases", "hardcase", "gig bag", "gigbag", "etui", "étui",
@@ -254,6 +261,21 @@ def has_primary_identity(listing: dict) -> bool:
     """Identity independent of an unverified search-engine description."""
     title, _ = _text(listing)
     return is_zeta_violin(title, **_identity_metadata(listing))
+
+
+def sells_other_product(title: str, description: str, metadata: dict) -> bool:
+    if not OTHER_PRODUCT_RX.search(title):
+        return False
+    if has_violin_word(title) or _violin_category(metadata.get("categories")):
+        return False
+    # A miscategorized or vaguely titled violin can still identify itself in
+    # its own description, in any supported language or by string configuration.
+    for clause in re.split(r"[,;\n]|(?<=[.!?])\s+", description):
+        if (not OTHER_PRODUCT_RX.search(clause)
+                and (has_violin_word(clause) or STRING_CONFIGURATION_RX.search(clause))
+                and is_zeta_violin(title, clause, **metadata)):
+            return False
+    return True
 
 
 def is_zeta_violin(title: str, description: str = "", *, brand: str = "", model: str = "",
@@ -455,6 +477,8 @@ def classify(listing: dict) -> str:
     if listing.get("source") == "search" and is_editorial_url(str(listing.get("url", ""))):
         return "non_sale"
     metadata = _identity_metadata(listing)
+    if sells_other_product(title, desc, metadata):
+        return "noise"
     title_conclusive = is_zeta_violin(title, **metadata)
     # Recording liner notes may mention Zeta instruments. The CD category
     # plus an artist-only title identifies the actual object being sold.
