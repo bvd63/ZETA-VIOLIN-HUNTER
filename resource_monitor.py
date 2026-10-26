@@ -172,6 +172,7 @@ def text() -> str:
     tavily = cycles * (Config.TAVILY_QUERIES_PER_RUN + Config.TAVILY_EXTRA_QUERIES_PER_RUN)
     exa = cycles * (Config.EXA_QUERIES_PER_RUN + Config.EXA_EXTRA_QUERIES_PER_RUN) * .017
     exa += 2 * 620 * .001  # Primary-page checks + identical Willhaben query fallback.
+    exa += 186 * .001      # Six final Gumtree fallback pages/day.
     lines.append(f'Plan la 31 zile: Brave {brave} cereri; Tavily {tavily} credite; Exa ≤ ${exa:.2f}. '
                  'Apify: costurile confirmate înlocuiesc rezervările; cele incerte rămân integral rezervate.')
     lines += [html.escape(s) for s in warnings(data)]

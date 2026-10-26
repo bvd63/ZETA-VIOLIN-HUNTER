@@ -128,6 +128,8 @@ class WillhabenScraper(BaseScraper):
 
     @staticmethod
     def _extract_exa(result: dict) -> tuple:
+        if result.get('_error'):
+            raise ValueError(result['_error'])
         text=result.get('text','')
         # Exa plain text retains the actual result heading; do not mistake an
         # empty challenge/error shell or missing links for zero advertisements.

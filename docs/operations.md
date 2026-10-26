@@ -30,8 +30,12 @@ Willhaben păstrează toate cele10 căutări HTTP și încearcă aceleași URL-u
 Exa numai la eșec. Rezerva extrage text live și linkurile reale, cel mult20pagini/zi
 și620/31 zile (încă0,620USD). Un număr de anunțuri fără linkuri nu este o căutare
 goală; mai puține linkuri decât rezultatele așteptate sunt acoperire parțială.
-Cele două rezerve de conținut plus căutările Exa înseamnă maximum7,564USD/31zile
-și0,244USD/zi, în limitele existente8USD și0,25USD. Niciun rezultat din cache
+Gumtree adaugă o ultimă încercare Exa după eșecul HTTP și Chromium, maximum6pagini/zi
+și186/31zile (0,186USD). Explicit0ads este o căutare validă; un corp lipsă sau
+anunțuri raportate fără linkuri rămân eroare. Linkurile reale dintr-un set
+incomplet sunt păstrate, dar sursa rămâne parțială.
+Cele trei rezerve de conținut plus căutările Exa înseamnă maximum7,750USD/31zile
+și0,250USD/zi, în limitele existente8USD și0,25USD. Niciun rezultat din cache
 Exa nu este folosit pentru a afirma disponibilitate curentă.
 
 Butoanele „Nu e vioară” și „Vândut / încheiat” salvează corecția și opresc alarmele

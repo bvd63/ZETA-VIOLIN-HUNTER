@@ -10,11 +10,12 @@ from keywords import market_queries
 import logging
 import re
 import httpx
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit, unquote
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
 from filters import has_zeta_signal
 from browser_fetch import PublicSearchBrowser
+from primary_page_reserve import fresh_gumtree_search
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class GumtreeScraper(BaseScraper):
                 try:
                     attempted_before, ok_before = self.requests_attempted, self.requests_ok
                     failures_before = len(self.failures)
+                    content_before = len(self.content_failures)
                     resp = await client.get(SEARCH_URL, params={"search_category": "all", "q": kw})
                     if resp.status_code != 200:
                         import asyncio
@@ -74,6 +76,20 @@ class GumtreeScraper(BaseScraper):
                         except Exception as exc:
                             self.content_failures.append('Gumtree browser fallback '+type(exc).__name__)
                             log.warning("Gumtree browser fallback failed (%s)",type(exc).__name__)
+                    if tiles is None:
+                        recovered=await fresh_gumtree_search(str(httpx.URL(SEARCH_URL,
+                            params={'search_category':'all','q':kw})),client)
+                        try:
+                            tiles,complete=self._extract_exa(recovered)
+                            if complete:
+                                self.requests_recovered+=max(0,self.requests_attempted-attempted_before-(self.requests_ok-ok_before))
+                                del self.failures[failures_before:]
+                                del self.content_failures[content_before:]
+                            else:
+                                self.content_failures.append('Gumtree: Exa recovered partial result links')
+                            log.info("Gumtree '%s': Exa live recovered %s item links (complete=%s)",kw,len(tiles),complete)
+                        except ValueError as exc:
+                            self.content_failures.append(str(exc))
                     if tiles is None:
                         if parse_error:
                             self.content_failures.append(parse_error)
@@ -115,6 +131,32 @@ class GumtreeScraper(BaseScraper):
 
         log.info(f"Gumtree UK: {len(results)} listings found")
         return results
+
+    @staticmethod
+    def _extract_exa(result: dict) -> tuple:
+        if result.get('_error'):
+            raise ValueError(result['_error'])
+        count=re.search(r'(?:^|\n)\s*(?:#+\s*)?([\d,]+)\s+ads?\s+for\b',result.get('text',''),re.I)
+        if not count:
+            raise ValueError('Gumtree: live search result count not verified')
+        total=int(count.group(1).replace(',',''))
+        tiles=[];seen=set()
+        for link in (result.get('extras') or {}).get('links',[]):
+            if not isinstance(link,str):
+                continue
+            parts=urlsplit(urljoin(SEARCH_URL,link))
+            if (parts.scheme!='https' or parts.hostname not in ('gumtree.com','www.gumtree.com')
+                    or not re.fullmatch(r'/p/(?:[^/]+/)+\d+/?',parts.path)):
+                continue
+            url=urlunsplit(('https','www.gumtree.com',parts.path.rstrip('/'),'',''))
+            if url in seen:
+                continue
+            seen.add(url)
+            title=unquote(parts.path.rstrip('/').split('/')[-2]).replace('-',' ')
+            tiles.append({'url':url,'title':title,'text':title,'description':'','price':'N/A','location':'','image':''})
+        if total>0 and not tiles:
+            raise ValueError('Gumtree: results exist but live item links missing')
+        return tiles,len(tiles)==total
 
     @staticmethod
     def _extract(html: str) -> list:

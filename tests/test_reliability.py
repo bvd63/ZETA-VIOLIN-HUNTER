@@ -274,12 +274,12 @@ class RegressionTests(unittest.TestCase):
                 with patch.object(Config,'EXA_API_KEY','fixture'), \
                      patch('primary_page_reserve.read',return_value={}), \
                      patch('primary_page_reserve.write'), \
-                     patch('primary_page_reserve.reserve',return_value=True) as reserved:
+                     patch('primary_page_reserve.reserve_pages',return_value=True) as reserved:
                     async with httpx.AsyncClient() as client:
                         with patch.object(client,'post',post):
                             page=await fresh_primary_page(url,client)
                     self.assertEqual(bool(page),source=='crawled' and status=='success')
-                    self.assertEqual(reserved.call_count,2)
+                    self.assertEqual(reserved.call_count,1)
                     if page:
                         self.assertEqual(inspect_page(self.listing(url=url),page,200,url)[0],'dead')
         asyncio.run(run())
@@ -290,7 +290,7 @@ class RegressionTests(unittest.TestCase):
         async def run():
             with patch.object(Config,'EXA_API_KEY','fixture'), \
                  patch('primary_page_reserve.read',return_value={}), \
-                 patch('primary_page_reserve.reserve',return_value=False), \
+                 patch('primary_page_reserve.reserve_pages',return_value=False), \
                  patch('httpx.AsyncClient.post',AsyncMock()) as post:
                 async with httpx.AsyncClient() as client:
                     self.assertEqual(await fresh_primary_page(url,client),'')
@@ -310,18 +310,40 @@ class RegressionTests(unittest.TestCase):
                     return httpx.Response(200,json={'statuses':[{'id':url,'status':'success','source':source}],
                         'results':[{'url':url,'text':'0 Anzeigen','extras':{'links':[]}}]})
                 with patch.object(Config,'EXA_API_KEY','fixture'), \
-                     patch('primary_page_reserve.reserve',return_value=True) as reserved:
+                     patch('primary_page_reserve.reserve_pages',return_value=True) as reserved:
                     async with httpx.AsyncClient() as client:
                         with patch.object(client,'post',post): result=await fresh_willhaben_search(url,client)
                     self.assertEqual(bool(result),source=='crawled')
-                    self.assertEqual(reserved.call_count,2)
+                    self.assertEqual(reserved.call_count,1)
             with patch.object(Config,'EXA_API_KEY','fixture'), \
-                 patch('primary_page_reserve.reserve',return_value=False), \
+                 patch('primary_page_reserve.reserve_pages',return_value=False), \
                  patch('httpx.AsyncClient.post',AsyncMock()) as post:
                 async with httpx.AsyncClient() as client:
-                    self.assertEqual(await fresh_willhaben_search(url,client),{})
+                    self.assertIn('limita locală',(await fresh_willhaben_search(url,client)).get('_error',''))
                 post.assert_not_awaited()
         asyncio.run(run())
+
+    def test_unavailable_shared_exa_budget_never_consumes_unbilled_page_slots(self):
+        from primary_page_reserve import reserve_pages
+        from provider_state import store,used,reserve
+        with store() as conn:
+            conn.execute("DELETE FROM provider_reservations WHERE provider IN ('exa','exa_contents','exa_will_search')")
+            conn.commit()
+        self.assertTrue(reserve('exa',250000,8000000,250000))
+        for name in ('exa_contents','exa_will_search'):
+            self.assertFalse(reserve_pages(name))
+            self.assertEqual(used(name),0)
+
+    def test_gumtree_final_route_has_six_page_daily_cap_without_extra_dollar_reservation(self):
+        from primary_page_reserve import reserve_pages
+        from provider_state import store,used
+        with store() as conn:
+            conn.execute("DELETE FROM provider_reservations WHERE provider IN ('exa','exa_gum_search')")
+            conn.commit()
+        for _ in range(6): self.assertTrue(reserve_pages('exa_gum_search'))
+        self.assertFalse(reserve_pages('exa_gum_search'))
+        self.assertEqual(used('exa_gum_search'),6)
+        self.assertEqual(used('exa'),6000)
 
     def test_article_with_affiliate_product_is_not_offer(self):
         page = '<main><h1>Zeta violin</h1><script type="application/ld+json">' + json.dumps([

@@ -29,17 +29,40 @@ def next_page(result):
         'props': {'pageProps': {'searchResult': result}}}) + '</script>'
 
 
-def run(scraper, handler, browser=(0, ""), will_result=None):
+def run(scraper, handler, browser=(0, ""), will_result=None, gum_result=None):
     def client(**kwargs):
         return BaseScraper.make_client(scraper, transport=httpx.MockTransport(handler), **kwargs)
     with patch.object(scraper, 'make_client', client), \
          patch('scrapers.gumtree.PublicSearchBrowser.fetch', AsyncMock(return_value=browser)), \
          patch('scrapers.willhaben.fresh_willhaben_search', AsyncMock(return_value=will_result or {})), \
+         patch('scrapers.gumtree.fresh_gumtree_search', AsyncMock(return_value=gum_result or {})), \
          patch('asyncio.sleep',AsyncMock()):
         return asyncio.run(scraper.search())
 
 
 class MarketplaceParserTests(unittest.TestCase):
+    def test_gumtree_last_live_route_recovers_explicit_empty_after_two_blocks(self):
+        payload={'text':'Jazz standard violin - Gumtree\n\n# 0 ads for jazz standard violin in All Classifieds',
+                 'extras':{'links':[]}}
+        scraper=GumtreeScraper()
+        with patch('scrapers.gumtree.market_queries',return_value=['jazz standard violin']):
+            self.assertEqual(run(scraper,lambda r:httpx.Response(247),browser=(247,''),gum_result=payload),[])
+        self.assertEqual(scraper.health_error(),'')
+        self.assertEqual(scraper.requests_recovered,3)
+
+    def test_gumtree_extracted_real_item_survives_partial_result_set(self):
+        payload={'text':'# 4 ads for Zeta violin', 'extras':{'links':[
+            '/p/violins/zeta-jv5-electric-violin/123456789',
+            'https://unrelated.example/p/violins/zeta/99999']}}
+        scraper=GumtreeScraper()
+        with patch('scrapers.gumtree.market_queries',return_value=['Zeta violin']):
+            found=run(scraper,lambda r:httpx.Response(247),browser=(247,''),gum_result=payload)
+        self.assertEqual(len(found),1)
+        self.assertEqual(classify(found[0]),'')
+        self.assertIn('partial',scraper.health_error())
+        with self.assertRaises(ValueError): GumtreeScraper._extract_exa({'text':'Access denied'})
+        with self.assertRaises(ValueError): GumtreeScraper._extract_exa({'text':'# 1 ad for zeta','extras':{'links':[]}})
+
     def test_willhaben_live_extraction_keeps_real_relative_item_links(self):
         violin='/iad/kaufen-und-verkaufen/d/zeta-geige-violin-5-strings-zehr-gute-zustand-1363838209/'
         keyboard='/iad/kaufen-und-verkaufen/d/alesis-q49-midi-keyboard-914382744/'
