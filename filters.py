@@ -35,7 +35,7 @@ def _rx(terms: list) -> "re.Pattern":
 # §4.1 CLASS A — strong Zeta identifiers
 # ---------------------------------------------------------------------------
 ZETA_BRAND_RX = _rx(["zeta", "zetta", "zetamusic", "zeta music", "zeta music systems"])
-ZETA_BRAND_JP = ["ゼータ"]
+ZETA_BRAND_NATIVE = ["ゼータ", "제타"]
 
 # Zeta model codes, optional hyphen (SV-24). Yamaha SV-200/SV-250/EV-205
 # do NOT match because the digits must end at a word boundary.
@@ -122,6 +122,25 @@ PICKUP_OBJECT_TITLE_RX = re.compile(
 # Require explicit bundle language to treat a case in the title as included gear.
 CASE_RX = _rx(["case", "cases", "hardcase", "gig bag", "gigbag", "etui", "étui",
                "geigenkoffer", "geigenkasten", "cutie"])
+# Hangul compounds do not have Latin word boundaries. Keep accessory objects
+# separate from the manufacturer's Korean name and explicit instrument bundles.
+CASE_RX = re.compile(CASE_RX.pattern + r"|케이스", re.I)
+KOREAN_CASE_INCLUDED_RX = re.compile(r"\s*(?:포함|동봉|증정|미포함|불포함|별도|(?:와|랑)?\s*함께|도\s*드립)")
+KOREAN_ACCESSORY_TITLE_RX = re.compile(
+    r"\s*(?:(?:오리지널|정품|중고|빈티지)\s*)*(?:제타|zeta|zetta)\s*"
+    r"(?:(?:오리지널|정품|중고|빈티지)\s*)*(?:전자\s*)?바이올린\s*(?:용\s*)?"
+    r"(?:(?:오리지널|정품|중고|빈티지)\s*)*(?:줄|현|활|픽업|브리지|브릿지)\s*"
+    r"(?:(?:오리지널|정품|중고|빈티지)\s*)*(?:세트\s*)?(?:만|단품)?\s*"
+    r"(?:판매(?:합니다|해요)?|팝니다)?\s*", re.I)
+KOREAN_INSTRUMENT_ABSENT_RX = re.compile(r"(?:전자\s*)?바이올린(?:은|는)?\s*(?:미포함|불포함)")
+KOREAN_ACCESSORY_ONLY_SALE_RX = re.compile(
+    r"(?:케이스|활|픽업|줄|현)\s*만\s*(?:판매합니다|판매해요|팝니다)(?=$|[^\w])"
+    r"|(?:케이스|활|픽업|줄|현)\s*만\s*판매(?=\s*[.!]|\s*$)")
+KOREAN_BUY_INTENT_RX = re.compile(r"구합니다|구매합니다|삽니다")
+KOREAN_SOLD_TITLE_RX = re.compile(
+    r"^\W*(?:판매|거래)\s*완료(?!\s*(?:예정|아님|아닙))(?=$|[^\w])"
+    r"|(?:판매|거래)\s*완료\W*$|[\[(]\s*(?:판매|거래)\s*완료\s*[\])]")
+KOREAN_ACCESSORY_MENTION_RX = re.compile(r"케이스|픽업|브리지|브릿지|바이올린\s*(?:용\s*)?(?:줄|현|활)")
 CASE_BUNDLE_RX = re.compile(
     r"\b(?:with|includes?|including|plus|and|in|mit|avec|con|cu|met)\b|\bw/|[+&]", re.I)
 INSTRUMENT_ABSENT_RX = _rx([
@@ -224,7 +243,7 @@ def _text(listing: dict) -> tuple:
 
 def has_zeta_brand(text: str) -> bool:
     text = normalize_identity_text(text)
-    return bool(ZETA_BRAND_RX.search(text)) or any(j in text for j in ZETA_BRAND_JP)
+    return bool(ZETA_BRAND_RX.search(text)) or any(j in text for j in ZETA_BRAND_NATIVE)
 
 
 def has_violin_word(text: str) -> bool:
@@ -258,7 +277,7 @@ def _violin_category(categories: object) -> bool:
             continue
         leaf = re.split(r"[/>]", category)[-1].strip()
         if (has_violin_word(leaf) and not CASE_RX.search(leaf) and not NOISE_OBJECT_RX.search(leaf)
-                and not re.search(r"\b(?:accessor\w*|strings?|bows?|parts?)\b", leaf, re.I)):
+                and not re.search(r"\b(?:accessor\w*|strings?|bows?|parts?)\b|케이스|줄|현\s*세트|활|부품|픽업", leaf, re.I)):
             return True
     return False
 
@@ -351,6 +370,18 @@ def description_identifies_instrument(description: str) -> bool:
     return False
 
 
+def korean_instrument_sale(description: str) -> bool:
+    """An accessory-shaped title needs an independent affirmative item clause."""
+    for clause in re.split(r"[.;\n]", description):
+        if (is_zeta_violin(clause) and has_violin_word(clause)
+                and re.search(r'판매합니다|판매해요|팝니다', clause)
+                and not KOREAN_ACCESSORY_MENTION_RX.search(clause)
+                and not KOREAN_INSTRUMENT_ABSENT_RX.search(clause)
+                and not KOREAN_BUY_INTENT_RX.search(clause)):
+            return True
+    return False
+
+
 def has_noise(title: str, description: str = "", title_conclusive: bool = None,
               *, metadata: dict = None) -> bool:
     """title_conclusive=True → the title alone proves a Zeta violin, so the
@@ -367,7 +398,8 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None,
         return True
     if any(j in title for j in NOISE_JP):
         return True
-    if not INTENT_RX.search(title) and is_standalone_case(title, metadata):
+    if (not INTENT_RX.search(title) and is_standalone_case(title, metadata)
+            and not ('케이스' in title and korean_instrument_sale(description))):
         return True
     if PICKUP_OBJECT_TITLE_RX.fullmatch(title):
         # A poorly named item may still be a whole violin. Only an independent
@@ -383,6 +415,10 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None,
                 break
         if not instrument_clause:
             return True
+    if KOREAN_ACCESSORY_TITLE_RX.fullmatch(title) and not korean_instrument_sale(description):
+        return True
+    if KOREAN_INSTRUMENT_ABSENT_RX.search(title) or KOREAN_INSTRUMENT_ABSENT_RX.search(description):
+        return True
     if INSTRUMENT_ABSENT_RX.search(description):
         return True
     if not description:
@@ -407,6 +443,9 @@ def is_standalone_case(title: str, metadata: dict = None) -> bool:
             return False
     if before.strip() and is_zeta_violin(before, **(metadata or {})) and re.match(r"\s+(?:included|inclus|inclusa|incluso)\b", after, re.I):
         return False
+    if case.group() == '케이스' and KOREAN_CASE_INCLUDED_RX.match(after):
+        if is_zeta_violin(before, **(metadata or {})) or is_zeta_violin(after, **(metadata or {})):
+            return False
     # Reverse-order explicit bundles are also real offers of an instrument.
     if re.match(r"\s+(?:with|including|plus|and)\b|\s*[+&]", after, re.I) and is_zeta_violin(after):
         return False
@@ -456,7 +495,8 @@ def is_editorial_url(url: str) -> bool:
 
 
 def is_excluded_intent(title: str, description: str = "", title_conclusive: bool = None) -> bool:
-    if INTENT_RX.search(title) or INTENT_TITLE_RX.search(title):
+    if (INTENT_RX.search(title) or INTENT_TITLE_RX.search(title) or KOREAN_BUY_INTENT_RX.search(title)
+            or KOREAN_ACCESSORY_ONLY_SALE_RX.search(title)):
         return True
     if title_conclusive is None:
         title_conclusive = is_zeta_violin(title)
@@ -468,7 +508,7 @@ def is_excluded_intent(title: str, description: str = "", title_conclusive: bool
                       "included accessory condition", body, flags=re.I)
         body = re.sub(r"\b(?:stand|pedal|amplifier|amp|controller)\s+(?:is\s+)?not\s+for\s+sale\b",
                       "accessory unavailable", body, flags=re.I)
-    if body and INTENT_RX.search(body):
+    if body and (INTENT_RX.search(body) or KOREAN_ACCESSORY_ONLY_SALE_RX.search(body)):
         return True
     if description and not title_conclusive and INTENT_TITLE_RX.search(description):
         return True
@@ -480,7 +520,7 @@ def is_other_brand(title: str) -> bool:
 
 
 def is_sold_or_ended(title: str) -> bool:
-    return bool(SOLD_RX.search(title))
+    return bool(SOLD_RX.search(title) or KOREAN_SOLD_TITLE_RX.search(title))
 
 
 def is_new_stock(listing: dict, condition_mode: str, excluded_sellers: list) -> bool:

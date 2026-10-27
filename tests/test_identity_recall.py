@@ -17,7 +17,7 @@ os.environ["CONDITION"] = "used"
 TEMP = tempfile.TemporaryDirectory()
 os.environ["DB_PATH"] = str(Path(TEMP.name) / "bot.db")
 
-from filters import classify
+from filters import classify, is_zeta_violin
 from offer_verifier import inspect_page, verify_offer
 from scrapers.reverb import ReverbScraper
 from scrapers.shopgoodwill import ShopGoodwillScraper
@@ -98,6 +98,68 @@ class IdentityRecallTests(unittest.TestCase):
         self.assertEqual(classify(listing(title="Rare black instrument", description="Zeta JV5, 1997.")), "")
         self.assertEqual(classify(listing(title="ＺＥＴＡ ＪＶ５ 1997")), "")
 
+    def test_typographic_model_hyphens_preserve_identity_and_priority(self) -> None:
+        for dash in ('\u2010','\u2011','\u2012','\u2013','\u2014','\u2212'):
+            for model in ('JV5','JV45','JLP5'):
+                title = 'Zeta ' + model.replace('JV','JV'+dash).replace('JLP','JLP'+dash)
+                with self.subTest(title=title):
+                    item = listing(title=title)
+                    self.assertEqual(classify(item), '')
+                    self.assertTrue(preference_matches(item))
+        self.assertNotEqual(classify(listing(title='Yamaha SV\u2011200 electric violin')), '')
+        self.assertNotEqual(classify(listing(title='Zeta JV\u20115 hard case')), '')
+
+    def test_native_korean_brand_and_included_case_identify_the_instrument(self) -> None:
+        for title in ('제타 전자바이올린','제타전자바이올린 5현',
+                      '제타ZETA전자바이올린 판매', 'Zeta 제타 전자바이올린 케이스 포함',
+                      '제타 바이올린 케이스포함', '제타 바이올린 케이스와 함께',
+                      '케이스 포함 제타 전자바이올린', '제타 전자바이올린만 판매, 케이스 미포함',
+                      '제타 전자바이올린 케이스 미포함', '제타 전자바이올린 케이스 별도'):
+            with self.subTest(title=title):
+                self.assertEqual(classify(listing(title=title,description='케이스에 사용감 있음. 중고. 거이 새거.')), '')
+        self.assertEqual(classify(listing(description='4현 제타 전자바이올린입니다. 중고.')), '')
+        for accessory in ('픽업', '케이스'):
+            self.assertEqual(classify(listing(title='제타 바이올린 '+accessory,description=
+                '중고 제타 전자바이올린을 판매합니다. 픽업도 포함되어 있습니다.')), '')
+
+    def test_korean_accessory_intent_and_status_do_not_become_violin_alerts(self) -> None:
+        for title in ('제타 바이올린 케이스', '제타바이올린용케이스만 판매',
+                      '제타 바이올린 줄만 판매','제타 바이올린 활','제타 바이올린 현 세트',
+                      '제타 바이올린 픽업 단품', '제타 바이올린 픽업만 판매합니다',
+                      '제타 바이올린 줄 판매합니다', '제타 첼로 4현', '제타 5현 베이스',
+                      '제타 바이올린 픽업 오리지널', '오리지널 제타 바이올린 픽업',
+                      '제타 바이올린 정품 픽업',
+                      '제타 5현 기타', '제타 5현', '제타 바이올린 구합니다'):
+            with self.subTest(title=title):
+                self.assertNotEqual(classify(listing(title=title)), '')
+        for body in ('바이올린 미포함', '바이올린은 미포함', '케이스만 판매합니다.'):
+            self.assertNotEqual(classify(listing(title='제타 바이올린',description=body)), '')
+        for body in ('케이스만 약간 스크래치 있습니다.', '케이스만 판매하지 않습니다.'):
+            self.assertEqual(classify(listing(title='제타 바이올린',description=body)), '')
+        self.assertEqual(classify(listing(title='제타 바이올린 픽업 오리지널',description=
+            '중고 제타 전자바이올린을 판매합니다. 오리지널 픽업도 포함되어 있습니다.')), '')
+        self.assertEqual(classify(listing(title='제타 바이올린 오리지널 픽업 포함')), '')
+        for title in ('[판매완료] 제타 전자바이올린', '제타 전자바이올린 거래완료'):
+            self.assertEqual(classify(listing(title=title)), 'sold')
+        for title in ('판매완료예정 제타 전자바이올린','판매완료 아님 제타 전자바이올린'):
+            self.assertEqual(classify(listing(title=title)), '')
+        self.assertFalse(is_zeta_violin('제타',categories=['바이올린 케이스']))
+        self.assertFalse(is_zeta_violin('제타',categories=['바이올린 줄']))
+        self.assertFalse(is_zeta_violin('제타',categories=['바이올린 현 세트']))
+
+    def test_primary_korean_description_replaces_the_discovery_snippet(self) -> None:
+        item = listing(title='Rare instrument', source='search', description='Unrelated index summary')
+        product = {'@type':'Product','name':'Rare instrument','brand':{'name':'제타'},
+                   'model':'JV\u20115','category':'바이올린',
+                   'description':'중고 제타 전자바이올린을 판매합니다. 케이스에 사용감 있음.',
+                   'offers':{'price':'1000','priceCurrency':'USD','availability':'https://schema.org/InStock'}}
+        page = '<main><h1>Rare instrument</h1><script type="application/ld+json">'+json.dumps(product)+'</script></main>'
+        self.assertEqual(inspect_page(item,page,200,item['url'])[0],'live')
+        self.assertNotIn('Unrelated',item['description'])
+        self.assertTrue(item['_primary_content_checked'])
+        self.assertEqual(classify(item),'')
+        self.assertTrue(preference_matches(item))
+
     def test_latin_brand_and_model_touching_asian_script_are_recognized(self) -> None:
         for title in ("ZETAバイオリン", "ZETA小提琴", "ZETA바이올린", "JV5バイオリン",
                       "小提琴ZETA", "ＺＥＴＡバイオリン", "JLP5バイオリン"):
@@ -124,6 +186,9 @@ class IdentityRecallTests(unittest.TestCase):
         self.assertTrue(preference_matches(listing(title="Zeta JV5 1997 - Black")))
         self.assertEqual(classify(listing(title="Zeta Strados violin",finish="Sunburst")), "")
         self.assertEqual(preference_matches(listing(title="Zeta Strados violin",finish="Sunburst")), [])
+        for title in ('제타 스트라도스 전자바이올린','ゼータ ストラドス バイオリン'):
+            self.assertEqual(classify(listing(title=title,finish='Sunburst')), '')
+            self.assertEqual(preference_matches(listing(title=title,finish='Sunburst')), [])
 
     def test_primary_product_metadata_fills_missing_title_words(self) -> None:
         self.assertEqual(classify(listing(brand="Zeta", categories=["Band and Orchestra / Violins"])), "")

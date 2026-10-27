@@ -19,17 +19,18 @@ JLP_RX = re.compile(r"\bjlp(?:[\s-]?[45])?\b|\bjean[\s-]*luc[\s-]*ponty\b", re.I
 BURST_RX = re.compile(r"\b(?:sun[\s-]*burst|(?:tobacco|honey|jlp)[\s-]*burst)\b", re.I)
 CJK = r"\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af"
 SCRIPT_BOUNDARY_RX = re.compile(r"(?<=[a-z0-9])(?=[" + CJK + r"])|(?<=[" + CJK + r"])(?=[a-z0-9])", re.I)
+TYPOGRAPHIC_DASHES = str.maketrans({c:'-' for c in '\u2010\u2011\u2012\u2013\u2014\u2212'})
 
 
 def normalize_identity_text(text: str) -> str:
     """Separate script boundaries: ZETAバイオリン / JV5小提琴 need no seller spaces."""
-    return SCRIPT_BOUNDARY_RX.sub(" ", unicodedata.normalize("NFKC", text))
+    return SCRIPT_BOUNDARY_RX.sub(" ", unicodedata.normalize("NFKC", text).translate(TYPOGRAPHIC_DASHES))
 
 
 def is_low_interest(listing: dict) -> bool:
     """Owner deprioritizes Strados. This never rejects a listing or guesses photos."""
     primary = normalize_identity_text(" ".join(str(listing.get(k) or "") for k in ("title", "model")))
-    return bool(re.search(r"\bstrados\b", primary, re.I))
+    return bool(re.search(r"\bstrados\b|ストラドス|스트라도스", primary, re.I))
 
 
 def preference_matches(listing: dict) -> list:
@@ -99,7 +100,7 @@ BASE_WEB_KEYWORDS = [
     'Zeta violin (' + ' OR '.join(f'"{v}"' for v in STRING_VARIANTS[9:]) + ')',
 ]
 ADDITIONAL_WEB_KEYWORDS = [
-    'Zeta 小提琴 OR Zeta 바이올린 OR Zeta βιολί OR Zeta keman',
+    'Zeta 小提琴 OR Zeta 바이올린 OR Zeta βιολί OR Zeta keman OR 제타 바이올린 OR 제타 전자바이올린',
     'Zeta JLP OR Zeta JLP4 OR Zeta JLP5 OR Zeta sunburst OR Zeta "tobacco burst" OR Zeta "JLP Burst"',
 ]
 WEB_KEYWORDS = BASE_WEB_KEYWORDS + ADDITIONAL_WEB_KEYWORDS

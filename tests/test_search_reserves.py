@@ -137,6 +137,8 @@ class SearchReservesTests(unittest.TestCase):
         expanded = [q for cursor in range(0, 200, 4) for q, _ in scraper.extra_queries(cursor)]
         for alias in list(MODEL_CODES) + ['Zeta ' + name for name in MODEL_NAMES] + ADDITIONAL_WEB_KEYWORDS:
             self.assertTrue(any(alias in q for q in expanded), alias)
+        for local in ('제타 바이올린','제타 전자바이올린'):
+            self.assertTrue(any(local in q for q in expanded), local)
         self.assertLessEqual((8 + len(scraper.extra_queries(0))) * 62, 900)
         self.assertLessEqual((8 + len(scraper.extra_queries(0))) * 2, scraper.daily_limit)
 
