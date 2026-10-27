@@ -110,7 +110,7 @@ class BraveScraper(BaseScraper):
                     if not reserve_request("brave", Config.BRAVE_MONTHLY_QUOTA,
                                            manual=getattr(self, "manual_fresh", False) or getattr(self, 'auxiliary_work', False)):
                         self.content_failures.append("Brave bot request allowance reached; other providers continue")
-                        log.info("Brave monthly budget exhausted — no further HTTP requests")
+                        log.info("Brave local daily/monthly request allowance reached — no further HTTP requests")
                         self.skipped = not results
                         break
                     spent += 1

@@ -36,6 +36,12 @@ def violin(n: int = 1) -> dict:
             'description': 'Used 5-string electric violin', 'price': '1500 USD', 'platform': 'Fixture', 'source': 'search'}
 
 
+def sold_reverb(n=82035982):
+    title = 'Zeta Electric Violin Jazz Classic Vintage (2000)'
+    return {**violin(n), 'url': f'https://reverb.com/en-ro/item/{n}-zeta-electric-violin',
+            'title': title, 'description': f'# {title}\n\nUsed – Excellent\n\nSOLD\n\nSee similar gear\n\n# {title}\n\nThis gear has sold\n\nListed: 2 years ago\n\nAbout this listing\nUsed violin.'}
+
+
 class QualityTests(unittest.TestCase):
     def setUp(self):
         with store() as conn:
@@ -60,6 +66,42 @@ class QualityTests(unittest.TestCase):
         for _ in range(10): self.assertTrue(core(1000, day+43200, (('will',1,620,20),)))
         self.assertEqual(used('will',now=day+43201),20)
         self.assertEqual(used('will:aux',now=day+43201),35)
+
+    def test_reverb_primary_sold_precedes_stale_stock_and_recommendation_buy_buttons(self):
+        item = sold_reverb()
+        product = {'@type':'Product', 'url':item['url'], 'name':item['title'],
+                   'offers':{'price':1500, 'availability':'https://schema.org/InStock'}}
+        page = '<main><h1>'+item['title']+'</h1><p>This gear has sold</p><h2>About this listing</h2><p>Used violin</p><aside>Add to cart</aside><script type="application/ld+json">'+json.dumps(product)+'</script></main>'
+        self.assertEqual(inspect_page(item,page,200,item['url'])[0],'dead')
+
+    def test_reverb_status_scope_excludes_description_related_and_scripts(self):
+        for other in ('<aside>This gear has sold</aside>', '<div class="related">This gear has sold</div>',
+                      '<div class="suggested-items">This gear has sold</div>',
+                      '<section aria-label="Similar listings">This gear has sold</section>',
+                      '<script>"This gear has sold"</script>', '<h2>About this listing</h2><p>This gear has sold</p>'):
+            item = sold_reverb()
+            page = '<main><h1>'+item['title']+'</h1><button>Add to cart</button>'+other+'</main>'
+            self.assertEqual(inspect_page(item,page,200,item['url'])[0],'live')
+        item = {**sold_reverb(),'url':'https://reverb.com.evil.example/item/82035982'}
+        page = '<main><h1>'+item['title']+'</h1><p>This gear has sold</p></main>'
+        self.assertEqual(inspect_page(item,page,200,item['url'])[0],'unknown')
+
+    def test_indexed_sold_requires_primary_heading_and_status_before_seller_prose(self):
+        from offer_verifier import indexed_closed_reason
+        item = sold_reverb()
+        self.assertTrue(indexed_closed_reason(item))
+        self.assertTrue(indexed_closed_reason({**item,'_discovery_description':'Used Zeta violin'}))
+        self.assertTrue(indexed_closed_reason({**item,'description':'Used Zeta violin',
+                                               '_discovery_description':item['description']}))
+        for description in ('This gear has sold', '# Different violin\nSOLD',
+                            '# '+item['title']+'\nAbout this listing\nSOLD',
+                            '# '+item['title']+'\nPromoted similar listings\nSOLD',
+                            '# '+item['title']+'\nUsed violin sold as is',
+                            '# '+item['title']+'\nListed: 2 years ago\nUsed violin'):
+            self.assertEqual(indexed_closed_reason({**item,'description':description}), '')
+        for url in ('https://reverb.com.evil.example/item/82035982','https://other.example/item/82035982',
+                    'https://reverb.com/news/article/item/82035982'):
+            self.assertEqual(indexed_closed_reason({**item,'url':url}), '')
 
     def test_31_day_core_plan_and_auxiliary_surplus_share_unchanged_ceiling(self):
         start = 1790812800 + 3600
@@ -173,6 +215,50 @@ class QualityTests(unittest.TestCase):
             for _ in range(8): self.assertTrue(reserve_request('brave',1000,manual=True))
             self.assertFalse(reserve_request('brave',1000,manual=True))
             for _ in range(32): self.assertTrue(reserve_request('brave',1000))
+
+    def test_brave_cache_and_manual_rows_cannot_consume_core_daily_allowance(self):
+        from search_budget import reserve_request
+        from status_tracker import StatusTracker
+        tracker=StatusTracker()
+        conn=tracker.conn
+        conn.execute('CREATE TABLE IF NOT EXISTS scraper_runs (scraper TEXT PRIMARY KEY,last_run TEXT)')
+        conn.execute('DELETE FROM scraper_runs');conn.execute('DELETE FROM scraper_stats')
+        conn.execute("INSERT INTO scraper_runs VALUES ('brave_quota:2026-10','704')")
+        for attempts,manual,aux in ((16,True,False),(0,False,False),(0,False,False),(3,False,True)):
+            conn.execute('INSERT INTO scraper_stats (scraper,raw_count,run_at,details) VALUES (?,?,?,?)',
+                         ('Brave Search',0,'2026-10-27T04:00:00',json.dumps(
+                             {'discovery_queries_attempted':attempts,'manual_fresh':manual,'auxiliary_work':aux})))
+        conn.commit()
+        try:
+            with patch('search_budget.datetime') as clock:
+                clock.now.return_value=datetime(2026,10,27,8,tzinfo=timezone.utc)
+                for _ in range(32): self.assertTrue(reserve_request('brave',1000))
+                self.assertFalse(reserve_request('brave',1000))
+            self.assertEqual(conn.execute("SELECT last_run FROM scraper_runs WHERE scraper='brave_quota:2026-10'").fetchone()[0],'736')
+        finally:
+            conn.execute('DELETE FROM scraper_stats');conn.commit();conn.close()
+
+    def test_brave_real_core_legacy_and_existing_ledgers_remain_conservative(self):
+        from search_budget import reserve_request
+        from status_tracker import StatusTracker
+        conn=StatusTracker().conn
+        conn.execute('CREATE TABLE IF NOT EXISTS scraper_runs (scraper TEXT PRIMARY KEY,last_run TEXT)')
+        try:
+            with patch('search_budget.datetime') as clock:
+                clock.now.return_value=datetime(2026,10,27,20,tzinfo=timezone.utc)
+                for details,expected in (({'discovery_queries_attempted':16},16),({},0),
+                                         ({'discovery_queries_attempted':-1},0)):
+                    conn.execute('DELETE FROM scraper_runs');conn.execute('DELETE FROM scraper_stats')
+                    conn.execute('INSERT INTO scraper_stats (scraper,raw_count,run_at,details) VALUES (?,?,?,?)',
+                                 ('Brave Search',0,'2026-10-27T08:00:00',json.dumps(details)));conn.commit()
+                    for _ in range(expected): self.assertTrue(reserve_request('brave',1000))
+                    self.assertFalse(reserve_request('brave',1000))
+                conn.execute('DELETE FROM scraper_stats');conn.execute('DELETE FROM scraper_runs')
+                conn.execute("INSERT INTO scraper_runs VALUES ('brave_daily:2026-10-27','32')");conn.commit()
+                self.assertFalse(reserve_request('brave',1000))
+                self.assertEqual(conn.execute("SELECT last_run FROM scraper_runs WHERE scraper='brave_daily:2026-10-27'").fetchone()[0],'32')
+        finally:
+            conn.execute('DELETE FROM scraper_stats');conn.commit();conn.close()
 
     def test_retry_after_date_and_nonfinite_values_do_not_trigger_paid_post_retries(self):
         from http_limits import retry_after_seconds
@@ -638,6 +724,98 @@ class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
             q.conn.execute('DELETE FROM discovery_queue');q.conn.commit()
         db = database.Database()
         db.conn.execute('DELETE FROM alerts');db.conn.execute('DELETE FROM pending_alerts');db.conn.commit();db.close()
+
+    async def test_indexed_reverb_sold_is_retained_without_alert_when_primary_is_blocked(self):
+        item = sold_reverb()
+        with DiscoveryQueue('search:Fixture') as queue:
+            queue.put([item])
+            queue.claim(1)
+        db = database.Database()
+        dropped = {}
+        try:
+            with patch('offer_verifier.public_dns',AsyncMock(return_value=True)):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(403))) as client:
+                    result = await self.main._verify_search_hits([item],db,client,dropped,'search:Fixture')
+            self.assertEqual(result,[])
+            self.assertEqual(db.pending(),[])
+            self.assertFalse(db.was_url_alerted(item['url']))
+            self.assertEqual(dropped,{'availability_conflict':1})
+            self.assertTrue(item['_availability_conflict'])
+            self.assertEqual(self.main.verification_counts(dropped)['rejected'],{})
+            with DiscoveryQueue('search:Fixture') as queue:
+                self.assertEqual(queue.conn.execute('SELECT count(*) FROM discovery_queue').fetchone()[0],1)
+                self.assertEqual(len(queue.claim(1,now=time.time()+3601)),1)
+        finally:
+            db.close()
+
+    async def test_current_primary_live_api_supersedes_old_index_sold(self):
+        from offer_verifier import verify_offer, availability_conflict
+        item = sold_reverb()
+        item['_availability_conflict'] = 'previous blocked check'
+        data = {'state':{'slug':'live'},'title':item['title'],'description':'Used Zeta Jazz Classic electric violin',
+                'condition':{'display_name':'Excellent'},'price':{'amount':'1500','currency':'USD'}}
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json=data))) as client:
+                state,_ = await verify_offer(item,client)
+        self.assertEqual(state,'live')
+        self.assertFalse(availability_conflict(item,state))
+        self.assertNotIn('_availability_conflict',item)
+
+    async def test_cached_unknown_sold_outbox_cannot_bypass_the_hold(self):
+        from price_tracker import PriceTracker
+        item = {**sold_reverb(),'verification':'unknown'}
+        db = database.Database();prices=PriceTracker()
+        notifier=SimpleNamespace(send_listings=AsyncMock(side_effect=lambda xs:xs))
+        try:
+            self.assertEqual(await self.main._deliver(notifier,db,prices,[item]),0)
+            notifier.send_listings.assert_not_awaited()
+            self.assertEqual([x['url'] for x in db.pending()],[item['url']])
+            self.assertFalse(db.was_url_alerted(item['url']))
+        finally:
+            db.close();prices.close()
+
+    async def test_sold_conflict_blocks_both_cycle_price_drop_routes_and_minute_retry(self):
+        from notifier import TelegramNotifier
+        item=sold_reverb();info={'old_price':1600,'new_price':1500}
+        for recovered in (True,False):
+            db=database.Database()
+            db.conn.execute("DELETE FROM pending_alerts WHERE url LIKE 'drop:%'");db.conn.commit()
+            if recovered:
+                db.enqueue_price_drop(item,info)
+            db.close()
+            result={'name':'Fixture','new':[],'drops':[] if recovered else [(item,info)],
+                    'status':0,'raw':0,'duration':0,'details':{}}
+            send=AsyncMock()
+            with patch.object(TelegramNotifier,'send_price_drops',send), \
+                 patch.object(TelegramNotifier,'send_listings',AsyncMock()), \
+                 patch.object(TelegramNotifier,'send_no_changes',AsyncMock()), \
+                 patch.object(TelegramNotifier,'send_reminders',AsyncMock()), \
+                 patch('main.verify_offer',AsyncMock(return_value=('unknown','HTTP 403'))), \
+                 patch('main.build_scrapers',return_value=[] if recovered else [SimpleNamespace()]), \
+                 patch('main._run_scraper_with_resilience',AsyncMock(return_value=result)), \
+                 patch('main.refresh_rates',AsyncMock()),patch('main.detect_egress',AsyncMock()), \
+                 patch('main._watchdog',AsyncMock()),patch('main.resource_tick',AsyncMock()), \
+                 patch('main._maybe_weekly_digest',AsyncMock()):
+                await self.main.run_search_cycle()
+                await self.main.notification_tick()
+            send.assert_not_awaited()
+            db=database.Database()
+            try:
+                self.assertEqual(db.pending_price_drops(),[(item,info)])
+            finally:
+                db.close()
+
+    async def test_unknown_without_closed_evidence_keeps_existing_alert_route(self):
+        item = {**sold_reverb(),'description':'Used Zeta electric violin; case included'}
+        db = database.Database()
+        try:
+            with patch('offer_verifier.public_dns',AsyncMock(return_value=True)):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(403))) as client:
+                    result = await self.main._verify_search_hits([item],db,client,{})
+            self.assertEqual([x['url'] for x in result],[item['url']])
+            self.assertEqual(result[0]['verification'],'unknown')
+        finally:
+            db.close()
 
     async def test_collection_children_are_persisted_and_parent_is_not_alerted(self):
         item = {**violin(),'url':LIST_URL}

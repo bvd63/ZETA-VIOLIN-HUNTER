@@ -2,6 +2,7 @@
 
 import logging
 import calendar
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from database import connect
@@ -40,13 +41,28 @@ def reserve_request(engine: str, limit: int, *, manual: bool = False) -> bool:
             if daily_row:
                 daily_used = int(daily_row[0])
             elif not manual:
-                # Upgrade old versions conservatively: each completed, non-skipped
-                # Brave cycle may have spent the previous 32-query daily budget.
+                # Migrate legacy rows conservatively, but never infer paid work
+                # from cached results. Modern stats record actual query attempts
+                # and distinguish auxiliary work, which has its own daily lane.
                 has_stats = conn.execute("SELECT 1 FROM sqlite_master WHERE name='scraper_stats'").fetchone()
                 if has_stats:
-                    old_runs = conn.execute("SELECT COUNT(*) FROM scraper_stats WHERE scraper='Brave Search' AND raw_count >= 0 AND run_at >= ?",
-                                            (f"{now:%Y-%m-%d}T00:00:00",)).fetchone()[0]
-                    daily_used = min(32, old_runs * 32)
+                    columns = {row[1] for row in conn.execute('PRAGMA table_info(scraper_stats)')}
+                    projection = 'details' if 'details' in columns else "'{}'"
+                    rows = conn.execute(f"SELECT {projection} FROM scraper_stats WHERE scraper='Brave Search' AND raw_count >= 0 AND run_at >= ?",
+                                        (f"{now:%Y-%m-%d}T00:00:00",)).fetchall()
+                    for (details,) in rows:
+                        try:
+                            data = json.loads(details or '{}')
+                            attempts = data.get('discovery_queries_attempted')
+                            if type(attempts) is not int or attempts < 0:
+                                raise ValueError('legacy/unknown query count')
+                            # An explicitly recorded zero is not a daily spend.
+                            # Positive auxiliary attempts are reserved separately.
+                            daily_used += 0 if (attempts == 0 or data.get('manual_fresh') is True
+                                               or data.get('auxiliary_work') is True) else attempts
+                        except (ValueError, TypeError, AttributeError):
+                            daily_used += 32
+                    daily_used = min(32, daily_used)
             if daily_used >= (16 if manual else 32):
                 conn.rollback()
                 return False

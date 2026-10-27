@@ -22,7 +22,7 @@ from notifier import TelegramNotifier  # noqa: E402
 from filters import classify, has_primary_identity, has_zeta_signal  # noqa: E402
 from native_candidates import incomplete_pickup_card, detail_priority  # noqa: E402
 from liveness import is_live  # noqa: E402
-from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX  # noqa: E402
+from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX, availability_conflict  # noqa: E402
 from discovery_queue import stage, complete  # noqa: E402
 from work_context import spending_scope  # noqa: E402
 from candidate_audit import record_candidate  # noqa: E402
@@ -86,6 +86,7 @@ DROP_REASON_LABELS = {
     "dead_link": "ended/expired page",
     "dead_cached": "known dead page (re-check after 7 days)",
     "liveness_deferred": "search-hit deferred to next cycle (liveness budget)",
+    "availability_conflict": "indexed sold status; retained for primary availability recheck",
     "duplicate_flagged": "flagged as possible duplicate (still sent)",
 }
 MAX_LIVENESS_CHECKS = 60      # per scraper per cycle
@@ -96,7 +97,7 @@ DEAD_CACHE_DAYS = 7
 
 def verification_counts(counts: dict) -> dict:
     """Report retained work separately from actual rejection decisions."""
-    deferred = {'liveness_deferred', 'identity_unverified'}
+    deferred = {'liveness_deferred', 'identity_unverified', 'availability_conflict'}
     observed = {'unverified', 'duplicate_flagged'}
     return {
         'rejected': {k:v for k,v in counts.items() if k not in deferred | observed | {'collection_expanded'}},
@@ -184,6 +185,11 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             if queue_namespace:
                 complete(queue_namespace, listing, 3600)
             dropped['collection_expanded'] = dropped.get('collection_expanded', 0) + len(children)
+            continue
+        if availability_conflict(listing, state):
+            if queue_namespace:
+                complete(queue_namespace, listing, 3600)
+            dropped['availability_conflict'] = dropped.get('availability_conflict', 0) + 1
             continue
         if _needs_primary_identity(listing, state):
             # Index text may describe a recommendation for a different lot.
@@ -372,6 +378,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                                 "requests_recovered": getattr(scraper, "requests_recovered", 0),
                                 **counts, "coverage": getattr(scraper, "coverage_stats", {}),
                                 "discovery_queries_attempted": getattr(scraper, "discovery_queries_attempted", 0),
+                                "auxiliary_work": getattr(scraper, "auxiliary_work", False),
                                 "manual_fresh": getattr(scraper, "manual_fresh", False)},
                 }
 
@@ -459,7 +466,7 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
             if known_collection_url(item.get('url', '')):
                 item.pop('verification', None)  # an old queued list may have been labelled live
             if item.get('verification') in ('live','unknown'):
-                return item
+                return None if availability_conflict(item, item['verification']) else item
             async with semaphore:
                 if item.get('source') != 'search':
                     item['_direct_item_candidate'] = True
@@ -469,7 +476,7 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
                     if state == 'dead':
                         db.mark_dead(item['id'],why)
                     return None
-                if _needs_primary_identity(item,state):
+                if _needs_primary_identity(item,state) or availability_conflict(item,state):
                     return None  # keep the delivery pending, never mark it seen
                 item['verification'],item['liveness'] = state,why
                 if state == 'live':
@@ -532,7 +539,7 @@ async def _notification_tick() -> None:
                     if classify(listing):
                         db.discard_pending(listing.get("url", ""))
                         continue
-                    if _needs_primary_identity(listing, state):
+                    if _needs_primary_identity(listing, state) or availability_conflict(listing,state):
                         continue  # keep pending; a search snippet is not item proof
                     listing["verification"], listing["liveness"] = state, why
                     await _deliver(notifier, db, prices, [listing])
@@ -544,7 +551,7 @@ async def _notification_tick() -> None:
                     if state in ("dead", "non_sale") or classify(listing):
                         db.finish_price_drop(listing.get("url", ""))
                         continue
-                    if _needs_primary_identity(listing, state):
+                    if _needs_primary_identity(listing, state) or availability_conflict(listing,state):
                         continue
                     if await notifier.send_price_drops([(listing, info)]):
                         db.finish_price_drop(listing.get("url", ""))
@@ -679,7 +686,7 @@ async def _run_search_cycle(*, force_discovery: bool = False, scheduled: bool = 
                     state, _ = await _verify_delivery_offer(listing, http)
                 if state in ("dead", "non_sale") or classify(listing):
                     db.finish_price_drop(listing.get("url", ""))
-                elif _needs_primary_identity(listing, state):
+                elif _needs_primary_identity(listing, state) or availability_conflict(listing,state):
                     continue
                 else:
                     all_drops.append((listing, info))
@@ -751,7 +758,7 @@ async def _run_search_cycle(*, force_discovery: bool = False, scheduled: bool = 
                             if state in ('dead', 'non_sale') or classify(listing):
                                 db.finish_price_drop(listing.get('url', ''))
                                 continue
-                            if _needs_primary_identity(listing, state):
+                            if _needs_primary_identity(listing, state) or availability_conflict(listing,state):
                                 continue
                             listing['verification'], listing['liveness'] = state, why
                             checked_drops.append((listing, info))

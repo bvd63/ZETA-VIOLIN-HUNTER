@@ -94,8 +94,72 @@ def gardiner_sale_date(soup):
     return None
 
 
-def primary_closed_reason(soup, host: str) -> str:
+def _reverb_item(url: str) -> bool:
+    parts = urlsplit(url)
+    return ((parts.hostname or '').lower() in ('reverb.com', 'www.reverb.com')
+            and bool(re.match(r'^/(?:[a-z]{2}(?:-[a-z]{2})?/)?item/\d+(?:[-/]|$)', parts.path, re.I)))
+
+
+def indexed_closed_reason(listing: dict) -> str:
+    """A title-bound extracted Reverb status is negative evidence, not live stock.
+
+    This is deliberately narrower than searching descriptions for 'sold'. A
+    markdown primary heading and a standalone status before the description
+    are required. A successful current primary check can supersede this index.
+    """
+    if not _reverb_item(listing.get('url', '')):
+        return ''
+    title = re.sub(r'\s+', ' ', html.unescape(str(listing.get('title', '')))).casefold().split(' | ')[0]
+    if not title:
+        return ''
+    for content in (listing.get('_discovery_description'), listing.get('description')):
+        matched, size = False, 0
+        for line in str(content or '').splitlines():
+            line = re.sub(r'\s+', ' ', html.unescape(line)).strip()
+            heading = re.match(r'^#{1,6}\s+(.+?)\s*#*$', line)
+            if heading:
+                if heading.group(1).casefold() != title:
+                    if matched:
+                        break
+                    continue
+                matched = True
+                continue
+            if not matched:
+                continue
+            size += len(line)
+            if size > 1200 or re.match(r'^(?:About this listing|Product specs|Promoted similar listings|Listed\s*:)', line, re.I):
+                break
+            if line.casefold() in ('sold', 'this gear has sold', 'this listing has ended'):
+                return 'Reverb: textul extras indică SOLD; verificarea primară actuală este necesară'
+    return ''
+
+
+def availability_conflict(listing: dict, state: str) -> bool:
+    return state == 'unknown' and bool(listing.get('_availability_conflict') or indexed_closed_reason(listing))
+
+
+def primary_closed_reason(soup, host: str, url: str = '') -> str:
     """Marketplace-specific primary status, never generic 'sold' in a sidebar."""
+    if _reverb_item(url):
+        primary = BeautifulSoup(str(soup.find('main') or soup), 'lxml')
+        for node in primary.select('script, style, aside, nav, footer, [class*="recommend"], [id*="recommend"], [class*="related"], [id*="related"]'):
+            node.decompose()
+        for node in list(primary.find_all(True)):
+            if node.parent is None:
+                continue
+            labels = ' '.join(str(node.get(key) or '') for key in ('class','id','aria-label','data-testid'))
+            if re.search(r'recommend|related|similar|suggested|promoted', labels, re.I):
+                node.decompose()
+        heading = primary.find('h1')
+        if heading:
+            # Reverb's sale status precedes the seller's About this listing
+            # prose. Buy controls belonging to recommendations cannot reopen it.
+            for text in heading.find_all_next(string=True):
+                value = ' '.join(str(text).split()).casefold()
+                if value in ('about this listing', 'product specs', 'promoted similar listings'):
+                    break
+                if value in ('this gear has sold', 'this listing has ended'):
+                    return 'Reverb: starea primară indică anunț vândut/încheiat'
     if host == 'invaluable.com' or host.endswith('.invaluable.com'):
         if soup.select_one('.closed-bid-lot-detail') or (soup.title and
                 soup.title.get_text(' ',strip=True).casefold().startswith('sold at auction:')):
@@ -166,7 +230,7 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
         listing['_collection_leads'] = leads
         return 'collection', 'pagină de rezultate; ofertele individuale necesită verificare'
     host = (urlsplit(final_url).hostname or "").lower()
-    closed = primary_closed_reason(soup, host)
+    closed = primary_closed_reason(soup, host, final_url)
     if closed:
         return 'dead', closed
     if host == "craigslist.org" or host.endswith(".craigslist.org"):
@@ -307,6 +371,16 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
 
 
 async def verify_offer(listing: dict, client) -> tuple:
+    listing.pop('_availability_conflict', None)
+    closed = indexed_closed_reason(listing)
+    state, reason = await _verify_offer(listing, client)
+    if state == 'unknown' and closed:
+        listing['_availability_conflict'] = closed
+        return state, closed + '; ' + reason
+    return state, reason
+
+
+async def _verify_offer(listing: dict, client) -> tuple:
     listing.pop("_primary_content_checked", None)
     url = listing.get("url", "")
     if (urlsplit(url).hostname or '').lower() == 'auctions.gardinerhoulgate.co.uk':
