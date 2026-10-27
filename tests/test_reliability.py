@@ -362,8 +362,15 @@ class RegressionTests(unittest.TestCase):
 
     def test_live_offer_enriches_title_price(self):
         listing = self.listing(title='Electric instrument')
-        page = '<main><script type="application/ld+json">' + json.dumps(
-            {'@type':'Product','name':'Zeta JV44 violin','offers':{'price':'1900','priceCurrency':'EUR','availability':'https://schema.org/InStock'}}) + '</script></main>'
+        product = {'@type':'Product','name':'Zeta JV44 violin','offers':{
+            'price':'1900','priceCurrency':'EUR','availability':'https://schema.org/InStock'}}
+        # A singleton without URL/H1 binding is retained as unknown, rather
+        # than borrowing its price/identity as a confirmed primary offer.
+        page = '<main><script type="application/ld+json">' + json.dumps(product) + '</script></main>'
+        self.assertEqual(inspect_page(listing, page, 200, listing['url'])[0], 'unknown')
+        self.assertEqual(listing['title'], 'Electric instrument')
+        product['url'] = listing['url']
+        page = '<main><script type="application/ld+json">' + json.dumps(product) + '</script></main>'
         self.assertEqual(inspect_page(listing, page, 200, listing['url'])[0], 'live')
         self.assertEqual(listing['price'], '1900 EUR')
         self.assertEqual(classify(listing), '')

@@ -1,5 +1,5 @@
 """A native search card is a discovery clue, not the complete item page."""
-from filters import has_zeta_signal, has_violin_word, PICKUP_OBJECT_TITLE_RX, INSTRUMENT_ABSENT_RX
+from filters import has_zeta_signal, has_violin_word, has_primary_identity, is_zeta_violin, PICKUP_OBJECT_TITLE_RX, INSTRUMENT_ABSENT_RX
 from keywords import preference_matches
 
 
@@ -31,6 +31,7 @@ def detail_priority(listing: dict) -> int:
     if preference_matches(listing):
         return 0
     text = str(listing.get('title') or '') + ' ' + str(listing.get('description') or '')
-    if has_violin_word(text) or str(listing.get('title') or '').strip().casefold() in ('zeta','zetta','zeta music'):
+    if (has_violin_word(text) or has_primary_identity(listing) or is_zeta_violin(text)
+            or str(listing.get('title') or '').strip().casefold() in ('zeta','zetta','zeta music')):
         return 1
     return 2

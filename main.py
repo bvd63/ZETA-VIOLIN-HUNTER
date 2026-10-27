@@ -328,6 +328,8 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                     for item in to_verify:
                         if db.was_url_alerted(item.get("url", ""), item.get("auction_end", "")):
                             item["_discovery_priority"] = 3
+                        else:
+                            item['_discovery_priority'] = min(item.get('_discovery_priority',2), detail_priority(item))
                     to_verify, deferred = stage(namespace, to_verify, MAX_LIVENESS_CHECKS)
                     dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + deferred
                     if to_verify and fetched < 0:

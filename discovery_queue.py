@@ -52,21 +52,20 @@ class DiscoveryQueue:
         self.conn.execute("BEGIN IMMEDIATE")
         try:
             if self.namespace.startswith('search:'):
-                # Older native payloads can outlive their search-index entry.
+                # Older web/native payloads can outlive their search-index entry.
                 # Re-rank their due work without rediscovery or changing leases,
                 # attempts, fairness, existing higher priorities or cost guards.
                 from native_candidates import detail_priority
-                def native_rank(payload, previous):
+                def candidate_rank(payload, previous):
                     try:
                         item = json.loads(payload)
-                        return min(previous, detail_priority(item)) if item.get('_native_card_source') else previous
+                        return min(previous, detail_priority(item))
                     except (ValueError,TypeError,AttributeError):
                         return previous
-                self.conn.create_function('native_detail_rank',2,native_rank)
-                self.conn.execute('''UPDATE discovery_queue SET priority=native_detail_rank(payload,priority)
-                    WHERE namespace=? AND next_attempt<=? AND priority>0
-                    AND instr(payload,'"_native_card_source"')>0
-                    AND priority>native_detail_rank(payload,priority)''',(self.namespace,now))
+                self.conn.create_function('candidate_detail_rank',2,candidate_rank)
+                self.conn.execute('''UPDATE discovery_queue SET priority=candidate_detail_rank(payload,priority)
+                    WHERE namespace=? AND next_attempt<=? AND priority>0 AND priority<3
+                    AND priority>candidate_detail_rank(payload,priority)''',(self.namespace,now))
             # Retire previously queued owner-excluded URLs without deleting
             # their history or consuming the detail slots of remaining sources.
             disabled = [key for (key,) in self.conn.execute(

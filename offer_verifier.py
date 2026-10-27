@@ -184,14 +184,19 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
                 listing["estate_sale"] = True
                 listing["sale_end"] = max(dates).isoformat()
                 return "live", "Craigslist: inventar și dată de vânzare verificate"
-    from product_metadata import primary_microdata, same_product_url
+    from product_metadata import primary_microdata, is_primary_product, page_condition
     products, editorial = [], False
     for tag in soup.find_all("script", type="application/ld+json"):
+        if any(p.name in ('aside','nav','footer') or any(word in ' '.join(p.get('class',[])).lower()
+                for word in ('recommend','related')) for p in tag.parents):
+            continue
         try:
             for node in _nodes(json.loads(tag.string or tag.get_text())):
                 types = node.get("@type", [])
                 if isinstance(types, str):
                     types = [types]
+                if not isinstance(types,list):
+                    types = []
                 types = {str(t).lower() for t in types}
                 editorial |= bool(types & EDITORIAL_TYPES)
                 if "product" in types:
@@ -207,21 +212,37 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
         listing["description"] = ""
     if h1 and h1.get_text(strip=True):
         listing["title"] = h1.get_text(" ", strip=True)[:300]
-    for product in products:
-        # Only the primary instrument, not a recommended item in a side bar.
-        name = str(product.get("name") or "")
-        product_url = str(product.get("url") or "")
-        if product_url and not same_product_url(product_url, final_url):
-            continue
-        if name and not (h1 and name.casefold() in listing["title"].casefold()) and len(products) > 1:
-            continue
+    # Condition evidence must agree across JSON-LD/microdata representations;
+    # a singleton without an actual URL/H1 match is not primary proof.
+    primary_title = h1.get_text(' ',strip=True) if h1 else ''
+    condition, condition_ambiguous = page_condition(products, final_url,primary_title)
+    if condition:
+        listing['condition'] = condition
+    primary_products = [product for product in products if is_primary_product(product,final_url,primary_title)]
+    closed_codes = ('soldout','outofstock','discontinued')
+    all_closed = bool(primary_products)
+    for product in primary_products:
         offers = product.get("offers") or []
         if isinstance(offers, dict):
             offers = [offers]
+        if not isinstance(offers,list):
+            offers = []
+        all_closed &= bool(offers) and all(isinstance(offer,dict) and not offer.get('offers')
+                    and str(offer.get('availability','')).rsplit('/',1)[-1].lower() in closed_codes for offer in offers)
+    if all_closed:
+        return 'dead','toate ofertele primare sunt încheiate/indisponibile'
+    for product in primary_products:
+        name = str(product.get("name") or "")
+        offers = product.get("offers") or []
+        offers = [offers] if isinstance(offers,dict) else offers
+        if not isinstance(offers,list):
+            offers = []
         for offer in offers:
+            if not isinstance(offer,dict):
+                continue
             availability = str(offer.get("availability", "")).rsplit("/", 1)[-1].lower()
-            if availability in ("soldout", "outofstock", "discontinued"):
-                return "dead", f"primary offer {availability}"
+            if availability in closed_codes and not offer.get('offers'):
+                continue  # Another associated offer can still be available.
             if name:
                 listing["title"] = html.unescape(name)[:300]
             if product.get("description"):
@@ -239,6 +260,8 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
             if offer.get("price") is not None or availability in ("instock", "limitedavailability", "preorder"):
                 if editorial:
                     return "non_sale", "articol cu linkuri către produse"
+                if condition_ambiguous:
+                    return 'unknown', 'condiție nou/folosit neconfirmată; date incomplete sau contradictorii'
                 return "live", "instrument cu ofertă structurată"
     if editorial:
         return "non_sale", "articol / recenzie, fără ofertă proprie"
@@ -275,6 +298,8 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
                                   and re.search(r'\bBiete\b', body)):
         # Dedicated item URLs or classifieds sales text + monetary amount.
         if item_page or re.search(r"[€$£¥]\s*\d|\d\s*(?:USD|EUR|GBP|JPY)\b", body):
+            if condition_ambiguous:
+                return 'unknown','condiție nou/folosit neconfirmată; date incomplete sau contradictorii'
             return "live", "pagină de vânzare / licitație"
     if item_page:
         return "unknown", "pagină de anunț; ofertă neverificată"

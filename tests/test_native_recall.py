@@ -74,6 +74,64 @@ def product_page(title='Zeta Jazz Fusion JV-4 violin', body='Used Zeta 4 string 
 
 
 class NativeRecallTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_strong_web_preference_and_oldest_fairness(self):
+        scraper = MarktplaatsScraper()
+        namespace = 'search:' + scraper.name
+        old = [{'url': f'https://example.com/item/homonym-{n}', 'title': 'Zeta racing handlebar',
+                'source': 'search', '_discovery_priority': 1} for n in range(80)]
+        preferred = {'id': 'web-preferred', 'url': 'https://example.com/item/web-preferred',
+                     'title': 'Zeta Jazz Fusion JLP electric violin', 'description': '', 'source': 'search'}
+        with DiscoveryQueue(namespace) as queue:
+            queue.put(old)
+            for n, item in enumerate(old):
+                queue.conn.execute('UPDATE discovery_queue SET created=?,next_attempt=? WHERE namespace=? AND key=?',
+                                   (n + 1, n + 1, namespace, item['url']))
+            queue.conn.commit()
+        scraper.search = AsyncMock(return_value=[preferred])
+        with patch('main.MAX_LIVENESS_CHECKS', 20), \
+             patch('main._verify_search_hits', new_callable=AsyncMock, return_value=[]) as verify:
+            await self.main._run_scraper_with_resilience(scraper, self.db, self.prices, asyncio.Semaphore(1))
+        selected = verify.await_args.args[0]
+        selected_urls = {item['url'] for item in selected}
+        self.assertEqual(len(selected), 20)
+        self.assertIn(preferred['url'], selected_urls)
+        self.assertTrue({item['url'] for item in old[:5]} <= selected_urls)
+        self.assertEqual(preferred.get('_discovery_priority'), 0)
+        with DiscoveryQueue(namespace) as queue:
+            self.assertEqual(queue.conn.execute('SELECT count(*) FROM discovery_queue WHERE namespace=?',
+                                               (namespace,)).fetchone()[0], 81)
+
+    async def test_legacy_web_preference_promotes_due_but_not_delivered_or_leased(self):
+        namespace = 'search:legacy-web-priority'
+        old = [{'url': f'https://example.com/item/legacy-noise-{n}', 'title': 'Zeta racing handlebar',
+                'source': 'search', '_discovery_priority': 2} for n in range(80)]
+        preferred = {'url': 'https://example.com/item/legacy-jlp', 'title': 'Zeta JLP violin',
+                     'source': 'search', '_discovery_priority': 2}
+        delivered = {**preferred, 'url': 'https://example.com/item/delivered', '_discovery_priority': 3}
+        leased = {**preferred, 'url': 'https://example.com/item/leased'}
+        with DiscoveryQueue(namespace) as queue:
+            queue.put(old + [preferred, delivered, leased])
+            for n, item in enumerate(old + [preferred, delivered]):
+                queue.conn.execute('UPDATE discovery_queue SET created=?,next_attempt=? WHERE namespace=? AND key=?',
+                                   (n + 1, n + 1, namespace, item['url']))
+            queue.conn.execute('UPDATE discovery_queue SET next_attempt=9999999999,attempts=3 WHERE namespace=? AND key=?',
+                               (namespace, leased['url']))
+            queue.conn.commit()
+        with DiscoveryQueue(namespace) as queue:
+            selected = queue.claim(20)
+            urls = {item['url'] for item in selected}
+            self.assertIn(preferred['url'], urls)
+            self.assertTrue({item['url'] for item in old[:5]} <= urls)
+            self.assertNotIn(delivered['url'], urls)
+            self.assertNotIn(leased['url'], urls)
+            rows = dict(queue.conn.execute('SELECT key,priority FROM discovery_queue WHERE namespace=?', (namespace,)))
+            self.assertEqual(rows[preferred['url']], 0)
+            self.assertEqual(rows[delivered['url']], 3)
+            self.assertEqual(rows[leased['url']], 2)
+            self.assertEqual(queue.conn.execute('SELECT next_attempt,attempts FROM discovery_queue WHERE namespace=? AND key=?',
+                                               (namespace, leased['url'])).fetchone(), (9999999999, 3))
+            self.assertEqual(len(rows), 83)
+
     async def test_existing_native_backlog_reprioritizes_without_rediscovery_or_lease_reset(self):
         namespace='search:legacy-native-priority'
         old=[{'url':f'https://example.com/item/old-{n}', 'title':'ZETA RACING handlebar',
@@ -111,6 +169,9 @@ class NativeRecallTests(unittest.IsolatedAsyncioTestCase):
         for title in preferred:
             self.assertTrue(preference_matches({'title':title}),title)
         self.assertEqual(detail_priority({'title':'Zeta Strados sunburst violin'}),1)
+        self.assertEqual(detail_priority({'title':'Zeta SV244'}),1)
+        self.assertEqual(detail_priority({'title':'Rare instrument','description':'Zeta CV44'}),1)
+        self.assertEqual(detail_priority({'title':'Instrument','brand':'Zeta','model':'SV244'}),1)
         with DiscoveryQueue('search:priority-regression') as queue:
             queue.put(items)
             selected=queue.claim(20)

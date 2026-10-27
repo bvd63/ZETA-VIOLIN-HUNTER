@@ -191,6 +191,51 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(inspect_page(item,page,200,u)[0],'live')
         self.assertTrue(item['_primary_content_checked'])
 
+    def test_unbound_singleton_cannot_close_primary_or_supply_identity(self):
+        from filters import classify
+        cases = [
+            ('Zeta Jazz Fusion JV5','Used Zeta JV5 violin for sale $1500','Other product','SoldOut','live',True),
+            ('Black case','Only a hard case for sale $100','Zeta Jazz Fusion JV5','InStock','live',False),
+            ('Zeta Jazz Fusion JV5','Used Zeta JV5 violin','Other product','InStock','unknown',True),
+        ]
+        for title,body,name,availability,state,eligible in cases:
+            with self.subTest(title=title,availability=availability,body=body):
+                item={**violin(),'title':title}
+                product={'@type':'Product','name':name,'brand':'Zeta','model':'JV5',
+                         'itemCondition':'https://schema.org/NewCondition',
+                         'offers':{'price':9999,'availability':'https://schema.org/'+availability}}
+                page='<main><h1>'+title+'</h1><p>'+body+'</p><script type="application/ld+json">'+json.dumps(product)+'</script></main>'
+                self.assertEqual(inspect_page(item,page,200,item['url'])[0],state)
+                self.assertEqual(item['title'],title)
+                self.assertNotEqual(item.get('price'),'9999')
+                self.assertNotEqual(item.get('condition'),'Brand New')
+                self.assertEqual(classify(item)=='',eligible)
+
+    def test_primary_url_alone_binds_generic_heading_among_recommendations(self):
+        item=violin()
+        primary={'@type':'Product','url':item['url'],'name':'Zeta JV5',
+                 'brand':'Zeta','model':'JV5','description':'Used five-string electric violin',
+                 'offers':{'price':1500,'availability':'https://schema.org/InStock'}}
+        related={'@type':'Product','name':'Rare black instrument','url':'https://example.com/item/other',
+                 'offers':{'availability':'https://schema.org/SoldOut'}}
+        page='<main><h1>Rare black instrument</h1><script type="application/ld+json">'+json.dumps([related,primary])+'</script></main>'
+        self.assertEqual(inspect_page(item,page,200,item['url'])[0],'live')
+        self.assertEqual(item['model'],'JV5')
+        self.assertEqual(item['price'],'1500')
+
+    def test_duplicate_primary_stock_representations_do_not_close_available_offer(self):
+        for order in (('SoldOut','InStock'),('InStock','SoldOut')):
+            item=violin()
+            products=[{'@type':'Product','url':item['url'],'name':item['title'],
+                       'offers':{'availability':'https://schema.org/'+state,'price':1500}}
+                      for state in order]
+            page='<h1>'+item['title']+'</h1><script type="application/ld+json">'+json.dumps(products)+'</script>'
+            self.assertEqual(inspect_page(item,page,200,item['url'])[0],'live')
+        item=violin()
+        for product in products:
+            product['offers']['availability']='https://schema.org/SoldOut'
+        self.assertEqual(inspect_page(item,'<h1>'+item['title']+'</h1><script type="application/ld+json">'+json.dumps(products)+'</script>',200,item['url'])[0],'dead')
+
     def test_primary_microdata_is_used_without_borrowing_related_stock(self):
         item = violin()
         page = '''<main><h1>Zeta Jazz Fusion JV5</h1><div itemscope itemtype="https://schema.org/Product">
@@ -457,6 +502,132 @@ class QualityTests(unittest.TestCase):
             self.assertEqual(metrics['due'],1)
             self.assertEqual(metrics['due_never_claimed'],0)
             self.assertIsNone(metrics['oldest_due_never_claimed_hours'])
+
+    def condition_page(self, product_condition=None, offer_condition=None, *, offers=None,
+                       native='Used', name='Zeta Jazz Fusion JV5', product_url=ITEM_URL, related=''):
+        product={'@type':'Product','name':name,'url':product_url,'brand':'Zeta','model':'JV5',
+                 'description':'Used electric violin. New strings fitted.',
+                 'offers':offers if offers is not None else {'price':'1500','priceCurrency':'USD',
+                    'availability':'https://schema.org/InStock'}}
+        if product_condition is not None:product['itemCondition']=product_condition
+        if offer_condition is not None:product['offers']['itemCondition']=offer_condition
+        item={**violin(),'url':ITEM_URL,'condition':native}
+        page='<main><h1>Zeta Jazz Fusion JV5</h1><script type="application/ld+json">'+json.dumps(product)+'</script>'+related+'<p>Price €1500</p></main>'
+        state,why=inspect_page(item,page,200,ITEM_URL)
+        return item,state,why
+
+    def test_primary_item_condition_overrides_index_and_offer_wins_product(self):
+        from filters import classify
+        for product,offer,expected in [('NewCondition',None,'Brand New'),
+                                       (None,'https://schema.org/NewCondition','Brand New'),
+                                       ('NewCondition','UsedCondition','Used'),
+                                       ('UsedCondition',{'@id':'https://schema.org/NewCondition'},'Brand New')]:
+            with self.subTest(product=product,offer=offer):
+                item,state,_=self.condition_page(product,offer)
+                self.assertEqual(state,'live');self.assertEqual(item['condition'],expected)
+                self.assertEqual(classify(item),'new_stock' if expected=='Brand New' else '')
+        item,_,_=self.condition_page('NewCondition',offers={
+            'price':1500,'url':'https://checkout.example/used-offer','itemCondition':'UsedCondition'})
+        self.assertEqual(item['condition'],'Used');self.assertEqual(classify(item),'')
+
+    def test_mixed_or_partly_unknown_offer_conditions_remain_uncertain(self):
+        from filters import classify
+        for conditions in (('NewCondition','UsedCondition'),('NewCondition',None)):
+            offers=[{'price':1000,'availability':'https://schema.org/InStock',
+                     **({'itemCondition':condition} if condition else {})} for condition in conditions]
+            item,state,why=self.condition_page(offers=offers)
+            self.assertEqual(state,'unknown');self.assertIn('nou/folosit',why)
+            self.assertTrue(item['_primary_content_checked'])
+            self.assertEqual(classify(item),'')
+
+    def test_recommended_or_unmatched_product_cannot_supply_new_condition(self):
+        from filters import classify
+        related='<aside><script type="application/ld+json">'+json.dumps({'@type':'Product','name':'Other product',
+             'itemCondition':'NewCondition','offers':{'price':3000}})+'</script></aside>'
+        item,_,_=self.condition_page(related=related,native='Like New')
+        self.assertEqual(item['condition'],'Like New');self.assertEqual(classify(item),'')
+        for url in ('','   ','#recommendation','https://example.com/item/other'):
+            item,_,_=self.condition_page('NewCondition',name='Different instrument name',product_url=url,native='Like New')
+            self.assertEqual(item['condition'],'Like New');self.assertEqual(classify(item),'')
+
+    def test_microdata_condition_respects_product_and_offer_scope(self):
+        from filters import classify
+        for product,offer,expected in [('NewCondition','UsedCondition','Used'),('UsedCondition','NewCondition','Brand New')]:
+            page=f'''<main><h1>Zeta Jazz Fusion JV5</h1><div itemscope itemtype="https://schema.org/Product">
+             <meta itemprop="name" content="Zeta Jazz Fusion JV5"><link itemprop="url" href="{ITEM_URL}">
+             <link itemprop="itemCondition" href="https://schema.org/{product}">
+             <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+              <meta itemprop="price" content="1500"><meta itemprop="priceCurrency" content="EUR">
+              <meta itemprop="itemCondition" content="https://schema.org/{offer}"></div></div></main>'''
+            item={**violin(),'url':ITEM_URL,'condition':'Used'}
+            self.assertEqual(inspect_page(item,page,200,ITEM_URL)[0],'live')
+            self.assertEqual(item['condition'],expected)
+            self.assertEqual(classify(item),'new_stock' if expected=='Brand New' else '')
+
+    def test_unknown_condition_new_strings_refurbished_and_damaged_are_not_new(self):
+        from filters import classify
+        for condition in ('UnknownCondition','RefurbishedCondition','DamagedCondition',
+                          {'@id':'https://schema.org/UsedCondition'},'https://evil.example/NewCondition',
+                          'https://[invalid','https://schema.org/not-schema/NewCondition',
+                          'https://schema.org/NewCondition/',True):
+            with self.subTest(condition=condition):
+                item,_,_=self.condition_page(condition,native='Like New')
+                self.assertEqual(classify(item),'')
+        item,_,_=self.condition_page('NewCondition','UnknownCondition',native='Like New')
+        self.assertEqual(item['condition'],'Like New');self.assertEqual(classify(item),'')
+
+    def test_microdata_without_actual_url_or_h1_does_not_invent_condition_identity(self):
+        from filters import classify
+        page='''<main><div itemscope itemtype="https://schema.org/Product">
+          <meta itemprop="name" content="Other instrument"><meta itemprop="brand" content="Zeta">
+          <meta itemprop="model" content="JV5"><link itemprop="itemCondition" href="https://schema.org/NewCondition">
+          <div itemprop="offers" itemscope itemtype="https://schema.org/Offer"><meta itemprop="price" content="1500"></div>
+        </div></main>'''
+        item={**violin(),'condition':'Used'}
+        inspect_page(item,page,200,item['url'])
+        self.assertEqual(item['condition'],'Used');self.assertEqual(classify(item),'')
+
+    def test_duplicate_primary_representations_with_conflicting_conditions_are_order_independent(self):
+        from filters import classify
+        for values in (('NewCondition','UsedCondition'),('UsedCondition','NewCondition'),('NewCondition','UnknownCondition')):
+            products=[{'@type':'Product','name':'Zeta Jazz Fusion JV5','url':ITEM_URL,'itemCondition':value,
+                       'offers':{'price':1500,'availability':'https://schema.org/InStock'}} for value in values]
+            item={**violin(),'url':ITEM_URL,'condition':'Used'}
+            page='<main><h1>Zeta Jazz Fusion JV5</h1><script type="application/ld+json">'+json.dumps(products)+'</script></main>'
+            self.assertEqual(inspect_page(item,page,200,ITEM_URL)[0],'unknown')
+            self.assertEqual(classify(item),'')
+
+    def test_malformed_metadata_does_not_hide_later_products_or_primary_body(self):
+        from filters import classify
+        for offers in ('not-an-offer',[None,'invalid',{'price':1500,'itemCondition':'UsedCondition'}]):
+            products=[{'@type':None}, {'@type':17}, {'@type':'Product','name':'Zeta Jazz Fusion JV5',
+                      'url':ITEM_URL,'itemCondition':'UsedCondition','offers':offers}]
+            item={**violin(),'url':ITEM_URL}
+            page='<main><h1>Zeta Jazz Fusion JV5</h1><script type="application/ld+json">'+json.dumps(products)+'</script><div id="description">Used Zeta violin for sale. New strings fitted.</div><p>Price €1500</p></main>'
+            self.assertEqual(inspect_page(item,page,200,ITEM_URL)[0],'live')
+            self.assertEqual(item['condition'],'Used');self.assertEqual(classify(item),'')
+
+    def test_closed_variant_does_not_hide_available_primary_offer(self):
+        from filters import classify
+        closed={'price':1500,'availability':'https://schema.org/SoldOut','itemCondition':'UsedCondition'}
+        active={**closed,'availability':'https://schema.org/InStock'}
+        for offers in ([closed,active],[active,closed]):
+            item,state,_=self.condition_page(offers=offers)
+            self.assertEqual(state,'live');self.assertEqual(classify(item),'')
+        self.assertEqual(self.condition_page(offers=[closed,closed])[1],'dead')
+
+    def test_nested_offer_conditions_are_uncertain_instead_of_assumed_new(self):
+        from filters import classify
+        item,state,_=self.condition_page('NewCondition',offers={'@type':'AggregateOffer',
+            'offers':[{'price':1500,'itemCondition':'UsedCondition'}]})
+        self.assertEqual(state,'unknown');self.assertEqual(classify(item),'')
+        product={'@type':'Product','name':'Zeta Jazz Fusion JV5','url':ITEM_URL,'brand':'Zeta','model':'JV5',
+                 'itemCondition':'NewCondition','offers':{'@type':'AggregateOffer','availability':'https://schema.org/SoldOut',
+                 'offers':[{'itemCondition':'UsedCondition','availability':'https://schema.org/InStock'}]}}
+        item={**violin(),'title':'Black instrument','url':ITEM_URL}
+        page='<main><h1>Black instrument</h1><script type="application/ld+json">'+json.dumps(product)+'</script><p>Price €1500</p></main>'
+        self.assertEqual(inspect_page(item,page,200,ITEM_URL)[0],'unknown')
+        self.assertEqual(classify(item),'')
 
 
 class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
