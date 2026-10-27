@@ -23,6 +23,14 @@ def card(url, title='Zeta violin', snippet='Used Zeta violin'):
 
 
 class ParserTests(unittest.TestCase):
+    def test_offerup_card_negative_uses_bound_shared_detector(self):
+        url='https://offerup.com/item/detail/3b32aed8-b98b-3c09-a73b-2f220d215b75'
+        rows,_=parse_results(page('q',card(url,snippet='SOLD')), 'q')
+        self.assertEqual(rows[0]['_indexed_availability_url'],url)
+        self.assertEqual(rows[0]['_indexed_availability_negative'],'sold')
+        rows,_=parse_results(page('q',card(url,snippet='Sold by Maria. Used Zeta violin.')), 'q')
+        self.assertNotIn('_indexed_availability_negative',rows[0])
+
     def test_query_echo_wrappers_private_and_associated_snippets(self):
         query = 'Zeta Jazz violin'
         wrapped = '//duckduckgo.com/l/?' + urlencode({'uddg':'https://example.com/item/123'})

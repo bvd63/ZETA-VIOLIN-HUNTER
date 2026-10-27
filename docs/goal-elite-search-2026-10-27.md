@@ -4,6 +4,12 @@ Proprietarul a cerut explicit continuarea autonomă până la implementare și v
 
 ## Contractul proprietarului
 
+### Actualizare28octombrie — disponibilitate și credibilitatea ofertelor
+
+Obiectivul complet a fost restabilit activ după înlocuirea accidentală cu textul„resume”; proiectul nu este declarat terminat. Continuă reparațiile pe fiecare sursă și criteriile de acceptare de mai jos. Cazul live OfferUpSOLD din tura102 cere guard pe UUID/ID, status primar înaintea metadatelor de stoc și dovadă negativă durabilă, fără închiderea falsă dinSoldby/descriere/recomandări. Corecția mesajului și închiderea tehnică păstrează confirmarea reală a proprietarului.
+
+Proprietarul suspectează ofertele ieftine de modele noi ale Classy Music Boutique. Verifică separat identitatea/stocul/condiția și credibilitatea comerciantului; un scor automat, domeniu recent sau preț mic nu dovedește singur fraudă. Păstrează diferența dintre Classy și alți comercianți cercetați, fără asociere corporativă inventată. Preferința pentru carantină temporară fără alerte/remindere versus alerte cu risc explicit a fost cerută proprietarului și este încă în așteptare. Nu elimina căutările/pistele și nu crea blacklist general automat. Notele private și probele se păstrează în outputs, iar regula used-only existentă rămâne.
+
 ### Reluare explicită și extindere — seara27octombrie2026
 
 Proprietarul cere reluarea goal-ului și repararea tuturor problemelor constatate, nu încheierea după o corecție locală sau după raportarea erorilor. Lucrul curent continuă independent de eticheta anterioară blocked; starea controlului Codex se verifică separat, fără a declara goal-ul complet pentru a-l înlocui. Cele două ture naturale99/100 și tura manuală101 au fost auditate, iar automatizarea unică de audit a fost ștearsă după verificare. Botul Railway și programul10/22 continuă.

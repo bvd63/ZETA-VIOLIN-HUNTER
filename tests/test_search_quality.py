@@ -74,6 +74,55 @@ class QualityTests(unittest.TestCase):
         page = '<main><h1>'+item['title']+'</h1><p>This gear has sold</p><h2>About this listing</h2><p>Used violin</p><aside>Add to cart</aside><script type="application/ld+json">'+json.dumps(product)+'</script></main>'
         self.assertEqual(inspect_page(item,page,200,item['url'])[0],'dead')
 
+    def test_offerup_sold_badge_wins_over_stock_metadata(self):
+        url='https://offerup.com/item/detail/3b32aed8-b98b-3c09-a73b-2f220d215b75'
+        item={**violin(), 'url':url, 'title':'Zeta Violin'}
+        product={'@type':'Product','url':url,'name':'Zeta Violin',
+                 'offers':{'price':900,'availability':'https://schema.org/InStock'}}
+        page='<main><h1>Zeta Violin</h1><div>SOLD</div><h2>Description</h2><p>Used</p></main><script type="application/ld+json">'+json.dumps(product)+'</script>'
+        self.assertEqual(inspect_page(item,page,200,url)[0],'dead')
+
+    def test_offerup_sold_scope_does_not_use_seller_or_recommendations(self):
+        url='https://offerup.com/item/detail/3b32aed8-b98b-3c09-a73b-2f220d215b75'
+        for extra in ('<div id="description"><span>SOLD</span> AS IS</div>',
+                      '<h2>Description</h2><p>SOLD separately</p>',
+                      '<div class="suggested-items"><span>SOLD</span></div>',
+                      '<aside><span>SOLD</span></aside>',
+                      '<h2><span>SOLD</span> by Alice</h2>',
+                      '<div><span>Sold</span><span> by Alice</span></div>',
+                      '<section><h2>Other listings</h2><article><span>SOLD</span></article></section>',
+                      '<article><a href="https://offerup.com/item/detail/12345">Other violin</a><span>SOLD</span></article>'):
+            item={**violin(), 'url':url}
+            page='<main><h1>Zeta Violin</h1>'+extra+'<p>Price $900</p></main>'
+            with self.subTest(extra=extra):
+                self.assertNotEqual(inspect_page(item,page,200,url)[0], 'dead')
+
+    def test_offerup_redirect_other_item_is_unknown(self):
+        url='https://offerup.com/item/detail/3b32aed8-b98b-3c09-a73b-2f220d215b75'
+        other='https://offerup.com/item/detail/3b32aed8-b98b-3c09-a73b-2f220d215b76'
+        page='<main><h1>Zeta Violin</h1><div>SOLD</div></main>'
+        self.assertEqual(inspect_page({**violin(), 'url':url},page,200,other)[0], 'unknown')
+
+    def test_offerup_indexed_markdown_and_card_are_scoped_to_item(self):
+        from offer_verifier import indexed_closed_reason, index_card_negative, _indexed_state_key
+        url='https://offerup.com/item/detail/3b32aed8-b98b-3c09-a73b-2f220d215b75'
+        item={**violin(), 'url':url, 'title':'Zeta Violin for Sale in Hemet, CA - OfferUp',
+              'description':'# Zeta Violin\n## Sold by Maria\n## Additional images\nSOLD\n## Description\nUsed'}
+        self.assertTrue(indexed_closed_reason(item))
+        self.assertEqual(_indexed_state_key(item),'availability:indexed_closed:offerup:3b32aed8-b98b-3c09-a73b-2f220d215b75')
+        for description in ('# Other Violin\nSOLD', '# Zeta Violin\n## Description\nSOLD',
+                            '# Zeta Violin\n## Related listings\nSOLD', '# Zeta Violin\nSold as is'):
+            self.assertFalse(indexed_closed_reason({**item,'description':description}))
+        self.assertTrue(index_card_negative(url,'SOLD'))
+        self.assertTrue(index_card_negative(url,'This item has been sold.'))
+        for phrase in ('SOLD as is', 'Previously sold separately', 'This gear has sold', 'Used violin'):
+            self.assertFalse(index_card_negative(url,phrase))
+        self.assertFalse(index_card_negative('https://offerup.com.evil.example/item/detail/123','SOLD'))
+        self.assertTrue(index_card_negative('https://offerup.com/item/detail/123','SOLD'))
+        self.assertFalse(index_card_negative('https://offerup.com/item/detail/abc','SOLD'))
+        marker=index_card_negative(url,'SOLD')
+        self.assertFalse(indexed_closed_reason({**item, **marker, 'url':url[:-1]+'6','description':''}))
+
     def test_reverb_status_scope_excludes_description_related_and_scripts(self):
         for other in ('<aside>This gear has sold</aside>', '<div class="related">This gear has sold</div>',
                       '<div class="suggested-items">This gear has sold</div>',
@@ -906,6 +955,28 @@ class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(state,'live')
             self.assertEqual(saved_indexed_closed_reason(plain),'')
             self.assertFalse(availability_conflict(plain,'unknown'))
+
+    async def test_offerup_indexed_sold_persists_on_403_and_live_primary_clears(self):
+        from offer_verifier import remember_indexed_closed, verify_offer, availability_conflict, saved_indexed_closed_reason
+        url='https://offerup.com/item/detail/3b32aed8-b98b-3c09-a73b-2f220d215b75'
+        old={**violin(), 'url':url+'?foo=1', 'title':'Zeta Violin for Sale in Hemet, CA - OfferUp',
+             'description':'# Zeta Violin\n## Additional images\nSOLD\n## Description\nUsed'}
+        remember_indexed_closed(old)
+        plain={**violin(), 'url':url, 'title':'Zeta Violin'}
+        self.assertTrue(saved_indexed_closed_reason(plain))
+        other={**plain, 'url':url[:-1]+'6'}
+        self.assertFalse(saved_indexed_closed_reason(other))
+        page='<main><h1>Zeta Violin</h1><p id="description">Used Zeta violin</p><p>For sale $900</p></main>'
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)), \
+             patch('primary_page_reserve.fresh_primary_page',AsyncMock(return_value=None)):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(403))) as client:
+                state,_ = await verify_offer(plain,client)
+            self.assertEqual(state,'unknown')
+            self.assertTrue(availability_conflict(plain,state))
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,text=page))) as client:
+                state,_ = await verify_offer(plain,client)
+            self.assertEqual(state,'live')
+            self.assertFalse(saved_indexed_closed_reason(plain))
 
     async def test_cached_unknown_sold_outbox_cannot_bypass_the_hold(self):
         from price_tracker import PriceTracker

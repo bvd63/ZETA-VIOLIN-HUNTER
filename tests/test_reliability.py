@@ -236,7 +236,7 @@ class RegressionTests(unittest.TestCase):
                 '<main><h1>Zeta violin</h1>'+status+'</main><aside>Add to cart</aside>',200,url)[0],'dead')
 
     def test_offerup_sold_badge_not_seller_name_or_related_item(self):
-        url='https://offerup.com/item/detail/abc'
+        url='https://offerup.com/item/detail/3b32aed8-b98b-3c09-a73b-2f220d215b75'
         page='<main><h1>Zeta violin</h1><div>SOLD</div><p>Price $900</p></main>'
         self.assertEqual(inspect_page(self.listing(url=url),page,200,url)[0],'dead')
         live='<main><h1>Zeta violin</h1><h2>Sold by Frances</h2><p>Price $900</p><aside><span>SOLD</span></aside></main>'

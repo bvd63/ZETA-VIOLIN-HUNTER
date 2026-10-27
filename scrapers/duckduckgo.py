@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 from bs4 import BeautifulSoup
 from config import Config
 from database import canonical_url
-from offer_verifier import public_url
+from offer_verifier import public_url, index_card_negative
 from provider_state import claim_window, read, write
 from scrapers.base import BaseScraper, BROWSER_HEADERS
 from scrapers.search_reserves import plan
@@ -64,13 +64,7 @@ def parse_results(content: str, query: str) -> tuple:
         snippet = card.select_one('.result__snippet') if card else None
         description = snippet.get_text(' ', strip=True) if snippet else ''
         result = {'url': url, 'title': title, 'description': description}
-        host = (urlsplit(url).hostname or '').lower()
-        if (host in ('reverb.com', 'www.reverb.com') and re.match(
-                r'^/(?:[a-z]{2}(?:-[a-z]{2})?/)?item/\d+(?:[-/]|$)', urlsplit(url).path, re.I)):
-            match = re.search(r'\b(this gear has sold|this listing has ended)\b', description, re.I)
-            if match:
-                result['_indexed_availability_url'] = url
-                result['_indexed_availability_negative'] = 'sold' if match.group(1).casefold() == 'this gear has sold' else 'ended'
+        result.update(index_card_negative(url, description))
         results.append(result)
     return results, len(anchors)
 

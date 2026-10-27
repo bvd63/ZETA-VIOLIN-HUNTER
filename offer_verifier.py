@@ -7,7 +7,7 @@ import json
 import re
 import socket
 import time
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, urljoin
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -111,16 +111,45 @@ def _reverb_item(url: str) -> bool:
     return bool(_reverb_item_id(url))
 
 
+def _offerup_item_id(url: str) -> str:
+    if not isinstance(url, str):
+        return ''
+    try:
+        parts = urlsplit(url)
+        if (parts.scheme not in ('http', 'https') or parts.username or parts.password
+                or parts.port not in (None, 80, 443)
+                or (parts.hostname or '').lower() not in ('offerup.com', 'www.offerup.com')):
+            return ''
+    except ValueError:
+        return ''
+    match = re.fullmatch(r'/item/detail/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)/?', parts.path, re.I)
+    return match[1].lower() if match else ''
+
+
 def index_card_negative(url: str, snippet: str) -> dict:
     """Only an associated index-card snippet may use short Reverb status text."""
-    if not _reverb_item_id(url) or not isinstance(snippet,str):
+    if not isinstance(snippet,str):
         return {}
     text = BeautifulSoup(snippet,'lxml').get_text(' ',strip=True)
+    if _offerup_item_id(url):
+        lines = [BeautifulSoup(line, 'lxml').get_text(' ', strip=True) for line in snippet.splitlines()]
+        if (not re.search(r'\bthis item has been sold\b', text, re.I)
+                and not any(re.fullmatch(r'sold[.!]?', line, re.I) for line in lines)):
+            return {}
+        return {'_indexed_availability_url':url, '_indexed_availability_negative':'sold'}
+    if not _reverb_item_id(url):
+        return {}
     match = re.search(r'\b(this gear has sold|this listing has ended)\b',text,re.I)
     if not match:
         return {}
     return {'_indexed_availability_url':url, '_indexed_availability_negative':
             'sold' if match[1].casefold() == 'this gear has sold' else 'ended'}
+
+
+def _offerup_title(value: str) -> str:
+    title = re.sub(r'\s+', ' ', html.unescape(value)).strip()
+    title = re.sub(r'\s+for sale in\s+.+?\s*[-–|]\s*offerup\s*$', '', title, flags=re.I)
+    return re.sub(r'\s*[-–|]\s*offerup\s*$', '', title, flags=re.I).casefold()
 
 
 def indexed_closed_reason(listing: dict) -> str:
@@ -131,7 +160,38 @@ def indexed_closed_reason(listing: dict) -> str:
     or an explicitly URL-bound negative index card, are required. A successful
     current primary check can supersede this index.
     """
-    if not _reverb_item(listing.get('url', '')):
+    url = listing.get('url', '')
+    offerup_id = _offerup_item_id(url)
+    if offerup_id:
+        bound_url = listing.get('_indexed_availability_url')
+        if (_offerup_item_id(bound_url) == offerup_id
+                and listing.get('_indexed_availability_negative') == 'sold'):
+            return 'OfferUp: rezultatul indexat indică SOLD; verificarea primară actuală este necesară'
+        title = _offerup_title(str(listing.get('title') or ''))
+        for content in (listing.get('_discovery_description'), listing.get('description')):
+            matched, size = False, 0
+            for raw in str(content or '').splitlines():
+                line = re.sub(r'\s+', ' ', html.unescape(raw)).strip()
+                heading = re.match(r'^#{1,6}\s+(.+?)\s*#*$', line)
+                value = heading.group(1).strip() if heading else line
+                if re.match(r'^(?:description|details|other (?:listings|items)|similar|related|recommended|more from|you may also like)\b', value, re.I):
+                    if matched:
+                        break
+                if heading and not matched:
+                    if title and _offerup_title(value) == title:
+                        matched = True
+                    continue
+                if not matched:
+                    continue
+                size += len(line)
+                if size > 1200:
+                    break
+                if heading and not re.match(r'^(?:sold by\b|additional images\b)', value, re.I):
+                    break
+                if value.casefold() == 'sold' and not heading:
+                    return 'OfferUp: textul indexat indică SOLD; verificarea primară actuală este necesară'
+        return ''
+    if not _reverb_item(url):
         return ''
     bound_url = listing.get('_indexed_availability_url')
     if (isinstance(bound_url, str) and _reverb_item(bound_url)
@@ -170,9 +230,10 @@ def availability_conflict(listing: dict, state: str) -> bool:
 
 def _indexed_state_key(listing: dict) -> str:
     item_id = _reverb_item_id(listing.get('url', ''))
-    if not item_id:
-        return ''
-    return 'availability:indexed_closed:reverb:' + item_id
+    if item_id:
+        return 'availability:indexed_closed:reverb:' + item_id
+    item_id = _offerup_item_id(listing.get('url', ''))
+    return 'availability:indexed_closed:offerup:' + item_id if item_id else ''
 
 
 def remember_indexed_closed(listing: dict) -> None:
@@ -194,6 +255,47 @@ def saved_indexed_closed_reason(listing: dict) -> str:
 
 def primary_closed_reason(soup, host: str, url: str = '') -> str:
     """Marketplace-specific primary status, never generic 'sold' in a sidebar."""
+    if _offerup_item_id(url):
+        primary = BeautifulSoup(str(soup.find('main') or soup), 'lxml')
+        for node in primary.select('script, style, aside, nav, footer'):
+            node.decompose()
+        for node in list(primary.find_all(True)):
+            if node.parent is None:
+                continue
+            labels = ' '.join(str(node.get(k) or '') for k in ('class','id','aria-label','data-testid'))
+            if re.search(r'recommend|related|similar|suggested|promoted', labels, re.I):
+                node.decompose()
+        heading = primary.find('h1')
+        if heading:
+            from bs4.element import Tag, NavigableString
+            for link in list(primary.find_all('a',href=True)):
+                if link.parent is None:
+                    continue
+                other = _offerup_item_id(urljoin(url,link.get('href','')))
+                if other and other != _offerup_item_id(url):
+                    box = link.find_parent(('article','section')) or link.find_parent('div')
+                    if box and box.find('h1') is not heading:
+                        box.decompose()
+            for node in heading.next_elements:
+                if isinstance(node, Tag):
+                    if (node.get('id', '').casefold() == 'description'
+                            or node.get('itemprop') == 'description'
+                            or str(node.get('data-testid') or '').casefold() in ('description', 'item-description', 'listing-description')
+                            or str(node.get('aria-label') or '').casefold() == 'description'
+                            or (node.name in ('h1','h2','h3','h4')
+                                and re.match(r'^(?:description|details|other (?:listings|items)|similar|related|recommended|more from|you may also like)\b', node.get_text(' ', strip=True), re.I))):
+                        break
+                elif isinstance(node, NavigableString):
+                    if (' '.join(str(node).split()).casefold() == 'sold'
+                            and not node.find_parent('a')
+                            and not any(re.match(r'^sold\s+by\b', parent.get_text(' ', strip=True), re.I)
+                                        for parent in node.parents if parent.name in ('h1','h2','h3','h4','span','div','p'))
+                            and not any(isinstance(sibling, NavigableString) and sibling.strip()
+                                        for sibling in (node.parent.previous_sibling, node.parent.next_sibling))
+                            and not any(isinstance(sibling, Tag) and re.match(r'^(?:by\b|as is\b|separately\b)',sibling.get_text(' ',strip=True),re.I)
+                                        for sibling in (node.parent.previous_sibling, node.parent.next_sibling))
+                            and node.parent.name in ('span','div','strong','p')):
+                        return 'OfferUp: anunț marcat SOLD'
     if _reverb_item(url):
         primary = BeautifulSoup(str(soup.find('main') or soup), 'lxml')
         for node in primary.select('script, style, aside, nav, footer, [class*="recommend"], [id*="recommend"], [class*="related"], [id*="related"]'):
@@ -260,6 +362,9 @@ def primary_closed_reason(soup, host: str, url: str = '') -> str:
 
 def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple:
     """(state, reason). live/dead/non_sale/unknown; enrich only listing content."""
+    original_offerup = _offerup_item_id(listing.get('url', ''))
+    if original_offerup and _offerup_item_id(final_url) != original_offerup:
+        return 'unknown', 'OfferUp: redirecționare către alt anunț; necesită reverificare'
     reason = looks_dead(status, listing["url"], final_url, text)
     if reason:
         return "dead", reason
@@ -388,10 +493,6 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     scoped = BeautifulSoup(str(main), "lxml")
     for related in scoped.select('aside, [class*="recommend"], [id*="recommend"], [class*="related"], [id*="related"]'):
         related.decompose()
-    if host in ('offerup.com', 'www.offerup.com') and any(
-            node.get_text(' ', strip=True) == 'SOLD' for node in scoped.find_all(['span','div','strong','p'])
-            if not node.find(['span','div','strong','p'])):
-        return 'dead', 'OfferUp: anunț marcat SOLD'
     body = scoped.get_text(" ", strip=True)
     # Read the item body, not just the search-engine snippet. Never borrow
     # footer/recommended-product text as identity evidence.

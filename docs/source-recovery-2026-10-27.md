@@ -1,5 +1,9 @@
 # Recuperarea surselor — continuarea din27octombrie
 
+Continuare după miezul nopții28octombrie: cycle102 a terminat99,6s/6577brut/5trimise, cu5surse parțiale. Numai DDG a încercat3interogări noi de motor;2pagini valide au dat20rezultate brute, a treia a răspuns202 și a fost oprită cu slotul păstrat. Cele5alerte sunt3pisteDDG și2produseClassy din coadă, toateUNKNOWN, nu5viori active/folosite confirmate. GovDeals/AllSurplus au răspuns la căutări, dar lipsa204 în această tură nu demonstrează recuperarea detaliilor încă amânate. Gumtree a citit46carduri, cu3query-uri rămase247.
+
+Auditul a descoperit încă un fals pozitiv OfferUp: pagina indexată a UUID3b32aed8-b98b-3c09-a73b-2f220d215b75 afișeazăSOLD. Alerta a fost corectată și închisă tehnic, cu ack existent păstrat și0încercăriPushover. Verificarea nouă mută badge-ul înaintea stocului structurat și îl limitează la corpul primar înainteDescription, cu IDvalid/aceeași ofertă, fără a utilizaSoldby, sellerprose sau recomandări. Dovezile indexate înseamnăhold la acces necunoscut și pot fi înlăturate de un currentprimarylive. Node înSingapore și probaBun înUS au rămas403 pentru acel URL; accesul geografic american singur nu a rezolvat OfferUp.
+
 Obiectivul complet este păstrat în [dosar](goal-elite-search-2026-10-27.md). După înlocuirea accidentală cu„resume”, obiectivul Codex a fost restabilit explicit și verificat activ. Starea proiectului rămâne în lucru; nu s-a declarat că reparațiile sunt terminate.
 
 | Sursă / incident | Schimbare și probă | Limită rămasă |
