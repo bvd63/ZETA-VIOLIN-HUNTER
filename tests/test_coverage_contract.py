@@ -115,7 +115,7 @@ class CoverageContractTests(unittest.TestCase):
 
     def test_brave_retains_fixed_queries_and_original_matrix_cadence(self):
         # OR-added model aliases widen these five auction queries.
-        clean = lambda q: q.replace(' OR JV5 OR JLP4', '')
+        clean = lambda q: q.replace(' OR JV5 OR JLP4 OR JV4', '')
         self.assertEqual(BASE['priority_queries'], [clean(q) for q in PRIORITY_QUERIES])
         self.assertEqual(BASE['web'], [clean(q) for q in MATRIX_KEYWORDS])
         with patch.object(Config, 'BRAVE_QUERIES_PER_RUN', 16):

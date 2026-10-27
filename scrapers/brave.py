@@ -107,7 +107,8 @@ class BraveScraper(BaseScraper):
         async with self.make_client(timeout=20) as client:
             for q, extra in plan:
                 try:
-                    if not reserve_request("brave", Config.BRAVE_MONTHLY_QUOTA, manual=getattr(self, "manual_fresh", False)):
+                    if not reserve_request("brave", Config.BRAVE_MONTHLY_QUOTA,
+                                           manual=getattr(self, "manual_fresh", False) or getattr(self, 'auxiliary_work', False)):
                         self.content_failures.append("Brave bot request allowance reached; other providers continue")
                         log.info("Brave monthly budget exhausted — no further HTTP requests")
                         self.skipped = not results
@@ -163,7 +164,7 @@ class BraveScraper(BaseScraper):
 
         consumed_matrix = max(0, spent - min(len(GLOBAL_QUERIES), len(plan)))
         self._kv_set("brave_cursor", str((cursor + consumed_matrix) % (len(MATRIX_KEYWORDS) * len(SITE_GROUPS))))
-        if not getattr(self, "manual_fresh", False):
+        if not getattr(self, "manual_fresh", False) and not getattr(self, 'auxiliary_work', False):
             self._kv_set("brave", datetime.utcnow().isoformat())
         log.info(f"Brave: {len(results)} listings found")
         return results

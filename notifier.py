@@ -8,6 +8,7 @@ import asyncio
 import logging
 import httpx
 import html
+import time
 from urllib.parse import urlsplit, urlunsplit
 from datetime import datetime
 from config import Config
@@ -33,14 +34,17 @@ class TelegramNotifier:
         url = TELEGRAM_API.format(token=self.token, method=method)
         payload = {"chat_id": self.chat_id, **payload}
         try:
+            from provider_state import read, write
+            if read('telegram:retry_after', 0) > time.time():
+                return {}  # durable outbox/reminders retry after the server cooldown
             async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.post(url, json=payload)
                 if resp.status_code == 429:
                     data = resp.json()
                     retry_after = max(1, int(data.get("parameters", {}).get("retry_after", 30)))
-                    log.warning("Telegram rate limited — waiting %ss", retry_after)
-                    await asyncio.sleep(retry_after + 1)
-                    resp = await client.post(url, json=payload)
+                    write('telegram:retry_after', time.time() + retry_after + 1)
+                    log.warning("Telegram rate limited — delivery retained for retry in %ss", retry_after)
+                    return {}
                 data = resp.json()
                 if resp.status_code != 200 or data.get("ok") is not True:
                     log.error("Telegram %s rejected notification (HTTP %s, code %s)",
@@ -81,6 +85,10 @@ class TelegramNotifier:
         receipts = AlertReceipts()
         try:
             receipt_id = receipts.prepare(self.chat_id, listing, text, event)
+            if receipts.was_delivered(receipt_id):
+                # Reconcile an accepted message after a crash before the batch
+                # updated delivered_urls. Reuse its existing reminder/ack state.
+                return True
             options = {"parse_mode": "HTML", "disable_notification": not receipts.is_pending(receipt_id),
                        "reply_markup": self._alert_buttons(receipt_id, self._normalize_url(listing.get("url", "")))}
             image_url = self._normalize_url(str(listing.get("image_url", "") or ""))

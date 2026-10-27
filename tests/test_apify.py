@@ -44,7 +44,7 @@ class ApifyTests(unittest.TestCase):
         self.config.start()
         self.addCleanup(self.config.stop)
         with store() as conn:
-            for table in ("apify_jobs", "apify_items", "apify_state", "apify_costs"):
+            for table in ("apify_jobs", "apify_items", "apify_state", "apify_costs", 'apify_item_attempts', 'apify_batch_targets'):
                 conn.execute(f"DELETE FROM {table}")
             conn.commit()
 
@@ -56,6 +56,14 @@ class ApifyTests(unittest.TestCase):
         return scraper
 
     def test_manual_discovery_keeps_regular_guard_and_obeys_global_budget(self):
+        from provider_state import write
+        write('apify:account', {'usage_cycle':{'endAt':'2026-11-04T23:59:59Z'},
+                               'included_monthly_usd':5,'usage_usd':0,'checked':time.time(),'error':''})
+        date_patch = patch('scrapers.apify_facebook.datetime')
+        clock = date_patch.start();self.addCleanup(date_patch.stop)
+        from datetime import datetime, timezone
+        clock.now.return_value = datetime(2026,10,27,tzinfo=timezone.utc)
+        clock.fromisoformat.side_effect = datetime.fromisoformat
         scraper=ApifyFacebookScraper();scraper.reset_health();scraper._cursor=0
         previous=str(time.time())
         with store() as conn:

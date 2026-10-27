@@ -1,4 +1,4 @@
-"""Bounded anonymous Chromium fallback for public Gumtree search pages."""
+"""Bounded anonymous Chromium fallback for verified public marketplace hosts."""
 from urllib.parse import urlsplit
 
 
@@ -17,7 +17,8 @@ class PublicSearchBrowser:
             await self.playwright.stop()
 
     async def fetch(self, url: str) -> tuple[int, str]:
-        if urlsplit(url).hostname not in ('www.gumtree.com', 'gumtree.com'):
+        if urlsplit(url).hostname not in ('www.gumtree.com', 'gumtree.com',
+                                          'www.musicalinstrument-auctions.co.uk', 'musicalinstrument-auctions.co.uk'):
             raise ValueError('Unsupported public search host')
         if self.unavailable:
             raise RuntimeError('Browser unavailable')

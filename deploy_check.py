@@ -7,6 +7,9 @@ import sys
 def main():
     for module, arguments in (
         ("tests.test_filters", []),
+        ("tests.test_trackers", []),
+        ("tests.test_dedup", []),
+        ("tests.test_liveness", []),
         ("tests.test_apify", []),
         ("tests.test_craigslist", []),
         ("tests.test_reliability", []),
@@ -17,6 +20,7 @@ def main():
         ("tests.test_search_reserves", []),
         ("tests.test_pushover", []),
         ("tests.test_operations", []),
+        ("tests.test_search_quality", []),
         ("apify_preview", ["--check"]),
     ):
         print(f"Pre-deploy check: {module}", flush=True)

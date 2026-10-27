@@ -51,10 +51,15 @@ class StatusTracker:
         if "details" not in columns:
             self.conn.execute("ALTER TABLE scraper_stats ADD COLUMN details TEXT DEFAULT '{}'")
             self.conn.commit()
+        cycle_columns = {row[1] for row in self.conn.execute('PRAGMA table_info(cycle_summary)')}
+        if 'work_kind' not in cycle_columns:
+            self.conn.execute("ALTER TABLE cycle_summary ADD COLUMN work_kind TEXT DEFAULT 'legacy'")
+            self.conn.commit()
 
-    def start_cycle(self):
+    def start_cycle(self, work_kind: str = 'legacy'):
         self._cycle_start = datetime.utcnow()
         self._cycle_stats = {}
+        self._work_kind = work_kind
 
     def record_scraper(self, name: str, raw: int, new: int,
                        error: str = "", duration: float = 0, details: dict = None):
@@ -79,10 +84,10 @@ class StatusTracker:
             self.conn.execute("""
                 INSERT INTO cycle_summary
                 (total_scrapers, total_raw, total_new, total_sent,
-                 total_ai_rejected, duration_sec, run_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                 total_ai_rejected, duration_sec, run_at, work_kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (sum(s["raw"] >= 0 for s in self._cycle_stats.values()), total_raw, total_new,
-                  total_sent, total_ai_rejected, duration, self._cycle_start.isoformat()))
+                  total_sent, total_ai_rejected, duration, self._cycle_start.isoformat(), self._work_kind))
             self.conn.commit()
         except Exception as e:
             log.warning(f"Cycle summary record error: {e}")
@@ -95,6 +100,28 @@ class StatusTracker:
         except Exception as e:
             log.warning(f"last cycle lookup error: {e}")
             return None
+
+    def last_scheduled_cycle_started(self):
+        """An auxiliary/cache-only run cannot conceal a missing scheduled cycle.
+
+        Upgrade fallback accepts legacy cycles only near an actual local slot;
+        it never rewrites or labels old ledger rows as scheduled work.
+        """
+        from config import Config
+        from datetime import timezone
+        from zoneinfo import ZoneInfo
+        hours = {int(h) for h in Config.SEARCH_HOURS.split(',') if h.strip().isdigit()}
+        for timestamp, kind in self.conn.execute('SELECT run_at,work_kind FROM cycle_summary ORDER BY id DESC LIMIT 200'):
+            if not timestamp or kind == 'auxiliary':
+                continue
+            date = datetime.fromisoformat(timestamp)
+            if kind == 'core':
+                return date
+            local = date.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(Config.SEARCH_TIMEZONE))
+            minutes = local.hour*60 + local.minute
+            if any(abs(minutes-hour*60) <= 5 for hour in hours):
+                return date
+        return None
 
     def get_streaks(self, lookback: int = 0) -> dict:
         """For each scraper: number of consecutive most-recent cycles with
@@ -149,7 +176,7 @@ class StatusTracker:
         try:
             row = self.conn.execute("""
                 SELECT total_scrapers, total_raw, total_new, total_sent,
-                       total_ai_rejected, duration_sec, run_at
+                       total_ai_rejected, duration_sec, run_at, work_kind
                 FROM cycle_summary ORDER BY id DESC LIMIT 1
             """).fetchone()
             if row:
@@ -161,6 +188,7 @@ class StatusTracker:
                     "scrapers_in_error": row[4],
                     "duration_seconds": round(row[5], 1),
                     "run_at": row[6],
+                    "work_kind": row[7],
                 }
 
             cur = self.conn.execute("""

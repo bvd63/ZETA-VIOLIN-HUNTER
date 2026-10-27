@@ -29,3 +29,4 @@ jobs:
       - run: python -m tests.test_search_reserves
       - run: python -m tests.test_pushover
       - run: python -m tests.test_operations
+      - run: python -m tests.test_search_quality

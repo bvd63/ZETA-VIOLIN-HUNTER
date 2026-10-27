@@ -131,7 +131,7 @@ class GoogleScraper(BaseScraper):
         return True
 
     def _mark_run(self) -> None:
-        if getattr(self, "manual_fresh", False):
+        if getattr(self, "manual_fresh", False) or getattr(self, 'auxiliary_work', False):
             return  # Preserve the next scheduled discovery window.
         try:
             conn = _db()
@@ -240,7 +240,8 @@ class GoogleScraper(BaseScraper):
         async with self.make_client(timeout=20) as client:
             for q, extra in plan:
                 try:
-                    if not reserve_request("google", min(96, Config.GOOGLE_DAILY_QUOTA)):
+                    if not reserve_request("google", min(96, Config.GOOGLE_DAILY_QUOTA),
+                                           manual=getattr(self, 'manual_fresh', False) or getattr(self, 'auxiliary_work', False)):
                         log.info("Google daily budget exhausted — no further HTTP requests")
                         break
                     spent += 1

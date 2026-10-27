@@ -4,7 +4,9 @@ Task input and run options are overridden explicitly: console caps are not API
 caps. Never retry an uncertain run creation; keep its full budget reservation.
 """
 
+import calendar
 import json
+import math
 import logging
 import re
 import time
@@ -47,7 +49,7 @@ def normalize(row: dict) -> dict:
     """Accept only actual public Facebook item URLs; support both observed schemas."""
     if not isinstance(row, dict) or row.get("error"):
         return {}
-    raw_url = row.get("itemUrl") or row.get("listingUrl") or ""
+    raw_url = row.get("itemUrl") or row.get("listingUrl") or row.get('url') or ""
     if not isinstance(raw_url, str):
         return {}
     try:
@@ -57,12 +59,14 @@ def normalize(row: dict) -> dict:
     match = ITEM.fullmatch(parsed.path)
     if parsed.scheme != "https" or parsed.hostname not in ("facebook.com", "www.facebook.com", "m.facebook.com") or not match:
         return {}
-    title = _text(row.get("listingTitle") or row.get("marketplace_listing_title"))
+    title = _text(row.get("listingTitle") or row.get("marketplace_listing_title") or row.get('title'))
     if not title:
         return {}
     price = row.get("listingPrice") or row.get("listing_price") or {}
     if not isinstance(price, dict):
         price = {}
+    if not price and isinstance(row.get('priceValue'), (int, float)) and not isinstance(row.get('priceValue'), bool):
+        price = {'amount': row['priceValue'], 'currency': row.get('priceCurrency') or 'USD'}
     location = _text(row.get("locationText"))
     if not location:
         raw_location = row.get("location")
@@ -76,7 +80,8 @@ def normalize(row: dict) -> dict:
     photo = photo if isinstance(photo, dict) else {}
     raw_image = photo.get("image")
     raw_image = raw_image if isinstance(raw_image, dict) else {}
-    image = photo.get("photo_image_url") or raw_image.get("uri", "")
+    image = (photo.get("photo_image_url") or raw_image.get("uri", "") or row.get('primary_listing_photo_url')
+             or row.get('imageUrl') or row.get('image_url') or '')
     image = image if isinstance(image, str) else ""
     item_id = match.group(1)
     return {
@@ -84,7 +89,9 @@ def normalize(row: dict) -> dict:
         "platform": "Facebook Marketplace", "title": title,
         "price": f"{price['amount']} {price.get('currency', 'USD')}" if price.get("amount") is not None else "N/A",
         "location": location or "Unknown", "url": f"https://www.facebook.com/marketplace/item/{item_id}/",
-        "description": _text(row.get("description")), "condition": _text(row.get("condition")),
+        "description": _text(row.get("description") or (
+            row.get('moreDetails', {}).get('redacted_description') if isinstance(row.get('moreDetails'), dict) else '')),
+        "condition": _text(row.get("condition")),
         "image_url": image, "relevance_score": 8, "provider": "apify",
         "apify_is_live": _flag(row, "isLive", "is_live"),
         "apify_is_sold": _flag(row, "isSold", "is_sold"),
@@ -121,6 +128,11 @@ def store():
             cap INTEGER, created REAL, done INTEGER DEFAULT 0)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS apify_items (
             url TEXT PRIMARY KEY, candidate TEXT, details TEXT, checked REAL DEFAULT 0)""")
+        conn.execute('''CREATE TABLE IF NOT EXISTS apify_item_attempts (
+            url TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0,
+            next_attempt REAL NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '')''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS apify_batch_targets (
+            reservation TEXT, url TEXT, PRIMARY KEY(reservation,url))''')
         conn.commit()
         yield conn
     finally:
@@ -155,6 +167,36 @@ class ApifyFacebookScraper(BaseScraper):
                 self.failures.append("Apify monthly budget reserved; collection skipped")
                 conn.rollback()
                 return ""
+            auxiliary = getattr(self, 'manual_fresh', False) or getattr(self, 'auxiliary_work', False)
+            if auxiliary:
+                now = datetime.now(timezone.utc)
+                days_left = calendar.monthrange(now.year, now.month)[1] - now.day + 1
+                pair_cap = Config.APIFY_DISCOVERY_CAP_USD + Config.APIFY_DETAILS_CAP_USD
+                protected = _money(days_left * Config.RUNS_PER_DAY * pair_cap)
+                account = {}
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE name='provider_state'").fetchone():
+                    row = conn.execute("SELECT value FROM provider_state WHERE key='apify:account'").fetchone()
+                    account = json.loads(row[0]) if row else {}
+                account_safe = False
+                try:
+                    end = datetime.fromisoformat(account['usage_cycle']['endAt'].replace('Z', '+00:00'))
+                    account_days = max(0, (end - now).total_seconds() / 86400)
+                    account_protected = math.ceil(account_days) * Config.RUNS_PER_DAY * pair_cap
+                    # The cached account meter cannot include later/uncertain jobs.
+                    # Preserve their full cap until authenticated settlement exists.
+                    since_meter = conn.execute('''SELECT coalesce(sum(coalesce(c.cost,j.cap)),0)
+                        FROM apify_jobs j LEFT JOIN apify_costs c ON c.run_id=j.run_id
+                        WHERE j.created>=? OR c.run_id IS NULL OR c.checked>=?''',
+                        (account.get('checked', 0), account.get('checked', 0))).fetchone()[0]
+                    account_safe = (not account.get('error') and account.get('checked', 0) > time.time() - 12 * 3600
+                                    and _money(account['included_monthly_usd'] - account['usage_usd'])
+                                    >= units + _money(account_protected) + since_meter)
+                except (KeyError, TypeError, ValueError):
+                    account_safe = False
+                if used + units + protected > _money(Config.APIFY_MONTHLY_LIMIT_USD) or not account_safe:
+                    self.failures.append('Apify extra work deferred: scheduled capacity/account credit protected')
+                    conn.rollback()
+                    return ''
             if phase == "details" and conn.execute(
                     "SELECT 1 FROM apify_jobs WHERE phase='details' AND done=0 AND created>?",
                     (time.time() - 300,)).fetchone():
@@ -163,7 +205,7 @@ class ApifyFacebookScraper(BaseScraper):
                 conn.rollback()
                 return ""
             if phase == "discovery":
-                guard_key = 'last_manual_discovery' if getattr(self, 'manual_fresh', False) else 'last_discovery'
+                guard_key = 'last_manual_discovery' if auxiliary else 'last_discovery'
                 row = conn.execute("SELECT value FROM apify_state WHERE key=?", (guard_key,)).fetchone()
                 if row and time.time() - float(row[0]) < Config.APIFY_GUARD_HOURS * 3600:
                     conn.rollback()
@@ -217,6 +259,16 @@ class ApifyFacebookScraper(BaseScraper):
         reservation = self._reserve(phase, cap)
         if not reservation:
             return "", []
+        if phase == 'details':
+            # Persist the expected IDs before POST. An error row or missing
+            # result must not leave an oldest candidate immediately due forever.
+            with store() as conn:
+                conn.executemany('INSERT OR IGNORE INTO apify_batch_targets VALUES (?,?)',
+                                 [(reservation, target['url']) for target in urls])
+                conn.executemany('''INSERT INTO apify_item_attempts (url,next_attempt,error) VALUES (?,?,?)
+                    ON CONFLICT(url) DO UPDATE SET next_attempt=excluded.next_attempt,error=excluded.error''',
+                    [(target['url'], time.time()+18*3600, 'detail POST may be billed; awaiting outcome') for target in urls])
+                conn.commit()
         task = Config.APIFY_DISCOVERY_TASK_ID if phase == "discovery" else Config.APIFY_DETAILS_TASK_ID
         if phase == "discovery":
             for target in urls:
@@ -237,6 +289,7 @@ class ApifyFacebookScraper(BaseScraper):
     def _consume(self, reservation: str, phase: str, rows: list) -> set:
         observed = set()
         with store() as conn:
+            expected = {row[0] for row in conn.execute('SELECT url FROM apify_batch_targets WHERE reservation=?', (reservation,))}
             for row in rows:
                 listing = normalize(row)
                 if not listing:
@@ -248,15 +301,38 @@ class ApifyFacebookScraper(BaseScraper):
                         log.info("Apify discovery %s rejected: %s", listing["url"], reason or "sold/pending")
                         continue
                 url = listing["url"]
+                if phase == 'details' and expected and url not in expected:
+                    self.failures.append('Apify detail returned an unexpected item ID; requested candidates retained')
+                    continue
                 observed.add(url)
-                conn.execute("INSERT INTO apify_items (url,candidate) VALUES (?,?) ON CONFLICT(url) DO UPDATE SET candidate=excluded.candidate",
-                             (url, json.dumps(listing, ensure_ascii=False)))
+                if phase == 'discovery':
+                    conn.execute("INSERT INTO apify_items (url,candidate) VALUES (?,?) ON CONFLICT(url) DO UPDATE SET candidate=excluded.candidate",
+                                 (url, json.dumps(listing, ensure_ascii=False)))
+                else:
+                    # Detail output may be partial/generic. Never erase the
+                    # original discovery evidence used to select later retries.
+                    conn.execute("INSERT OR IGNORE INTO apify_items (url,candidate) VALUES (?,?)",
+                                 (url, json.dumps(listing, ensure_ascii=False)))
                 if phase == "details":
-                    if any(listing[key] is None for key in ("apify_is_live", "apify_is_sold", "apify_is_pending")):
+                    incomplete = any(listing[key] is None for key in ("apify_is_live", "apify_is_sold", "apify_is_pending"))
+                    if incomplete:
                         self.failures.append("Apify detail availability missing; candidate withheld")
+                        observed.discard(url)
                     listing["apify_checked_at"] = datetime.now(timezone.utc).isoformat()
                     conn.execute("UPDATE apify_items SET details=?, checked=? WHERE url=?",
-                                 (json.dumps(listing, ensure_ascii=False), time.time(), url))
+                                 (json.dumps(listing, ensure_ascii=False), 0 if incomplete else time.time(), url))
+                    if not incomplete:
+                        conn.execute('DELETE FROM apify_item_attempts WHERE url=?', (url,))
+            if phase == 'details':
+                if expected - observed:
+                    self.failures.append('Apify requested detail missing/incomplete; retained with per-item retry')
+                for url in expected - observed:
+                    previous = conn.execute('SELECT failures FROM apify_item_attempts WHERE url=?', (url,)).fetchone()
+                    failures = min(8, (previous[0] if previous else 0) + 1)
+                    delay = min(72 * 3600, 18 * 3600 * 2 ** (failures - 1))
+                    conn.execute('INSERT OR REPLACE INTO apify_item_attempts VALUES (?,?,?,?)',
+                                 (url, failures, time.time() + delay, 'detail missing/no_items; not sold proof'))
+                    log.warning('Apify detail %s deferred for %sh; candidate retained', url, delay // 3600)
             conn.execute("UPDATE apify_jobs SET done=1 WHERE id=?", (reservation,))
             conn.commit()
         return observed
@@ -283,9 +359,7 @@ class ApifyFacebookScraper(BaseScraper):
                         except RuntimeError as exc:
                             if str(exc) not in ("Apify HTTP 404", "Apify HTTP 410"):
                                 raise
-                            with store() as conn:
-                                conn.execute("UPDATE apify_jobs SET done=1 WHERE id=?", (reservation,))
-                                conn.commit()
+                            self._consume(reservation, phase, [])
                             self.failures.append("Apify expired run; reservation retained, results unavailable")
                             continue
                         self._consume(reservation, phase, rows)
@@ -298,7 +372,10 @@ class ApifyFacebookScraper(BaseScraper):
                         log.info("Apify discovery skipped: guard or monthly reservation limit")
                 with store() as conn:
                     queue = []
-                    for url, candidate in conn.execute("SELECT url,candidate FROM apify_items WHERE checked<? ORDER BY checked,url", (cutoff,)):
+                    for url, candidate in conn.execute('''SELECT i.url,i.candidate FROM apify_items i
+                            LEFT JOIN apify_item_attempts a ON a.url=i.url
+                            WHERE i.checked<? AND coalesce(a.next_attempt,0)<=?
+                            ORDER BY i.checked,i.url''', (cutoff, time.time())):
                         listing = json.loads(candidate)
                         if discovery_reason(listing) or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
                             continue

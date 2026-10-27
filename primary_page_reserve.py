@@ -7,32 +7,24 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode, quote
 
 from config import Config
 from database import canonical_url
-from provider_state import read, write, store
+from provider_state import read, write, reserve_work
+from work_context import work_kind
 
 log = logging.getLogger(__name__)
 
 
 def reserve_pages(kind: str) -> bool:
     """Reserve page count and shared dollars atomically; no phantom page slots."""
-    now=time.time()
-    day=datetime.fromtimestamp(now,timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
+    if work_kind.get() == 'queue':
+        return False  # queue maintenance never launches a paid recovery
     page_rolling,page_daily=(186,6) if kind=='exa_gum_search' else (620,20)
-    with store() as conn:
-        conn.execute('BEGIN IMMEDIATE')
-        for provider,units,rolling_cap,day_cap in (
-                (kind,1,page_rolling,page_daily),('exa',1000,int(Config.EXA_ROLLING_BUDGET_USD*1000000),250000)):
-            rolling=conn.execute('SELECT coalesce(sum(units),0) FROM provider_reservations WHERE provider=? AND created>?',
-                                 (provider,now-31*86400)).fetchone()[0]
-            daily=conn.execute('SELECT coalesce(sum(units),0) FROM provider_reservations WHERE provider=? AND created>=?',
-                               (provider,day)).fetchone()[0]
-            if rolling+units>rolling_cap or daily+units>day_cap:
-                conn.rollback()
-                log.warning('Exa %s: local %s reservation guard; original searches remain configured',kind,
-                            'daily' if daily+units>day_cap else 'rolling')
-                return False
-        conn.executemany('INSERT INTO provider_reservations VALUES (?,?,?)',[(kind,now,1),('exa',now,1000)])
-        conn.commit()
-    return True
+    planned = (Config.EXA_QUERIES_PER_RUN + Config.EXA_EXTRA_QUERIES_PER_RUN) * Config.RUNS_PER_DAY * 31 * 17000 + 1426000
+    ok = reserve_work('exa', 1000, int(Config.EXA_ROLLING_BUDGET_USD * 1000000), 250000,
+                      planned, auxiliary=work_kind.get() != 'core',
+                      counters=((kind, 1, page_rolling, page_daily),))
+    if not ok:
+        log.warning('Exa %s: local %s reservation guard; candidate retained', kind, work_kind.get())
+    return ok
 
 
 def supported(url: str) -> bool:

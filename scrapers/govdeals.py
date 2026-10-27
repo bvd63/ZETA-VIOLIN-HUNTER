@@ -76,14 +76,26 @@ class GovDealsClient:
         return response.json()
 
 
+def asset_closed_reason(asset: dict, row: dict = None, *, now: datetime = None) -> str:
+    """Only explicit status/deadline evidence closes a lot; missing data does not."""
+    asset = asset if isinstance(asset, dict) else {}
+    row = row if isinstance(row, dict) else {}
+    if str(asset.get("assetStatusCd", "")).upper() in ("SOA", "SOLD", "CLO", "CLOSED", "CAN"):
+        return "stare explicită de licitație încheiată"
+    end = auction_end(row.get("assetAuctionEndDateUtc") or asset.get("assetAuctionEndDate") or "")
+    if end and datetime.fromisoformat(end) <= (now or datetime.now(timezone.utc)):
+        return "termen de licitație depășit"
+    return ""
+
+
 def parse_asset(asset: dict, row: dict = None, *, now: datetime = None,
                 platform: str = "GovDeals", host: str = "www.govdeals.com") -> dict:
+    if not isinstance(asset, dict):
+        return {}
     row = row or {}
     title = html.unescape(asset.get("assetShortDesc") or row.get("assetShortDescription") or "")
     end = auction_end(row.get("assetAuctionEndDateUtc") or asset.get("assetAuctionEndDate") or "")
-    if not end or datetime.fromisoformat(end) <= (now or datetime.now(timezone.utc)):
-        return {}
-    if str(asset.get("assetStatusCd", "")).upper() in ("SOA", "SOLD", "CLO", "CLOSED", "CAN"):
+    if not end or asset_closed_reason(asset, row, now=now):
         return {}
     asset_id = asset.get("assetId") or row.get("assetId")
     account_id = asset.get("accountId") or row.get("accountId")
@@ -151,7 +163,11 @@ class GovDealsScraper(BaseScraper):
                     detail = await api.asset(str(row["assetId"]), str(row["accountId"]))
                     listing = parse_asset(detail, row, platform=self.name, host=self.host)
                     self.coverage_stats["detail_checked"] += 1
-                    complete(self.name, row, 10 * 3600)
+                    incomplete = not listing and not asset_closed_reason(detail, row)
+                    complete(self.name, row, 3600 if incomplete else 10 * 3600)
+                    if incomplete:
+                        self.coverage_stats["detail_unverified"] += 1
+                        self.content_failures.append("auction detail incomplete; retained for retry")
                     if listing and has_zeta_signal(listing["title"] + " " + listing["description"]):
                         results.append(listing)
                 except Exception as exc:

@@ -62,6 +62,10 @@ class AlertReceipts:
             (now, message_id, now + Config.ALERT_FIRST_REMINDER_MINUTES * 60, receipt_id))
         self.conn.commit()
 
+    def was_delivered(self, receipt_id: str) -> bool:
+        return self.conn.execute('SELECT 1 FROM alert_receipts WHERE id=? AND delivered_at IS NOT NULL',
+                                 (receipt_id,)).fetchone() is not None
+
     def acknowledge(self, receipt_id: str, chat_id: str) -> bool:
         cur = self.conn.execute("""UPDATE alert_receipts SET acknowledged_at=coalesce(acknowledged_at,?),
             next_reminder=NULL, push_next_attempt=NULL WHERE id=? AND chat_id=?""", (time.time(), receipt_id, str(chat_id)))

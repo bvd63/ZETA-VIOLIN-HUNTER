@@ -7,8 +7,9 @@ import json
 import re
 import socket
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 from filters import is_editorial_url, classify
@@ -16,7 +17,7 @@ from liveness import looks_dead, UA, REVERB_ITEM_RX
 from source_policy import is_disabled_source
 
 GOVDEALS_RX = re.compile(r"^https://(?:(?:www|prod-seo)\.)?(?:govdeals|allsurplus)\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?asset/(\d+)/(\d+)(?:[/?#]|$)", re.I)
-ITEM_PATH = re.compile(r"/(?:item|items|itm|lot|lots|asset|listing|listings|ad|offer|offers|annuncio|anzeige|jp/auction|auction-lot)/|/l/\d+[-/]|/sale/\d+/\d+/|/lot-[\w-]+|/marketplace/item/|/d/[^/]+/\d+\.html", re.I)
+ITEM_PATH = re.compile(r"/(?:item|items|product|products|itm|lot|lots|asset|listing|listings|ad|offer|offers|annuncio|anzeige|jp/auction|auction-lot)/|/l/\d+[-/]|/sale/\d+/\d+/|/lot-[\w-]+|/marketplace/item/|/d/[^/]+/\d+\.html", re.I)
 ARCHIVE_PATH = re.compile(r"/(?:price-result|realized-prices|auction-results|cozio-archive)/", re.I)
 SALE_WORDS = re.compile(r"\b(?:for sale|wts|selling|current bid|minimum bid|place bid|buy now|buy it now|add to cart|make an offer|auction lot|price|prix|preis|à vendre|zu verkaufen|te koop|in vendita)\b", re.I)
 EDITORIAL_TYPES = {"article", "newsarticle", "blogposting", "review", "reportagearticle"}
@@ -24,6 +25,13 @@ EDITORIAL_TYPES = {"article", "newsarticle", "blogposting", "review", "reportage
 
 def is_item_url(url: str) -> bool:
     parts = urlsplit(url)
+    from collection_pages import mercatino_item
+    if mercatino_item(url):
+        return True
+    if ((parts.hostname or '').removeprefix('www.') == 'thomann.de'
+            and re.fullmatch(r'/[a-z]{2}/classified_show\.html', parts.path)
+            and re.fullmatch(r'\d+', parse_qs(parts.query).get('id', [''])[0])):
+        return True
     if ITEM_PATH.search(parts.path):
         return True
     # These short paths are only item evidence on their own marketplace host.
@@ -73,6 +81,19 @@ def _nodes(value):
         yield from _nodes(value.get("@graph", []))
 
 
+def gardiner_sale_date(soup):
+    for text in soup.find_all(string=re.compile(r'Sale Date:', re.I)):
+        if text.parent.name in ('script', 'style') or any(p.name in ('aside', 'nav', 'footer') for p in text.parents):
+            continue
+        match = re.search(r'Sale Date:\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})', str(text), re.I)
+        if match:
+            try:
+                return datetime.strptime(' '.join(match.groups()), '%d %B %Y').date()
+            except ValueError:
+                pass
+    return None
+
+
 def primary_closed_reason(soup, host: str) -> str:
     """Marketplace-specific primary status, never generic 'sold' in a sidebar."""
     if host == 'invaluable.com' or host.endswith('.invaluable.com'):
@@ -83,6 +104,10 @@ def primary_closed_reason(soup, host: str) -> str:
         for status in soup.select('span.h4.text-warning, strong'):
             if status.get_text(' ', strip=True).casefold() == 'closed':
                 return 'Gardiner Houlgate: lot încheiat'
+    if host.removeprefix('www.') == 'musicalinstrument-auctions.co.uk':
+        date = gardiner_sale_date(soup)
+        if date and date < datetime.now(ZoneInfo('Europe/London')).date():
+            return 'Gardiner Houlgate: data licitației a trecut'
     if host == 'ha.com' or host.endswith('.ha.com'):
         for node in soup.find_all(string=re.compile(r'^\s*Sold on [A-Za-z]+ \d{1,2}, \d{4} for\s*:', re.I)):
             if node.parent.name not in ('script', 'style'):
@@ -128,6 +153,11 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
             or soup.select_one('[class*="gv-Skeleton"], #challenge-running, #cf-challenge-running')):
         return 'unknown', 'pagină de acces / autentificare; oferta nu poate fi verificată'
     item_page = is_item_url(final_url) or bool(listing.get('_direct_item_candidate'))
+    from collection_pages import collection_leads
+    leads = collection_leads(soup, final_url, item_page)
+    if leads is not None:
+        listing['_collection_leads'] = leads
+        return 'collection', 'pagină de rezultate; ofertele individuale necesită verificare'
     host = (urlsplit(final_url).hostname or "").lower()
     closed = primary_closed_reason(soup, host)
     if closed:
@@ -147,6 +177,7 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
                 listing["estate_sale"] = True
                 listing["sale_end"] = max(dates).isoformat()
                 return "live", "Craigslist: inventar și dată de vânzare verificate"
+    from product_metadata import primary_microdata, same_product_url
     products, editorial = [], False
     for tag in soup.find_all("script", type="application/ld+json"):
         try:
@@ -160,6 +191,7 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
                     products.append(node)
         except (ValueError, TypeError):
             continue
+    products.extend(primary_microdata(soup, final_url))
     # Ignore footer/recommendations, scripts and navigation when checking sale intent.
     main = soup.find("main") or soup.find(id="main-content") or soup.find(id="postingbody") or soup
     h1 = main.find("h1")
@@ -172,7 +204,7 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
         # Only the primary instrument, not a recommended item in a side bar.
         name = str(product.get("name") or "")
         product_url = str(product.get("url") or "")
-        if product_url and urlsplit(product_url).path.rstrip("/") != urlsplit(final_url).path.rstrip("/"):
+        if product_url and not same_product_url(product_url, final_url):
             continue
         if name and not (h1 and name.casefold() in listing["title"].casefold()) and len(products) > 1:
             continue
@@ -227,7 +259,13 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
         return "dead", "rezultat de licitație încheiată"
     if re.search(r"\b(?:closed|auction ended|sold amount)\s*[:(]", body, re.I) and listing.get("auction"):
         return "dead", "licitație încheiată"
-    if SALE_WORDS.search(body):
+    if host.removeprefix('www.') == 'musicalinstrument-auctions.co.uk' and item_page:
+        date = gardiner_sale_date(scoped)
+        if date and date >= datetime.now(ZoneInfo('Europe/London')).date() and re.search(r'Estimate:\s*£\s*\d',body,re.I):
+            listing['auction'], listing['auction_sale_date'] = True, date.isoformat()
+            return 'live', 'Gardiner Houlgate: lot publicat într-o licitație viitoare; ora închiderii neconfirmată'
+    if SALE_WORDS.search(body) or (host.removeprefix('www.') == 'thomann.de' and item_page
+                                  and re.search(r'\bBiete\b', body)):
         # Dedicated item URLs or classifieds sales text + monetary amount.
         if item_page or re.search(r"[€$£¥]\s*\d|\d\s*(?:USD|EUR|GBP|JPY)\b", body):
             return "live", "pagină de vânzare / licitație"
@@ -268,7 +306,7 @@ async def verify_offer(listing: dict, client) -> tuple:
         return "unknown", "destinația publică nu poate fi verificată"
     gov = GOVDEALS_RX.search(url)
     if gov:
-        from scrapers.govdeals import GovDealsClient, parse_asset
+        from scrapers.govdeals import GovDealsClient, parse_asset, asset_closed_reason
         try:
             is_surplus = (urlsplit(url).hostname or "").endswith("allsurplus.com")
             api = GovDealsClient(client, "AD" if is_surplus else "GD", 2 if is_surplus else 1)
@@ -277,7 +315,9 @@ async def verify_offer(listing: dict, client) -> tuple:
             verified = parse_asset(data, platform="AllSurplus" if is_surplus else "GovDeals",
                                    host="www.allsurplus.com" if is_surplus else "www.govdeals.com")
             if not verified:
-                return "dead", "GovDeals: licitație încheiată sau indisponibilă"
+                closed = asset_closed_reason(data)
+                return ("dead", "GovDeals: " + closed) if closed else (
+                    "unknown", "GovDeals: date primare incomplete; necesită reverificare")
             listing.update({k: v for k, v in verified.items() if k not in ("id", "source")})
             listing["_primary_content_checked"] = True
             return "live", "GovDeals: licitație activă verificată prin API"
@@ -324,6 +364,15 @@ async def verify_offer(listing: dict, client) -> tuple:
                 current = urljoin(current, response.headers["location"])
                 continue
             state, reason = inspect_page(listing, response.text, response.status_code, current)
+            if state == 'unknown' and (urlsplit(current).hostname or '').removeprefix('www.') == 'musicalinstrument-auctions.co.uk':
+                try:
+                    from browser_fetch import PublicSearchBrowser
+                    async with PublicSearchBrowser() as browser:
+                        code, rendered = await browser.fetch(current)
+                    state, reason = inspect_page(listing, rendered, code, current)
+                    reason = 'Public Chromium: ' + reason
+                except Exception:
+                    pass  # failed access remains unknown, never proof of sold
             if state == 'unknown':
                 from primary_page_reserve import fresh_primary_page
                 recovered = await fresh_primary_page(current, client)

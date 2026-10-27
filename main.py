@@ -6,6 +6,7 @@ Searches globally for Zeta electric violin listings and sends Telegram alerts.
 import asyncio
 import logging
 import warnings
+import time
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -22,12 +23,16 @@ from filters import classify, has_primary_identity  # noqa: E402
 from liveness import is_live  # noqa: E402
 from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX  # noqa: E402
 from discovery_queue import stage, complete  # noqa: E402
+from work_context import spending_scope  # noqa: E402
+from candidate_audit import record_candidate  # noqa: E402
 from dedup import is_duplicate  # noqa: E402
 from fx import refresh_rates  # noqa: E402
 from diagnostics import run_reachability  # noqa: E402
 from telegram_commands import TelegramCommands  # noqa: E402
 
 from scrapers.reverb import ReverbScraper  # noqa: E402
+from scrapers.base import BaseScraper  # noqa: E402
+from scrapers.gardiner import GardinerHoulgateScraper  # noqa: E402
 from scrapers.ebay import EbayScraper  # noqa: E402
 from scrapers.google import GoogleScraper  # noqa: E402
 from scrapers.brave import BraveScraper  # noqa: E402
@@ -100,6 +105,7 @@ def build_scrapers() -> list:
         HiBidScraper(),
         GovDealsScraper(),
         AllSurplusScraper(),
+        GardinerHoulgateScraper(),
         KijijiScraper(),
         MarktplaatsScraper(),
         WillhabenScraper(),
@@ -123,11 +129,12 @@ def _needs_primary_identity(listing: dict, state: str) -> bool:
 
 
 async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncClient, dropped: dict,
-                              queue_namespace: str = None) -> list:
+                              queue_namespace: str = None, *, deadline: float = None,
+                              concurrency: int = None) -> list:
     """Liveness-check search-engine hits concurrently. Returns the live ones.
     Dead pages go to liveness_cache (re-checked after DEAD_CACHE_DAYS); hard
     404/410 and Reverb 'not live' are permanent (seen)."""
-    sem = asyncio.Semaphore(LIVENESS_CONCURRENCY)
+    sem = asyncio.Semaphore(concurrency or LIVENESS_CONCURRENCY)
     alive_listings = []
     if not candidates:
         return []
@@ -138,7 +145,7 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
 
     tasks = [asyncio.create_task(check(c)) for c in candidates]
     try:
-        done, pending = await asyncio.wait(tasks, timeout=LIVENESS_TIMEOUT_SEC)
+        done, pending = await asyncio.wait(tasks, timeout=deadline if deadline is not None else LIVENESS_TIMEOUT_SEC)
         if pending:
             log.warning("Liveness deadline: preserving completed checks; %s deferred", len(pending))
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + len(pending)
@@ -153,6 +160,16 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
         listing, (state, why) = outcome
+        record_candidate(listing, state, why)
+        if state == 'collection':
+            children = listing.pop('_collection_leads', [])
+            from discovery_queue import DiscoveryQueue
+            with DiscoveryQueue(queue_namespace or 'search:Collections') as queue:
+                queue.put(children)
+            if queue_namespace:
+                complete(queue_namespace, listing, 3600)
+            dropped['collection_expanded'] = dropped.get('collection_expanded', 0) + len(children)
+            continue
         if _needs_primary_identity(listing, state):
             # Index text may describe a recommendation for a different lot.
             # Retain the candidate, but do not call that primary-item proof.
@@ -161,7 +178,8 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             dropped["identity_unverified"] = dropped.get("identity_unverified", 0) + 1
             dropped["liveness_deferred"] = dropped.get("liveness_deferred", 0) + 1
             continue
-        if state == "live" or (state == "unknown" and (is_item_url(listing.get("url", "")) or GOVDEALS_RX.search(listing.get("url", "")))):
+        if state == "live" or (state == "unknown" and (is_item_url(listing.get("url", ""))
+                or listing.get('_direct_item_candidate') or GOVDEALS_RX.search(listing.get("url", "")))):
             reason = classify(listing)
             if reason:
                 if queue_namespace:
@@ -240,6 +258,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                         log.info('   %s public Facebook leads queued for existing detail budget', seeded)
 
                 for listing in listings:
+                    record_candidate(listing, 'discovered')
                     reason = classify(listing)
                     if reason == "non_zeta" and listing.get("source") == "search":
                         # An index snippet is not the complete listing. Identity
@@ -247,6 +266,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                         listing["_discovery_priority"] = 2
                         reason = None
                     if reason:
+                        record_candidate(listing, 'rejected', reason)
                         dropped[reason] = dropped.get(reason, 0) + 1
                         log.debug(f"   drop[{reason}] {listing.get('title', '')[:70]}")
                         continue
@@ -369,7 +389,14 @@ async def _verify_delivery_offer(listing: dict, http) -> tuple:
     # even when the marketplace uses an unfamiliar item URL structure.
     if listing.get('source') != 'search':
         listing['_direct_item_candidate'] = True
-    return await verify_offer(listing, http)
+    state, reason = await verify_offer(listing, http)
+    if state == 'collection':
+        from discovery_queue import DiscoveryQueue
+        with DiscoveryQueue('search:Collections') as queue:
+            queue.put(listing.pop('_collection_leads', []))
+        state = 'non_sale'  # children are retained; the list itself is not a product
+    record_candidate(listing, state, reason)
+    return state, reason
 
 
 async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: PriceTracker, listings: list) -> int:
@@ -396,6 +423,9 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
     semaphore = asyncio.Semaphore(LIVENESS_CONCURRENCY)
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
         async def check(item):
+            from collection_pages import known_collection_url
+            if known_collection_url(item.get('url', '')):
+                item.pop('verification', None)  # an old queued list may have been labelled live
             if item.get('verification') in ('live','unknown'):
                 return item
             async with semaphore:
@@ -431,12 +461,18 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
     for listing in delivered:
         db.mark_seen(listing["id"], listing)
         db.record_alert(listing, listing.get("price_usd"))
+        record_candidate(listing, 'delivered', 'Telegram accepted; acknowledgement tracked separately')
     if len(delivered) < len(unique):
         log.warning(f"   {len(unique) - len(delivered)} listing(s) not delivered; unresolved eligible offers remain queued")
     return len(delivered)
 
 
 async def notification_tick() -> None:
+    with spending_scope('queue'):
+        await _notification_tick()
+
+
+async def _notification_tick() -> None:
     """Retry delivery and remind until acknowledged; never runs paid searches."""
     notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)
     try:
@@ -502,6 +538,57 @@ async def resource_tick() -> None:
         log.warning("Resource monitor failed (%s); search remains active", type(exc).__name__)
 
 
+async def detail_queue_tick() -> None:
+    """Bounded extra primary-page work; no search or paid recovery calls."""
+    if not Config.DETAIL_WORKER_ENABLED or search_cycle_lock.locked():
+        return
+    from zoneinfo import ZoneInfo
+    local = datetime.now(ZoneInfo(Config.SEARCH_TIMEZONE))
+    hours = {int(h) for h in Config.SEARCH_HOURS.split(',') if h.strip().isdigit()}
+    if (local.hour in hours and local.minute < 10) or ((local.hour + 1) % 24 in hours and local.minute >= 55):
+        return
+    from discovery_queue import DiscoveryQueue
+    from provider_state import read, write
+    async with search_cycle_lock:
+        with spending_scope('queue'):
+            db, prices = Database(), PriceTracker()
+            try:
+                names = [row[0] for row in db.conn.execute('''SELECT DISTINCT namespace FROM discovery_queue
+                    WHERE next_attempt<=? ORDER BY namespace''', (time.time(),))
+                    if row[0].startswith('search:') or row[0] in ('GovDeals', 'AllSurplus', 'Craigslist')]
+                if not names:
+                    return
+                cursor = int(read('detail_worker:cursor', 0))
+                namespace = names[cursor % len(names)]
+                write('detail_worker:cursor', cursor + 1)
+                with DiscoveryQueue(namespace) as queue:
+                    candidates = queue.claim(Config.DETAIL_WORKER_BATCH)
+                for item in candidates:
+                    item.setdefault('id', BaseScraper()._make_id('queue', item['url']))
+                    item.setdefault('platform', namespace.removeprefix('search:'))
+                    item.setdefault('description', '')
+                    item.setdefault('price', 'See listing')
+                    item.setdefault('location', 'Unknown')
+                    item['source'] = 'search'
+                    if namespace in ('GovDeals', 'AllSurplus', 'Craigslist'):
+                        item['_direct_item_candidate'] = True
+                async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
+                    ready = await _verify_search_hits(candidates, db, http, {}, namespace, deadline=45, concurrency=3)
+                write('detail_worker:health', {'checked': time.time(), 'namespace': namespace,
+                                              'claimed': len(candidates), 'eligible': len(ready), 'queued': len(ready), 'error': ''})
+                # Verification already persisted ready offers in the outbox.
+                # The minute delivery job sends them; network/Telegram backoff
+                # must not extend this worker's lock or delay a scheduled search.
+                log.info('Detail worker %s: %s claimed, %s eligible queued for minute delivery; no paid discovery',
+                         namespace, len(candidates), len(ready))
+            except Exception as exc:
+                write('detail_worker:health', {'checked': time.time(), 'error': type(exc).__name__})
+                log.warning('Detail worker deferred (%s); claims remain recoverable', type(exc).__name__)
+            finally:
+                prices.close()
+                db.close()
+
+
 def source_problem(name: str, error: str) -> str:
     if name == "Google Search" and "API_PROJECT_NOT_ELIGIBLE" in error:
         return "Google: proiectul nu are acces la Custom Search API; nu este epuizare de credite."
@@ -512,7 +599,12 @@ def source_problem(name: str, error: str) -> str:
     return f"{name}: {error[:160]}"
 
 
-async def run_search_cycle(*, force_discovery: bool = False):
+async def run_search_cycle(*, force_discovery: bool = False, scheduled: bool = False):
+    with spending_scope('core' if scheduled else 'auxiliary'):
+        return await _run_search_cycle(force_discovery=force_discovery, scheduled=scheduled)
+
+
+async def _run_search_cycle(*, force_discovery: bool = False, scheduled: bool = False):
     """Run one full search cycle across ALL platforms. Concurrent triggers
     queue behind the lock (a scheduled run is never lost)."""
     if search_cycle_lock.locked():
@@ -521,7 +613,7 @@ async def run_search_cycle(*, force_discovery: bool = False):
     async with search_cycle_lock:
         log.info("=" * 80)
         log.info(f"🎻 STARTING ZETA VIOLIN HUNT at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        status_tracker.start_cycle()
+        status_tracker.start_cycle('core' if scheduled else 'auxiliary')
         log.info("=" * 80)
 
         if not Config.EGRESS_COUNTRY:
@@ -533,7 +625,9 @@ async def run_search_cycle(*, force_discovery: bool = False):
         scrapers = build_scrapers()
         for scraper in scrapers:
             scraper.manual_fresh = force_discovery
-        log.info("Discovery mode: %s; spending limits remain active", "manual fresh" if force_discovery else "scheduled/guarded")
+            scraper.auxiliary_work = not scheduled
+        mode = 'scheduled/core' if scheduled else 'manual fresh/auxiliary' if force_discovery else 'guarded/auxiliary'
+        log.info("Discovery mode: %s; spending limits remain active", mode)
 
         total_sent = 0
         all_drops = []
@@ -745,7 +839,7 @@ async def handle_health(request):
 async def handle_ready(request):
     from operations import readiness
     # Public, deliberately contains no listings, chat IDs, quotas or credentials.
-    state = readiness(status_tracker.last_cycle_started())
+    state = readiness(status_tracker.last_scheduled_cycle_started())
     return web.json_response(state, status=200 if state['status'] == 'ready' else 503)
 
 
@@ -799,12 +893,12 @@ def _log_task_exception(task: asyncio.Task) -> None:
 async def _startup_cycle() -> None:
     """Run a cycle at container start unless one ran recently (deploys and
     crash loops must not re-scrape everything and re-spend quotas)."""
-    last = status_tracker.last_cycle_started()
+    last = status_tracker.last_scheduled_cycle_started()
     if last and datetime.utcnow() - last < timedelta(hours=Config.STARTUP_RUN_GUARD_HOURS):
         log.info(f"⏭️ Startup cycle skipped — last cycle started {last:%Y-%m-%d %H:%M} UTC "
                  f"(< {Config.STARTUP_RUN_GUARD_HOURS:g}h ago). Next scheduled run stands.")
         return
-    await run_search_cycle()
+    await run_search_cycle(scheduled=True)
 
 
 async def main():
@@ -848,10 +942,12 @@ async def main():
                       max_instances=1, coalesce=True, misfire_grace_time=60)
     scheduler.add_job(pushover_tick, "interval", minutes=1, id="pushover-notifications",
                       max_instances=1, coalesce=True, misfire_grace_time=60)
+    scheduler.add_job(detail_queue_tick, 'interval', minutes=10, id='detail-queue',
+                      max_instances=1, coalesce=True, misfire_grace_time=60)
     # misfire_grace_time: if the loop is busy at 12:00:00 the run must still happen
     # (default grace is 1 s, which silently DROPS the only run of the day).
     job = scheduler.add_job(run_search_cycle, "cron", hour=hours, minute=0, timezone=Config.SEARCH_TIMEZONE,
-                            misfire_grace_time=3600, coalesce=True, max_instances=1)
+                            misfire_grace_time=3600, coalesce=True, max_instances=1, kwargs={'scheduled': True})
     scheduler.start()
     log.info("🔔 Telegram reminders: first after %smin, then every %smin until Am văzut; delivery retries every minute",
              Config.ALERT_FIRST_REMINDER_MINUTES, Config.ALERT_REPEAT_MINUTES)

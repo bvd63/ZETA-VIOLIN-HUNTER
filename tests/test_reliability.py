@@ -327,21 +327,25 @@ class RegressionTests(unittest.TestCase):
         from primary_page_reserve import reserve_pages
         from provider_state import store,used,reserve
         with store() as conn:
-            conn.execute("DELETE FROM provider_reservations WHERE provider IN ('exa','exa_contents','exa_will_search')")
+            conn.execute("DELETE FROM provider_reservations WHERE provider LIKE 'exa%'")
             conn.commit()
         self.assertTrue(reserve('exa',250000,8000000,250000))
-        for name in ('exa_contents','exa_will_search'):
-            self.assertFalse(reserve_pages(name))
-            self.assertEqual(used(name),0)
+        from work_context import spending_scope
+        with spending_scope('core'):
+            for name in ('exa_contents','exa_will_search'):
+                self.assertFalse(reserve_pages(name))
+                self.assertEqual(used(name),0)
 
     def test_gumtree_final_route_has_six_page_daily_cap_without_extra_dollar_reservation(self):
         from primary_page_reserve import reserve_pages
         from provider_state import store,used
         with store() as conn:
-            conn.execute("DELETE FROM provider_reservations WHERE provider IN ('exa','exa_gum_search')")
+            conn.execute("DELETE FROM provider_reservations WHERE provider LIKE 'exa%'")
             conn.commit()
-        for _ in range(6): self.assertTrue(reserve_pages('exa_gum_search'))
-        self.assertFalse(reserve_pages('exa_gum_search'))
+        from work_context import spending_scope
+        with spending_scope('core'):
+            for _ in range(6): self.assertTrue(reserve_pages('exa_gum_search'))
+            self.assertFalse(reserve_pages('exa_gum_search'))
         self.assertEqual(used('exa_gum_search'),6)
         self.assertEqual(used('exa'),6000)
 
@@ -775,7 +779,7 @@ class SourceHealthTests(unittest.TestCase):
         search = AsyncMock()
         # Default production schedule is 10:00/22:00; a deploy 11 hours after
         # the morning search used to run early and starve the evening search.
-        with patch.object(main.status_tracker, 'last_cycle_started', return_value=datetime.utcnow() - timedelta(hours=11)), \
+        with patch.object(main.status_tracker, 'last_scheduled_cycle_started', return_value=datetime.utcnow() - timedelta(hours=11)), \
                 patch.object(Config, 'STARTUP_RUN_GUARD_HOURS', 12), \
                 patch('main.run_search_cycle', search):
             asyncio.run(main._startup_cycle())

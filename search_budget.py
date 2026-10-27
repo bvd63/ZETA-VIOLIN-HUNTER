@@ -1,9 +1,11 @@
 """Reserve search requests before HTTP, including failed requests and restarts."""
 
 import logging
+import calendar
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from database import connect
+from config import Config
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +25,14 @@ def reserve_request(engine: str, limit: int, *, manual: bool = False) -> bool:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper = ?", (key,)).fetchone()
         used = int(row[0]) if row else 0
+        if engine == 'google' and manual:
+            aux_key = f'google_manual_daily:{now:%Y-%m-%d}'
+            aux = conn.execute('SELECT last_run FROM scraper_runs WHERE scraper=?', (aux_key,)).fetchone()
+            extra_used = int(aux[0]) if aux else 0
+            planned = min(limit, Config.GOOGLE_QUERIES_PER_RUN * Config.RUNS_PER_DAY)
+            if extra_used + 1 > max(0, limit - planned):
+                conn.rollback()
+                return False
         day_key = f"brave_manual_daily:{now:%Y-%m-%d}" if manual else f"brave_daily:{now:%Y-%m-%d}"
         daily_used = 0
         if engine == "brave":
@@ -40,12 +50,23 @@ def reserve_request(engine: str, limit: int, *, manual: bool = False) -> bool:
             if daily_used >= (16 if manual else 32):
                 conn.rollback()
                 return False
+            if manual:
+                row = conn.execute('SELECT last_run FROM scraper_runs WHERE scraper=?',
+                                   (f'brave_daily:{now:%Y-%m-%d}',)).fetchone()
+                core_today = int(row[0]) if row else 0
+                remaining_days = calendar.monthrange(now.year, now.month)[1] - now.day
+                protected = remaining_days * 32 + max(0, 32 - core_today)
+                if used + 1 + protected > limit:
+                    conn.rollback()
+                    return False
         if used >= limit:
             conn.rollback()
             return False
         conn.execute("INSERT OR REPLACE INTO scraper_runs VALUES (?, ?)", (key, str(used + 1)))
         if engine == "brave":
             conn.execute("INSERT OR REPLACE INTO scraper_runs VALUES (?, ?)", (day_key, str(daily_used + 1)))
+        if engine == 'google' and manual:
+            conn.execute('INSERT OR REPLACE INTO scraper_runs VALUES (?,?)', (aux_key,str(extra_used+1)))
         conn.commit()
         return True
     except Exception as exc:

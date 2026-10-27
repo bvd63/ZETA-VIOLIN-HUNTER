@@ -86,6 +86,8 @@ class Config:
     EXA_QUERIES_PER_RUN = min(8, max(1, int(os.getenv("EXA_QUERIES_PER_RUN", "4"))))
     EXA_EXTRA_QUERIES_PER_RUN = min(2, max(0, int(os.getenv("EXA_EXTRA_QUERIES_PER_RUN", "2"))))
     EXA_ROLLING_BUDGET_USD = min(8, max(0, float(os.getenv("EXA_ROLLING_BUDGET_USD", "8"))))
+    DETAIL_WORKER_ENABLED = _bool('DETAIL_WORKER_ENABLED', 'true')
+    DETAIL_WORKER_BATCH = min(12, max(1, int(os.getenv('DETAIL_WORKER_BATCH', '12'))))
 
     # Apify Facebook: invoked by the existing scheduler, never a second cron.
     APIFY_TOKEN = os.getenv("APIFY_TOKEN", "")

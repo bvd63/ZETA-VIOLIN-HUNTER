@@ -191,6 +191,10 @@ class TelegramCommands:
         finally:
             db.close()
         lines.append("📬 Apare în istoricul notificărilor." if notified else "📭 Nu apare în istoricul notificărilor păstrat.")
+        from candidate_audit import candidate_history
+        for stage, why, stamp in candidate_history(url, 4):
+            at = datetime.utcfromtimestamp(stamp).strftime('%d.%m %H:%M UTC')
+            lines.append(html.escape(f'{at}: {stage} — {why}'))
         lines.append("Verificarea arată starea actuală; nu reconstituie o căutare din trecut.")
         await self.notifier.send("\n".join(lines))
 

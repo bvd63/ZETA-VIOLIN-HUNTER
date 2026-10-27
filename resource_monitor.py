@@ -51,6 +51,10 @@ def snapshot() -> dict:
         if "discovery_queue" in tables:
             data["deferred_details"] = {name: {"saved": total, "due": due} for name, total, due in conn.execute(
                 "SELECT namespace,count(*),sum(next_attempt<=?) FROM discovery_queue GROUP BY namespace", (time.time(),))}
+            for name, never_claimed, oldest in conn.execute('''SELECT namespace,sum(attempts=0),min(created)
+                    FROM discovery_queue GROUP BY namespace'''):
+                data['deferred_details'][name].update({'never_claimed': never_claimed,
+                    'oldest_saved_hours': round(max(0, time.time() - oldest) / 3600, 1)})
     finally:
         conn.close()
     for name, key, limit, scale in (("tavily", Config.TAVILY_API_KEY, Config.TAVILY_ROLLING_CREDITS, 1),
@@ -60,6 +64,7 @@ def snapshot() -> dict:
                       "period": "ultimele 31 zile", "health": read(name + ":health", {})}
     data["apify_account"] = read("apify:account", {})
     data['backup'] = read('operations:backup', {})
+    data['detail_worker'] = read('detail_worker:health', {})
     data["pushover"] = {"configured": bool(Config.PUSHOVER_APP_TOKEN and Config.PUSHOVER_USER_KEY),
                         "health": read("pushover:health", {}), "quota": read("pushover:quota", {})}
     return data
@@ -73,6 +78,7 @@ async def refresh_accounts() -> None:
             cached = read("apify:account", {})
             try:
                 headers = {"Authorization": "Bearer " + Config.APIFY_TOKEN}
+                sampled_before = time.time()  # jobs racing the usage GET remain outside this snapshot
                 usage = await client.get("https://api.apify.com/v2/users/me/usage/monthly", headers=headers)
                 usage.raise_for_status()
                 profile = await client.get("https://api.apify.com/v2/users/me", headers=headers)
@@ -85,7 +91,7 @@ async def refresh_accounts() -> None:
                     "included_monthly_usd": p.get("monthlyUsageCreditsUsd"),
                     "plan_base_usd": p.get("monthlyBasePriceUsd"),
                     "account_usage_ceiling_usd": (lim.get("limits") or {}).get("maxMonthlyUsageUsd"),
-                    "checked": time.time(), "error": ""}
+                    "checked": sampled_before, "error": ""}
                 write("apify:account", value)
                 from apify_costs import reconcile
                 # Reuse the authenticated metadata client; GETs spend no Actor

@@ -53,6 +53,9 @@ class RecoveryTests(unittest.TestCase):
                 self.assertEqual(readiness(old, datetime(2026,10,day,hour,30,tzinfo=timezone.utc))['status'], 'ready')
 
     def test_manual_brave_allowance_preserves_regular_day_and_month_ceiling(self):
+        clock_patch = patch('search_budget.datetime')
+        clock = clock_patch.start();self.addCleanup(clock_patch.stop)
+        clock.now.return_value = datetime(2026,10,31,12,tzinfo=timezone.utc)
         from search_budget import reserve_request
         conn = database.connect()
         conn.execute('CREATE TABLE IF NOT EXISTS scraper_runs (scraper TEXT PRIMARY KEY,last_run TEXT)')

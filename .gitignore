@@ -49,3 +49,4 @@ backups/
 *.db-shm
 *.log
 logs/
+outputs/

@@ -12,12 +12,13 @@ from urllib.parse import urlsplit
 
 import httpx
 from config import Config
-from provider_state import read, write, reserve, claim_window
+from provider_state import read, write, reserve_work, claim_window
 from scrapers.base import BaseScraper
 from scrapers.google import SITE_GROUPS, AUCTION_GROUPS, US_MARKET_GROUPS
 from keywords import WEB_KEYWORDS, ADDITIONAL_WEB_KEYWORDS, MODEL_CODES, MODEL_NAMES
 from source_policy import is_disabled_source
 from facebook_discovery import queries as facebook_queries
+from http_limits import retry_after_seconds
 
 log = logging.getLogger(__name__)
 GROUPS = US_MARKET_GROUPS + AUCTION_GROUPS + SITE_GROUPS
@@ -62,9 +63,13 @@ class ReserveSearch(BaseScraper):
             return []
         if not hasattr(self, "content_failures"):
             self.reset_health()
-        if not getattr(self, "manual_fresh", False) and not claim_window(self.engine + ":last_run", 10 * 3600):
-            self.skipped = True
-            return []
+        if not getattr(self, "manual_fresh", False):
+            auxiliary = getattr(self, 'auxiliary_work', False)
+            key = self.engine + (':aux:last_run' if auxiliary else ':last_run')
+            if (auxiliary and time.time() - float(read(self.engine + ':last_run', 0)) < 10 * 3600
+                    or not claim_window(key, 10 * 3600)):
+                self.skipped = True
+                return []
         now = time.time()
         if (read(self.engine + ":retry_after", 0) or 0) > now:
             self.content_failures.append("provider cooldown / quota; other sources continue")
@@ -76,8 +81,12 @@ class ReserveSearch(BaseScraper):
         results, seen = [], set()
         async with self.make_client(timeout=30) as client:
             for index, (query, hosts) in enumerate(queries):
-                if not reserve(self.engine, self.units, self.rolling_limit(), self.daily_limit):
-                    self.content_failures.append("bot reservation limit; other sources continue")
+                planned = len(queries) * Config.RUNS_PER_DAY * 31 * self.units
+                if self.engine == 'exa':
+                    planned += 1426000  # all existing primary/Willhaben/Gumtree page allowances
+                if not reserve_work(self.engine, self.units, self.rolling_limit(), self.daily_limit,
+                                    planned, auxiliary=getattr(self, 'auxiliary_work', False) or getattr(self, 'manual_fresh', False)):
+                    self.content_failures.append("bot reservation limit (scheduled capacity protected); other sources continue")
                     break
                 # Advance BEFORE HTTP. A restart cannot re-spend the same slot.
                 if index < count:
@@ -91,7 +100,7 @@ class ReserveSearch(BaseScraper):
                         write(self.engine + ":health", {"error": f"HTTP {response.status_code}", "checked": time.time()})
                         if response.status_code in (401, 402, 403, 429):
                             delay = response.headers.get("retry-after", "")
-                            seconds = min(86400, max(60, int(delay))) if delay.isdigit() else 3600
+                            seconds = retry_after_seconds(delay)
                             write(self.engine + ":retry_after", time.time() + seconds)
                             break
                         continue

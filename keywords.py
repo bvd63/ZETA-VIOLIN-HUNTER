@@ -6,7 +6,7 @@ import unicodedata
 from zoneinfo import ZoneInfo
 
 BASE_MODEL_CODES = ("JV44", "JV45", "SV24", "SV25", "SV43", "SV244", "CV44", "EV25", "EV44", "JVS4", "JLP5")
-MODEL_CODES = BASE_MODEL_CODES + ("JV5", "JLP4")
+MODEL_CODES = BASE_MODEL_CODES + ("JV5", "JLP4", "JV4")
 MODEL_NAMES = (
     "jazz fusion", "jazz standard", "jazz modern", "jazz classic", "jazz acoustic pro",
     "jazz fusion legacy", "fusion legacy", "jazz legacy", "strados modern",
@@ -42,7 +42,7 @@ def preference_matches(listing: dict) -> list:
     if JLP_RX.search(text):
         matches.append("Jean-Luc Ponty / JLP menționat")
     primary = normalize_identity_text(" ".join(str(listing.get(k) or "") for k in ("title", "model")))
-    if re.search(r"\bjazz\b|\bjv(?:44|45|5)\b|\bjvs4\b", primary, re.I):
+    if re.search(r"\bjazz\b|\bjv(?:44|45|4|5)\b|\bjvs4\b", primary, re.I):
         matches.append("Jazz / JV menționat; căluș de confirmat în fotografii")
     if BURST_RX.search(text):
         matches.append("finisaj sunburst / burst menționat")
