@@ -27,6 +27,7 @@ from database import connect
 from keywords import WEB_KEYWORDS, BASE_WEB_KEYWORDS, MODEL_CODES
 from search_budget import reserve_request
 from source_policy import is_disabled_source
+from offer_verifier import index_card_negative, remember_indexed_closed
 
 log = logging.getLogger(__name__)
 
@@ -269,12 +270,16 @@ class GoogleScraper(BaseScraper):
                     for item in items:
                         url = item.get("link", "")
                         unique_id = self._make_id("google", url)
-                        if not url or is_disabled_source(url) or unique_id in seen_ids:
+                        if not url or is_disabled_source(url):
+                            continue
+                        snippet = item.get("snippet", "")
+                        negative = index_card_negative(url, snippet)
+                        remember_indexed_closed({'url':url, **negative})
+                        if unique_id in seen_ids:
                             continue
                         seen_ids.add(unique_id)
 
                         title = item.get("title", "")
-                        snippet = item.get("snippet", "")
                         pagemap = item.get("pagemap", {}) or {}
 
                         if self._is_excluded(title):
@@ -297,6 +302,7 @@ class GoogleScraper(BaseScraper):
                                 break
 
                         results.append({
+                            **negative,
                             "id": unique_id,
                             "platform": self._extract_platform(url),
                             "title": title,

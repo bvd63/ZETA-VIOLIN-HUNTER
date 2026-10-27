@@ -111,6 +111,19 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(used('exa',now=start+30*86400+1),8000000)
         self.assertFalse(reserve_work('exa',1,8000000,250000,7750000,auxiliary=True,now=start+30*86400+1))
 
+    def test_negative_index_card_requires_same_reverb_item_url(self):
+        from offer_verifier import indexed_closed_reason
+        item = {**sold_reverb(), 'description':'Used Zeta violin'}
+        bound = {'_indexed_availability_url':item['url'], '_indexed_availability_negative':'sold'}
+        self.assertTrue(indexed_closed_reason({**item, **bound}))
+        self.assertTrue(indexed_closed_reason({**item, **bound, '_indexed_availability_url':item['url']+'?foo=1'}))
+        for change in ({'_indexed_availability_url':item['url'].replace('82035982','82035983')},
+                       {'_indexed_availability_url':'https://reverb.com.evil.example/item/82035982'},
+                       {'_indexed_availability_negative':'live'},
+                       {'_indexed_availability_url':'https://[bad'},
+                       {'url':'https://other.example/item/82035982'}):
+            self.assertEqual(indexed_closed_reason({**item, **bound, **change}), '')
+
     def test_untagged_legacy_costs_are_retained_and_block_extra_spend_conservatively(self):
         now = time.time()
         with store() as conn:
@@ -124,6 +137,68 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(reserve_work('exa',1000,999,250000,7750000,counters=(('pages',1,620,20),)))
         self.assertEqual(used('pages'),0)
         self.assertEqual(used('exa'),0)
+
+    def test_market_observations_are_exact_query_scoped_and_do_not_refresh_from_cache(self):
+        from primary_page_reserve import remember_market_search, cached_market_search
+        url='https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=zeta'
+        result={'_live_crawled':True,'text':'1 Anzeige','extras':{'links':[]}}
+        with patch('primary_page_reserve.time.time',return_value=10000):
+            remember_market_search(url,result)
+        with patch('primary_page_reserve.time.time',return_value=11000):
+            cached=cached_market_search(url,'auxiliary')
+            self.assertTrue(cached['_cached'])
+            self.assertEqual(cached['_checked_at'],10000)
+            remember_market_search(url,cached)
+            self.assertEqual(cached_market_search(url,'again')['_checked_at'],10000)
+            self.assertEqual(cached_market_search(url+'&PAGE=2','different page'),{})
+            self.assertEqual(cached_market_search(url.replace('zeta','strados'),'different query'),{})
+        with patch('primary_page_reserve.time.time',return_value=47000):
+            self.assertEqual(cached_market_search(url,'expired'),{})
+
+    def test_auxiliary_market_cache_makes_no_paid_reservation_or_http_request(self):
+        from primary_page_reserve import remember_market_search, fresh_willhaben_search
+        url='https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=zeta'
+        remember_market_search(url,{'_live_crawled':True,'text':'0 Anzeigen','extras':{'links':[]}})
+        client=SimpleNamespace(post=AsyncMock(side_effect=AssertionError('unexpected paid request')))
+        with patch.object(Config,'EXA_API_KEY','fixture'),spending_scope('auxiliary'), \
+             patch('primary_page_reserve.reserve_pages',side_effect=AssertionError('cache must not reserve')):
+            result=asyncio.run(fresh_willhaben_search(url,client))
+        self.assertTrue(result['_cached']);client.post.assert_not_awaited()
+
+    def test_core_market_discovery_still_requests_fresh_content_and_replaces_cache(self):
+        from primary_page_reserve import remember_market_search, fresh_willhaben_search
+        url='https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=zeta'
+        remember_market_search(url,{'_live_crawled':True,'text':'0 Anzeigen','extras':{'links':[]}})
+        response=SimpleNamespace(status_code=200,json=lambda:{'statuses':[{'id':url,'status':'success','source':'crawled'}],
+            'results':[{'url':url,'text':'1 Anzeige','extras':{'links':['/iad/kaufen-und-verkaufen/d/zeta-jv5-111']}}]})
+        client=SimpleNamespace(post=AsyncMock(return_value=response))
+        with patch.object(Config,'EXA_API_KEY','fixture'),spending_scope('core'), \
+             patch('primary_page_reserve.reserve_pages',return_value=True):
+            result=asyncio.run(fresh_willhaben_search(url,client))
+        client.post.assert_awaited_once()
+        self.assertTrue(result['_live_crawled']);self.assertNotIn('_cached',result)
+        self.assertEqual(result['text'],'1 Anzeige')
+
+    def test_unavailable_live_market_keeps_old_observation_labelled_without_spend(self):
+        from primary_page_reserve import remember_market_search, fresh_gumtree_search
+        url='https://www.gumtree.com/search?search_category=all&q=zeta'
+        remember_market_search(url,{'_live_crawled':True,'text':'0 ads for zeta','extras':{'links':[]}})
+        client=SimpleNamespace(post=AsyncMock(side_effect=AssertionError('budget denied')))
+        with patch.object(Config,'EXA_API_KEY','fixture'),spending_scope('core'), \
+             patch('primary_page_reserve.reserve_pages',return_value=False):
+            result=asyncio.run(fresh_gumtree_search(url,client))
+        self.assertTrue(result['_cached'])
+        self.assertIn('reservation unavailable',result['_cache_reason'])
+        client.post.assert_not_awaited()
+
+    def test_optional_market_cache_failure_cannot_stop_current_result(self):
+        from primary_page_reserve import remember_market_search, cached_market_search
+        with patch('primary_page_reserve.write',side_effect=RuntimeError('fixture locked')):
+            remember_market_search('https://www.gumtree.com/search?q=zeta',{'_live_crawled':True,'text':'0 ads for zeta'})
+        with patch('primary_page_reserve.read',side_effect=RuntimeError('fixture locked')):
+            self.assertEqual(cached_market_search('https://www.gumtree.com/search?q=zeta','aux'),{})
+        with patch('primary_page_reserve.read',return_value={'checked':time.time(), 'result':{'url':'https://[bad','text':'0 ads'}}):
+            self.assertEqual(cached_market_search('https://www.gumtree.com/search?q=zeta','aux'),{})
 
     def test_mercatino_list_expands_all_individual_routes_without_title_gate(self):
         item = {**violin(),'url':LIST_URL}
@@ -720,6 +795,9 @@ class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         import main
         self.main = main
+        with store() as conn:
+            conn.execute("DELETE FROM provider_state WHERE key LIKE 'availability:indexed_closed:%'")
+            conn.commit()
         with DiscoveryQueue('search:Fixture') as q:
             q.conn.execute('DELETE FROM discovery_queue');q.conn.commit()
         db = database.Database()
@@ -760,6 +838,74 @@ class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state,'live')
         self.assertFalse(availability_conflict(item,state))
         self.assertNotIn('_availability_conflict',item)
+
+    async def test_negative_search_card_is_held_when_blocked_but_current_live_wins(self):
+        from offer_verifier import verify_offer, availability_conflict
+        item = {**sold_reverb(), 'description':'This gear has sold',
+                '_indexed_availability_url':sold_reverb()['url'], '_indexed_availability_negative':'sold'}
+        data = {'state':{'slug':'live'},'title':item['title'],'description':'Used Zeta Jazz Classic electric violin',
+                'condition':{'display_name':'Excellent'},'price':{'amount':'1500','currency':'USD'}}
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(403))) as client:
+                state, _ = await verify_offer(item, client)
+            self.assertEqual(state,'unknown')
+            self.assertTrue(availability_conflict(item,state))
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json=data))) as client:
+                state, _ = await verify_offer(item, client)
+            self.assertEqual(state,'live')
+            self.assertFalse(availability_conflict(item,state))
+
+    async def test_gumtree_primary_node_recovery_precedes_paid_reserve(self):
+        from offer_verifier import verify_offer
+        item = {**violin(), 'url':'https://www.gumtree.com/p/violins/zeta-jv5/123456789'}
+        primary = '<main><h1>Zeta Jazz Fusion JV5</h1><p>Used Zeta 5-string electric violin. Price £1500. For sale.</p></main>'
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)), \
+             patch('public_node_fetch.fetch',AsyncMock(return_value=(200,primary,item['url']))) as node, \
+             patch('primary_page_reserve.fresh_primary_page',new_callable=AsyncMock) as reserve:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(247))) as client:
+                state,reason = await verify_offer(item,client)
+        self.assertEqual(state,'live')
+        self.assertTrue(reason.startswith('Public Node:'))
+        self.assertTrue(item['_primary_content_checked'])
+        node.assert_awaited_once_with(item['url'])
+        reserve.assert_not_awaited()
+
+    async def test_gumtree_node_failure_preserves_existing_reserve(self):
+        from offer_verifier import verify_offer
+        item = {**violin(), 'url':'https://www.gumtree.com/p/violins/zeta-jv5/123456789'}
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)), \
+             patch('public_node_fetch.fetch',AsyncMock(side_effect=RuntimeError('unavailable'))), \
+             patch('primary_page_reserve.fresh_primary_page',AsyncMock(return_value=None)) as reserve:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(403))) as client:
+                state,_ = await verify_offer(item,client)
+        self.assertEqual(state,'unknown')
+        reserve.assert_awaited_once_with(item['url'],client)
+
+    async def test_negative_index_evidence_survives_rediscovery_and_other_provider_queue(self):
+        from offer_verifier import remember_indexed_closed, verify_offer, availability_conflict, saved_indexed_closed_reason
+        old = sold_reverb()
+        remember_indexed_closed({**old, 'url':old['url']+'?foo=1'})
+        plain = {**old, 'description':'Used Zeta violin', 'id':'different-provider', 'source':'search'}
+        with DiscoveryQueue('search:Fixture') as queue:
+            queue.put([old])
+            queue.put([plain])
+            current = queue.claim(1)[0]
+        self.assertNotIn('SOLD',current['description'])
+        other = {**plain, 'url':'https://reverb.com/item/82035983-other'}
+        self.assertEqual(saved_indexed_closed_reason(other),'')
+        data = {'state':{'slug':'live'},'title':plain['title'],'description':'Used Zeta electric violin',
+                'condition':{'display_name':'Excellent'},'price':{'amount':'1500','currency':'USD'}}
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(403))) as client:
+                state,_ = await verify_offer(current, client)
+            self.assertEqual(state,'unknown')
+            self.assertTrue(availability_conflict(current,state))
+            self.assertTrue(availability_conflict(plain,'unknown'))
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json=data))) as client:
+                state,_ = await verify_offer(plain, client)
+            self.assertEqual(state,'live')
+            self.assertEqual(saved_indexed_closed_reason(plain),'')
+            self.assertFalse(availability_conflict(plain,'unknown'))
 
     async def test_cached_unknown_sold_outbox_cannot_bypass_the_hold(self):
         from price_tracker import PriceTracker

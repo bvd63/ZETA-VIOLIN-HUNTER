@@ -94,21 +94,50 @@ def gardiner_sale_date(soup):
     return None
 
 
+def _reverb_item_id(url: str) -> str:
+    if not isinstance(url, str):
+        return ''
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ''
+    if (parts.hostname or '').lower() not in ('reverb.com', 'www.reverb.com'):
+        return ''
+    match = re.match(r'^/(?:[a-z]{2}(?:-[a-z]{2})?/)?item/(\d+)(?:[-/]|$)', parts.path, re.I)
+    return match[1] if match else ''
+
+
 def _reverb_item(url: str) -> bool:
-    parts = urlsplit(url)
-    return ((parts.hostname or '').lower() in ('reverb.com', 'www.reverb.com')
-            and bool(re.match(r'^/(?:[a-z]{2}(?:-[a-z]{2})?/)?item/\d+(?:[-/]|$)', parts.path, re.I)))
+    return bool(_reverb_item_id(url))
+
+
+def index_card_negative(url: str, snippet: str) -> dict:
+    """Only an associated index-card snippet may use short Reverb status text."""
+    if not _reverb_item_id(url) or not isinstance(snippet,str):
+        return {}
+    text = BeautifulSoup(snippet,'lxml').get_text(' ',strip=True)
+    match = re.search(r'\b(this gear has sold|this listing has ended)\b',text,re.I)
+    if not match:
+        return {}
+    return {'_indexed_availability_url':url, '_indexed_availability_negative':
+            'sold' if match[1].casefold() == 'this gear has sold' else 'ended'}
 
 
 def indexed_closed_reason(listing: dict) -> str:
     """A title-bound extracted Reverb status is negative evidence, not live stock.
 
     This is deliberately narrower than searching descriptions for 'sold'. A
-    markdown primary heading and a standalone status before the description
-    are required. A successful current primary check can supersede this index.
+    markdown primary heading and a standalone status before the description,
+    or an explicitly URL-bound negative index card, are required. A successful
+    current primary check can supersede this index.
     """
     if not _reverb_item(listing.get('url', '')):
         return ''
+    bound_url = listing.get('_indexed_availability_url')
+    if (isinstance(bound_url, str) and _reverb_item(bound_url)
+            and listing.get('_indexed_availability_negative') in ('sold', 'ended')):
+        if _reverb_item_id(bound_url) == _reverb_item_id(listing['url']):
+            return 'Reverb: rezultatul indexat indică SOLD/ended pentru acest URL; verificarea primară actuală este necesară'
     title = re.sub(r'\s+', ' ', html.unescape(str(listing.get('title', '')))).casefold().split(' | ')[0]
     if not title:
         return ''
@@ -135,7 +164,32 @@ def indexed_closed_reason(listing: dict) -> str:
 
 
 def availability_conflict(listing: dict, state: str) -> bool:
-    return state == 'unknown' and bool(listing.get('_availability_conflict') or indexed_closed_reason(listing))
+    return state == 'unknown' and bool(listing.get('_availability_conflict')
+        or indexed_closed_reason(listing) or saved_indexed_closed_reason(listing))
+
+
+def _indexed_state_key(listing: dict) -> str:
+    item_id = _reverb_item_id(listing.get('url', ''))
+    if not item_id:
+        return ''
+    return 'availability:indexed_closed:reverb:' + item_id
+
+
+def remember_indexed_closed(listing: dict) -> None:
+    """Share URL-bound negative evidence across rediscovery and provider queues."""
+    reason = indexed_closed_reason(listing)
+    if reason:
+        from provider_state import write
+        write(_indexed_state_key(listing), {'reason': reason, 'observed': time.time()})
+
+
+def saved_indexed_closed_reason(listing: dict) -> str:
+    key = _indexed_state_key(listing)
+    if not key:
+        return ''
+    from provider_state import read
+    value = read(key, {})
+    return str(value.get('reason') or '') if isinstance(value, dict) else ''
 
 
 def primary_closed_reason(soup, host: str, url: str = '') -> str:
@@ -372,8 +426,12 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
 
 async def verify_offer(listing: dict, client) -> tuple:
     listing.pop('_availability_conflict', None)
-    closed = indexed_closed_reason(listing)
+    remember_indexed_closed(listing)
+    closed = indexed_closed_reason(listing) or saved_indexed_closed_reason(listing)
     state, reason = await _verify_offer(listing, client)
+    if state == 'live' and closed:
+        from provider_state import write
+        write(_indexed_state_key(listing), {})
     if state == 'unknown' and closed:
         listing['_availability_conflict'] = closed
         return state, closed + '; ' + reason
@@ -479,6 +537,15 @@ async def _verify_offer(listing: dict, client) -> tuple:
                 current = urljoin(current, response.headers["location"])
                 continue
             state, reason = inspect_page(listing, response.text, response.status_code, current)
+            if (state == 'unknown' and response.status_code in (247,403)
+                    and (urlsplit(current).hostname or '').lower() in ('gumtree.com','www.gumtree.com')):
+                try:
+                    from public_node_fetch import fetch as node_fetch
+                    code, rendered, final = await node_fetch(current)
+                    state, reason = inspect_page(listing, rendered, code, final)
+                    reason = 'Public Node: ' + reason
+                except Exception:
+                    pass  # Keep the existing independent reserve and unknown route.
             if state == 'unknown' and (urlsplit(current).hostname or '').removeprefix('www.') == 'musicalinstrument-auctions.co.uk':
                 try:
                     from browser_fetch import PublicSearchBrowser

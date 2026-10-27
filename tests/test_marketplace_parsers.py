@@ -34,6 +34,7 @@ def run(scraper, handler, browser=(0, ""), will_result=None, gum_result=None):
         return BaseScraper.make_client(scraper, transport=httpx.MockTransport(handler), **kwargs)
     with patch.object(scraper, 'make_client', client), \
          patch('scrapers.gumtree.PublicSearchBrowser.fetch', AsyncMock(return_value=browser)), \
+         patch('scrapers.gumtree.node_fetch', AsyncMock(return_value=(0,'',''))), \
          patch('scrapers.willhaben.fresh_willhaben_search', AsyncMock(return_value=will_result or {})), \
          patch('scrapers.gumtree.fresh_gumtree_search', AsyncMock(return_value=gum_result or {})), \
          patch('asyncio.sleep',AsyncMock()):
@@ -113,7 +114,7 @@ class MarketplaceParserTests(unittest.TestCase):
         with patch('scrapers.gumtree.market_queries',return_value=['jazz standard violin']):
             self.assertEqual(run(scraper,lambda r:httpx.Response(247),browser=(247,''),gum_result=payload),[])
         self.assertEqual(scraper.health_error(),'')
-        self.assertEqual(scraper.requests_recovered,3)
+        self.assertEqual(scraper.requests_recovered,4)
 
     def test_gumtree_extracted_real_item_survives_partial_result_set(self):
         payload={'text':'# 4 ads for Zeta violin', 'extras':{'links':[
@@ -170,9 +171,29 @@ class MarketplaceParserTests(unittest.TestCase):
             found=run(scraper,blocked,browser=(200,CARDS))
         self.assertTrue(any(not classify(item) for item in found))
         self.assertEqual(scraper.health_error(),'')
-        self.assertEqual(scraper.requests_recovered,4)
-        self.assertEqual(scraper.requests_attempted,6)
+        self.assertEqual(scraper.requests_recovered,6)
+        self.assertEqual(scraper.requests_attempted,8)
         self.assertTrue(any('JV5' in url for url in calls))
+
+    def test_cached_willhaben_links_remain_candidates_without_claiming_fresh_coverage(self):
+        payload={'text':'1 Anzeige','extras':{'links':[
+            'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/zeta-jv5-123']},'_cached':True,'_checked_at':1000}
+        scraper=WillhabenScraper()
+        with patch('scrapers.willhaben.search_plan',return_value=[('zeta',SEARCH_URL)]):
+            found=run(scraper,lambda r:httpx.Response(403),will_result=payload)
+        self.assertEqual(len(found),1)
+        self.assertIn('cached',scraper.health_error())
+        self.assertIn('403',scraper.health_error())
+        self.assertEqual(scraper.requests_recovered,0)
+
+    def test_cached_gumtree_empty_observation_does_not_prove_current_empty_market(self):
+        payload={'text':'0 ads for zeta','extras':{'links':[]},'_cached':True,'_checked_at':1000}
+        scraper=GumtreeScraper()
+        with patch('scrapers.gumtree.market_queries',return_value=['zeta']):
+            self.assertEqual(run(scraper,lambda r:httpx.Response(247),browser=(247,''),gum_result=payload),[])
+        self.assertIn('cached',scraper.health_error())
+        self.assertIn('247',scraper.health_error())
+        self.assertEqual(scraper.requests_recovered,0)
 
     def test_gumtree_browser_challenge_stays_an_access_error(self):
         scraper=GumtreeScraper()
@@ -186,7 +207,7 @@ class MarketplaceParserTests(unittest.TestCase):
         with patch('scrapers.gumtree.market_queries',return_value=['Zeta violin']):
             self.assertEqual(run(scraper,lambda r:httpx.Response(247),browser=(200,'<h1>0 ads for Zeta violin</h1>')),[])
         self.assertEqual(scraper.health_error(),'')
-        self.assertEqual(scraper.requests_recovered,2)
+        self.assertEqual(scraper.requests_recovered,3)
 
     def test_marketplace_item_routes_are_host_scoped(self):
         paths = [('www.willhaben.at', '/iad/kaufen-und-verkaufen/d/zeta-geige-123/'),

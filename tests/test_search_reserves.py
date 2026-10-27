@@ -94,6 +94,61 @@ class SearchReservesTests(unittest.TestCase):
             found = self.run_scraper(scraper, handler)
             self.assertEqual([x['url'] for x in found], ['https://jp.mercari.com/item/m123'])
 
+    def test_duplicate_negative_full_extract_is_persisted_for_tavily_and_exa(self):
+        from offer_verifier import saved_indexed_closed_reason
+        url='https://reverb.com/item/82035982-zeta'; other='https://reverb.com/item/82035983-zeta'
+        title='Zeta Jazz violin'
+        for scraper in (TavilyScraper(), ExaScraper()):
+            with self.subTest(engine=scraper.name):
+                with store() as conn:
+                    conn.execute('DELETE FROM provider_state');conn.execute('DELETE FROM provider_reservations');conn.commit()
+                calls=[]
+                def handler(request):
+                    calls.append(request)
+                    return httpx.Response(200,json={'results':[
+                        {'url':url,'title':title,'content':'Used violin'},
+                        {'url':url,'title':title,'content':'# '+title+'\nThis gear has sold\nAbout this listing'},
+                        {'url':other,'title':title,'content':'Used violin'}]})
+                found=self.run_scraper(scraper,handler)
+                self.assertEqual(len(found),2)
+                self.assertTrue(saved_indexed_closed_reason({'url':url}))
+                self.assertFalse(saved_indexed_closed_reason({'url':other}))
+                self.assertEqual(len(calls),14 if isinstance(scraper,TavilyScraper) else 4)
+
+    def test_duplicate_negative_cards_are_persisted_for_google_and_brave(self):
+        from offer_verifier import saved_indexed_closed_reason
+        from scrapers.google import GoogleScraper
+        from scrapers.brave import BraveScraper
+        url='https://reverb.com/item/82035982-zeta'; other='https://reverb.com/item/82035983-zeta'
+        for engine in ('google','brave'):
+            with self.subTest(engine=engine):
+                with store() as conn:
+                    conn.execute('DELETE FROM provider_state');conn.execute('DELETE FROM provider_reservations');conn.commit()
+                calls=[]
+                def handler(request):
+                    calls.append(request)
+                    if engine=='google':
+                        return httpx.Response(200,json={'items':[{'link':url,'title':'Zeta violin','snippet':'Used violin'},
+                            {'link':url,'title':'Zeta violin','snippet':'This gear has sold'},
+                            {'link':other,'title':'Zeta violin','snippet':'Used violin'}]})
+                    return httpx.Response(200,json={'web':{'results':[{'url':url,'title':'Zeta violin','description':'Used violin'},
+                        {'url':url,'title':'Zeta violin','extra_snippets':['This listing has ended']},
+                        {'url':other,'title':'Zeta violin','description':'Used violin'}]}})
+                scraper=GoogleScraper('fixture','fixture') if engine=='google' else BraveScraper()
+                original=scraper.make_client
+                with patch.object(scraper,'make_client',side_effect=lambda **kw: original(transport=httpx.MockTransport(handler),**kw)), \
+                     patch.object(scraper,'_should_run',return_value=True), \
+                     patch.object(scraper,'plan_queries',return_value=([('zeta',{})],0)), \
+                     patch('scrapers.'+engine+'.reserve_request',return_value=True), \
+                     patch('asyncio.sleep',new_callable=AsyncMock), \
+                     patch.object(Config,'BRAVE_API_KEY','fixture'), \
+                     patch.object(Config,'GOOGLE_QUERIES_PER_RUN',1):
+                    found=asyncio.run(scraper.search())
+                self.assertEqual(len(calls),1)
+                self.assertEqual(len(found),2)
+                self.assertTrue(saved_indexed_closed_reason({'url':url}))
+                self.assertFalse(saved_indexed_closed_reason({'url':other}))
+
     def test_daily_and_rolling_limits_are_independent(self):
         self.assertTrue(reserve("x", 2, 10, 2, now=100000))
         self.assertFalse(reserve("x", 1, 10, 2, now=100001))

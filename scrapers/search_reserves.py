@@ -19,6 +19,7 @@ from keywords import WEB_KEYWORDS, ADDITIONAL_WEB_KEYWORDS, MODEL_CODES, MODEL_N
 from source_policy import is_disabled_source
 from facebook_discovery import queries as facebook_queries
 from http_limits import retry_after_seconds
+from offer_verifier import remember_indexed_closed
 
 log = logging.getLogger(__name__)
 GROUPS = US_MARKET_GROUPS + AUCTION_GROUPS + SITE_GROUPS
@@ -116,13 +117,16 @@ class ReserveSearch(BaseScraper):
                         url, title = item.get("url"), item.get("title")
                         if not isinstance(url, str) or not isinstance(title, str):
                             continue
-                        if urlsplit(url).scheme not in ("http", "https") or is_disabled_source(url) or url in seen:
+                        if urlsplit(url).scheme not in ("http", "https") or is_disabled_source(url):
                             continue
-                        seen.add(url)
                         content = item.get("content") or item.get("text") or "\n".join(
                             s for s in item.get("highlights", []) if isinstance(s, str))
                         if not isinstance(content, str):
                             content = ""
+                        remember_indexed_closed({'url':url, 'title':title, 'description':content})
+                        if url in seen:
+                            continue
+                        seen.add(url)
                         results.append({"id": self._make_id(self.engine, url),
                             "platform": urlsplit(url).hostname or self.name, "title": title,
                             "description": content, "url": url, "source": "search",

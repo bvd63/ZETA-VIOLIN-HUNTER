@@ -1,6 +1,7 @@
 """Exa live extraction for blocked public offers; shared existing credit cap."""
 import html
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode, quote
@@ -11,6 +12,50 @@ from provider_state import read, write, reserve_work
 from work_context import work_kind
 
 log = logging.getLogger(__name__)
+
+MARKET_CACHE_SECONDS = 10 * 3600
+
+
+def remember_market_search(url: str, result: dict) -> None:
+    """Store only a live-crawled result accepted by the marketplace parser.
+
+    The caller invokes this after parsing the result count and item links. A
+    cached/indexed/failed extraction cannot refresh this observation's age.
+    """
+    if result.get('_live_crawled') is not True or result.get('_cached') is True:
+        return
+    extras = result.get('extras')
+    links = extras.get('links') if isinstance(extras,dict) else []
+    links = links if isinstance(links,list) else []
+    try:
+        write('exa_market:page:' + canonical_url(url), {'checked':time.time(), 'result':{
+            'url':url, 'title':str(result.get('title') or '')[:300],
+            'text':str(result.get('text') or '')[:300000],
+            'extras':{'links':[v for v in links if isinstance(v,str)][:300]},
+        }})
+    except Exception as exc:
+        log.warning('Search observation cache unavailable (%s); current results retained', type(exc).__name__)
+
+
+def cached_market_search(url: str, reason: str) -> dict:
+    try:
+        saved = read('exa_market:page:' + canonical_url(url), {})
+    except Exception:
+        return {}  # An optional cache must never stop current discovery.
+    if not isinstance(saved,dict):
+        return {}
+    checked, result = saved.get('checked'), saved.get('result')
+    now = time.time()
+    try:
+        same_url = isinstance(result,dict) and canonical_url(str(result.get('url',''))) == canonical_url(url)
+    except (ValueError,TypeError):
+        return {}
+    if (type(checked) not in (int,float) or not math.isfinite(checked)
+            or not 0 <= now-checked <= MARKET_CACHE_SECONDS or not isinstance(result,dict)
+            or not same_url
+            or not isinstance(result.get('text'),str) or not result['text']):
+        return {}
+    return {**result, '_cached':True, '_checked_at':checked, '_cache_reason':reason}
 
 
 def reserve_pages(kind: str) -> bool:
@@ -54,7 +99,14 @@ async def _fresh_market_search(url: str, client, market: str) -> dict:
     if ((parts.hostname or '').lower().removeprefix('www.') != host
             or not parts.path.startswith(path) or not Config.EXA_API_KEY):
         return {}
+    if work_kind.get() != 'core':
+        cached = cached_market_search(url, 'auxiliary work uses the last verified search observation')
+        if cached:
+            return cached
     if not reserve_pages(kind):
+        cached = cached_market_search(url, 'current live extraction reservation unavailable')
+        if cached:
+            return cached
         return {'_error':market+': limita locală zilnică/lunară Exa; celelalte surse continuă'}
     try:
         response=await client.post('https://api.exa.ai/contents',headers={'x-api-key':Config.EXA_API_KEY},
@@ -65,10 +117,10 @@ async def _fresh_market_search(url: str, client, market: str) -> dict:
         result=next((r for r in data.get('results',[]) if canonical_url(str(r.get('url','')))==canonical_url(url)),{})
         if (response.status_code==200 and status.get('status')=='success'
                 and status.get('source')=='crawled' and isinstance(result.get('text'),str)):
-            return result
+            return {**result, '_live_crawled':True}
     except Exception as exc:
         log.warning('%s live extraction unavailable (%s)',market,type(exc).__name__)
-    return {}
+    return cached_market_search(url, 'current live extraction unavailable')
 
 
 async def fresh_primary_page(url: str, client) -> str:

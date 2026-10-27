@@ -22,7 +22,7 @@ from notifier import TelegramNotifier  # noqa: E402
 from filters import classify, has_primary_identity, has_zeta_signal  # noqa: E402
 from native_candidates import incomplete_pickup_card, detail_priority  # noqa: E402
 from liveness import is_live  # noqa: E402
-from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX, availability_conflict  # noqa: E402
+from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX, availability_conflict, remember_indexed_closed  # noqa: E402
 from discovery_queue import stage, complete  # noqa: E402
 from work_context import spending_scope  # noqa: E402
 from candidate_audit import record_candidate  # noqa: E402
@@ -38,6 +38,7 @@ from scrapers.ebay import EbayScraper  # noqa: E402
 from scrapers.google import GoogleScraper  # noqa: E402
 from scrapers.brave import BraveScraper  # noqa: E402
 from scrapers.search_reserves import TavilyScraper, ExaScraper  # noqa: E402
+from scrapers.duckduckgo import DuckDuckGoScraper  # noqa: E402
 from scrapers.craigslist import CraigslistScraper  # noqa: E402
 from scrapers.shopgoodwill import ShopGoodwillScraper  # noqa: E402
 from scrapers.hibid import HiBidScraper  # noqa: E402
@@ -115,6 +116,7 @@ def build_scrapers() -> list:
         BraveScraper(),
         TavilyScraper(),
         ExaScraper(),
+        DuckDuckGoScraper(),
         CraigslistScraper(),
         ShopGoodwillScraper(),
         HiBidScraper(),
@@ -279,6 +281,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                         log.info('   %s public Facebook leads queued for existing detail budget', seeded)
 
                 for listing in listings:
+                    remember_indexed_closed(listing)
                     record_candidate(listing, 'discovered')
                     reason = classify(listing)
                     native_clue = has_zeta_signal(str(listing.get('title') or '') + ' ' +

@@ -4,6 +4,18 @@ Proprietarul a cerut explicit continuarea autonomă până la implementare și v
 
 ## Contractul proprietarului
 
+### Reluare explicită și extindere — seara27octombrie2026
+
+Proprietarul cere reluarea goal-ului și repararea tuturor problemelor constatate, nu încheierea după o corecție locală sau după raportarea erorilor. Lucrul curent continuă independent de eticheta anterioară blocked; starea controlului Codex se verifică separat, fără a declara goal-ul complet pentru a-l înlocui. Cele două ture naturale99/100 și tura manuală101 au fost auditate, iar automatizarea unică de audit a fost ștearsă după verificare. Botul Railway și programul10/22 continuă.
+
+- Prioritate imediată: Reverb403; GovDeals/AllSurplus204detalii; Willhaben403; Gumtree247; GoogleCSEeligibility403; protecțiile/capacitatea Exa/Apify/Brave/Tavily. Pentru fiecare: cauză, probă dinRailway, cale directă și alternativă gratuită/API/browser/feed dacă există, validarea identității/stării, păstrarea candidaților și verificare după activare.
+- Separă blocajul extern de bugul colectorului, schema greșită, rândul istoric, cota reală, rezerva locală și amânarea auxiliară. Fiecare îmbunătățire trebuie să crească sau să păstreze găsirea viorilor. Nu reduce interogări, aliasuri, limbi, regiuni, frecvențe, limite de rezultate ori priorități pentru a obține un raport aparent sănătos.
+- O pagină200, unActorSUCCEEDED, numărul brut sau lipsa erorilor în log nu sunt probe suficiente. Acceptarea cere conținut util/extracție verificată și teste pe controale active/încheiate/neconcludente. Datele indexate/cache și pistele vechi se raportează separat de căutările noi. Zeroalerte noi nu dovedește inexistența altor viori.
+- Repară orice filtru sau traseu care permiteSOLD confirmat, accesorii-only ori obiecte nerelevante; nu introduce respingeri ale viorilor din titlu incomplet, altă limbă, scor mic sau acces403. Dovezile negative și conflictele explicite opresc alerta, fără pierderea reverificării unei piste incerte.
+- Cercetează și implementează toate celelalte lucrări inițiale încă utile: surse recente verificate, repo-uri/actori alternativi, recuperare de acces, bugete și cozi, diagnostice și notificări. Pilotele plătite rămân condiționate de capacitate verificată fără afectarea turelor, fără resetări/ocoliri sau achiziții automate.
+- Verifică fiecare remediere proporțional, apoi toate suitele/CI/predeploy, commit/push, versiunea efectivă Railway și rularea completă. Păstrează dovezi pe sursă: interogări/region/limbă, cereri/rezultate/fallback/cache, viori eligibile/noi, motive de reținere și alertă/confirmare. Nu afirma acces100% sau toatecerințele îndeplinite când probele lipsesc.
+- Dacă după căile sigure investigate rămâne o dependență externă, consemnează exact ce lipsește și următorul pas concret al proprietarului. Nu declara goal-ul complet și nu folosi un blocaj singular ca motiv să abandonezi celelalte reparații realizabile.
+
 - Toate căutările, limbile, regiunile, modelele și sursele existente se păstrează. Singura sursă eliminată explicit este Yahoo Japonia.
 - 10:00 și 22:00 Europe/Bucharest, cu DST. Între ture se pot verifica detalii deja descoperite, fără relansări necontrolate ale căutărilor plătite.
 - Prioritate vintage JLP/Jean-Luc Ponty, Jazz/Jazz Fusion/Jazz Standard și familia JV, toate aliasurile existente inclusiv JV5/JV44/JV45, sunburst/burst. Anul1993 nu este cerință. Alte modele rămân eligibile. Strados are interes redus, inclusiv varianta de căluș cu pini.

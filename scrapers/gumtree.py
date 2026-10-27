@@ -16,7 +16,8 @@ from scrapers.base import BaseScraper, BROWSER_HEADERS
 from native_candidates import card_hints
 from filters import has_zeta_signal
 from browser_fetch import PublicSearchBrowser
-from primary_page_reserve import fresh_gumtree_search
+from public_node_fetch import fetch as node_fetch
+from primary_page_reserve import fresh_gumtree_search, remember_market_search
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,22 @@ class GumtreeScraper(BaseScraper):
                             tiles = self._extract(resp.text)
                         except ValueError as exc:
                             parse_error = str(exc)
+                            self.content_failures.append(parse_error)
+                    if tiles is None and resp.status_code in (200, 247, 403):
+                        self.requests_attempted += 1
+                        try:
+                            code, node_html, _ = await node_fetch(str(httpx.URL(SEARCH_URL,
+                                params={'search_category':'all', 'q':kw})))
+                            if code != 200:
+                                raise ValueError(f'HTTP {code}')
+                            tiles = self._extract(node_html)
+                            self.requests_ok += 1
+                            self.requests_recovered += max(0, self.requests_attempted-attempted_before-(self.requests_ok-ok_before))
+                            del self.failures[failures_before:]
+                            del self.content_failures[content_before:]
+                            log.info("Gumtree '%s': Node recovered %s cards", kw, len(tiles))
+                        except Exception as exc:
+                            self.content_failures.append('Gumtree Node fallback '+type(exc).__name__)
                     if tiles is None and (resp.status_code in (200, 247, 403)):
                         # Same exact query through ordinary Chromium. No login,
                         # CAPTCHA solving, proxy or reduced keyword coverage.
@@ -78,6 +95,7 @@ class GumtreeScraper(BaseScraper):
                                 recovered = self.requests_attempted-attempted_before-(self.requests_ok-ok_before)
                                 self.requests_recovered += max(0,recovered)
                                 del self.failures[failures_before:]
+                                del self.content_failures[content_before:]
                                 log.info("Gumtree '%s': browser recovered query after HTTP %s (%s tiles)",
                                          kw,resp.status_code,len(tiles))
                             else:
@@ -90,18 +108,22 @@ class GumtreeScraper(BaseScraper):
                             params={'search_category':'all','q':kw})),client)
                         try:
                             tiles,complete=self._extract_exa(recovered)
-                            if complete:
+                            remember_market_search(str(httpx.URL(SEARCH_URL,
+                                params={'search_category':'all','q':kw})),recovered)
+                            cached = recovered.get('_cached') is True
+                            if cached:
+                                self.content_failures.append('Gumtree: cached search observation; fresh coverage unverified')
+                            if complete and not cached:
                                 self.requests_recovered+=max(0,self.requests_attempted-attempted_before-(self.requests_ok-ok_before))
                                 del self.failures[failures_before:]
                                 del self.content_failures[content_before:]
-                            else:
+                            elif not complete:
                                 self.content_failures.append('Gumtree: Exa recovered partial result links')
-                            log.info("Gumtree '%s': Exa live recovered %s item links (complete=%s)",kw,len(tiles),complete)
+                            log.info("Gumtree '%s': Exa %s recovered %s item links (complete=%s)",
+                                     kw,'cached' if cached else 'live',len(tiles),complete)
                         except ValueError as exc:
                             self.content_failures.append(str(exc))
                     if tiles is None:
-                        if parse_error:
-                            self.content_failures.append(parse_error)
                         log.warning("Gumtree '%s' unresolved HTTP %s",kw,resp.status_code)
                         continue
                     self.fetched += len(tiles)

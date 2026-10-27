@@ -17,7 +17,7 @@ from urllib.parse import urlsplit, urljoin, unquote
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
 from native_candidates import card_hints
-from primary_page_reserve import fresh_willhaben_search
+from primary_page_reserve import fresh_willhaben_search, remember_market_search
 
 log = logging.getLogger(__name__)
 
@@ -61,13 +61,18 @@ class WillhabenScraper(BaseScraper):
                         recovered=await fresh_willhaben_search(str(httpx.URL(search_url,params={'keyword':kw})),client)
                         try:
                             adverts,complete=self._extract_exa(recovered)
-                            if complete:
+                            remember_market_search(str(httpx.URL(search_url,params={'keyword':kw})),recovered)
+                            cached = recovered.get('_cached') is True
+                            if cached:
+                                self.content_failures.append('Willhaben: cached search observation; fresh coverage unverified')
+                            if complete and not cached:
                                 if resp.status_code != 200:
                                     self.requests_recovered+=1
                                 del self.failures[failures_before:]
-                            else:
+                            elif not complete:
                                 self.content_failures.append('Willhaben: Exa recovered partial result links')
-                            log.info("Willhaben '%s': Exa live recovered %s item links (complete=%s)",kw,len(adverts),complete)
+                            log.info("Willhaben '%s': Exa %s recovered %s item links (complete=%s)",
+                                     kw,'cached' if cached else 'live',len(adverts),complete)
                         except ValueError as exc:
                             if parse_error:
                                 self.content_failures.append(parse_error)

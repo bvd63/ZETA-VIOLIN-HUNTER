@@ -23,16 +23,42 @@ class IncompleteAuctionDetails(ValueError):
     """A successful but empty public API response is not proof of closure."""
 
 
-def auction_end(value: str) -> str:
+def auction_end(value: str, *, naive_utc: bool = False) -> str:
+    """Detail dates without offsets are New York time; search UTC dates are UTC."""
     if not value:
         return ""
     try:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=ZoneInfo("America/New_York"))
+            dt = dt.replace(tzinfo=timezone.utc if naive_utc else ZoneInfo("America/New_York"))
         return dt.astimezone(timezone.utc).isoformat()
-    except ValueError:
+    except (ValueError, OverflowError):
         return ""
+
+
+def _id_equal(left, right):
+    return str(left).strip() == str(right).strip()
+
+
+def _validate_identity(asset, expected):
+    if not isinstance(asset, dict) or not isinstance(expected, dict):
+        return
+    for key in ("assetId", "accountId"):
+        if asset.get(key) is not None and expected.get(key) is not None:
+            if not _id_equal(asset[key], expected[key]):
+                raise IncompleteAuctionDetails("auction detail identity mismatch")
+
+
+def _effective_end(asset, row):
+    detail_end = auction_end(asset.get("assetAuctionEndDate"))
+    if detail_end:
+        return detail_end
+    if row.get("_deadline_conflict"):
+        return ""
+    if (asset.get("auctionId") is not None and row.get("auctionId") is not None
+            and not _id_equal(asset["auctionId"], row["auctionId"])):
+        return ""
+    return auction_end(row.get("assetAuctionEndDateUtc"), naive_utc=True)
 
 
 class GovDealsClient:
@@ -79,16 +105,23 @@ class GovDealsClient:
         response.raise_for_status()
         if response.status_code == 204 or not response.content.strip():
             raise IncompleteAuctionDetails(f"HTTP {response.status_code} empty auction detail")
-        return response.json()
+        data = response.json()
+        if not isinstance(data, dict) or not data:
+            raise IncompleteAuctionDetails("empty auction detail")
+        _validate_identity(data, {"assetId": asset_id, "accountId": account_id})
+        return data
 
 
 def asset_closed_reason(asset: dict, row: dict = None, *, now: datetime = None) -> str:
     """Only explicit status/deadline evidence closes a lot; missing data does not."""
     asset = asset if isinstance(asset, dict) else {}
     row = row if isinstance(row, dict) else {}
+    if not asset:
+        return ""
+    _validate_identity(asset, row)
     if str(asset.get("assetStatusCd", "")).upper() in ("SOA", "SOLD", "CLO", "CLOSED", "CAN"):
         return "stare explicită de licitație încheiată"
-    end = auction_end(row.get("assetAuctionEndDateUtc") or asset.get("assetAuctionEndDate") or "")
+    end = _effective_end(asset, row)
     if end and datetime.fromisoformat(end) <= (now or datetime.now(timezone.utc)):
         return "termen de licitație depășit"
     return ""
@@ -96,11 +129,12 @@ def asset_closed_reason(asset: dict, row: dict = None, *, now: datetime = None) 
 
 def parse_asset(asset: dict, row: dict = None, *, now: datetime = None,
                 platform: str = "GovDeals", host: str = "www.govdeals.com") -> dict:
-    if not isinstance(asset, dict):
+    if not isinstance(asset, dict) or not asset:
         return {}
     row = row or {}
+    _validate_identity(asset, row)
     title = html.unescape(asset.get("assetShortDesc") or row.get("assetShortDescription") or "")
-    end = auction_end(row.get("assetAuctionEndDateUtc") or asset.get("assetAuctionEndDate") or "")
+    end = _effective_end(asset, row)
     if not end or asset_closed_reason(asset, row, now=now):
         return {}
     asset_id = asset.get("assetId") or row.get("assetId")
@@ -110,6 +144,10 @@ def parse_asset(asset: dict, row: dict = None, *, now: datetime = None,
     description = BeautifulSoup(asset.get("assetLongDesc") or "", "lxml").get_text(" ", strip=True)
     currency = asset.get("currencyCode") or row.get("currencyCode") or "USD"
     bid = row.get("currentBid")
+    detail_end = auction_end(asset.get("assetAuctionEndDate"))
+    row_end = auction_end(row.get("assetAuctionEndDateUtc"), naive_utc=True)
+    if detail_end and row_end and detail_end != row_end:
+        bid = None
     photos = asset.get("assetPhotos") or []
     photo = urljoin("https://files.lqdt1.com", photos[0]) if photos and isinstance(photos[0], str) else ""
     return {
@@ -133,8 +171,7 @@ class GovDealsScraper(BaseScraper):
     host = "www.govdeals.com"
 
     async def search(self) -> list:
-        results, seen = [], set()
-        candidates = []
+        results, candidates_by_id = [], {}
         async with self.make_client(headers=BROWSER_HEADERS) as http:
             api = GovDealsClient(http, self.business_id, self.site_id)
             await api.initialize()
@@ -148,19 +185,35 @@ class GovDealsScraper(BaseScraper):
                         continue
                     self.fetched += len(rows)
                     for row in rows:
-                        identity = (row.get("accountId"), row.get("assetId"))
-                        if None in identity or identity in seen:
+                        if row.get("accountId") is None or row.get("assetId") is None:
                             continue
-                        seen.add(identity)
+                        identity = (str(row["accountId"]), str(row["assetId"]))
                         title = row.get("assetShortDescription", "")
                         # Search may match a model/violin only inside a mixed
                         # lot's description. Queue it; the detail + final shared
                         # classifier decides identity, never a title-only gate.
-                        candidates.append({**row, "title": title,
+                        candidate = {**row, "title": title,
                             "url": f"https://{self.host}/en/asset/{identity[1]}/{identity[0]}",
-                            "_discovery_priority": 0 if has_zeta_signal(title) else 1})
+                            "_discovery_priority": 0 if has_zeta_signal(title) else 1}
+                        old = candidates_by_id.get(identity)
+                        if old is not None:
+                            already_conflicted = bool(old.get("_deadline_conflict"))
+                            old_end = auction_end(old.get("assetAuctionEndDateUtc"), naive_utc=True)
+                            new_end = auction_end(candidate.get("assetAuctionEndDateUtc"), naive_utc=True)
+                            conflict = (old.get("_deadline_conflict") or old_end != new_end
+                                or (old.get("auctionId") is not None and candidate.get("auctionId") is not None
+                                    and not _id_equal(old["auctionId"], candidate["auctionId"])))
+                            if new_end and (not old_end or new_end > old_end):
+                                old = candidate
+                            if conflict:
+                                old["_deadline_conflict"] = True
+                                if not already_conflicted:
+                                    log.warning("%s conflicting discovery rows for %s; primary deadline required", self.name, old["url"])
+                            candidate = old
+                        candidates_by_id[identity] = candidate
                     if len(rows) < 100:
                         break
+            candidates = list(candidates_by_id.values())
             selected, deferred = stage(self.name, candidates, 30)
             self.coverage_stats = {"candidates": len(candidates), "detail_deferred": deferred,
                                    "detail_checked": 0, "detail_unverified": 0}

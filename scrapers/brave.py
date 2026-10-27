@@ -18,6 +18,7 @@ from config import Config
 from database import connect
 from search_budget import reserve_request
 from source_policy import is_disabled_source
+from offer_verifier import index_card_negative, remember_indexed_closed
 
 log = logging.getLogger(__name__)
 
@@ -130,14 +131,18 @@ class BraveScraper(BaseScraper):
                     for item in items:
                         url = item.get("url", "")
                         unique_id = self._make_id("brave", url)
-                        if not url or is_disabled_source(url) or unique_id in seen_ids:
+                        if not url or is_disabled_source(url):
+                            continue
+                        snippets = [item.get("description", "") or ""]
+                        snippets.extend(s for s in (item.get("extra_snippets") or []) if isinstance(s, str))
+                        snippet = "\n".join(dict.fromkeys(snippets))[:6000]
+                        negative = index_card_negative(url, snippet)
+                        remember_indexed_closed({'url':url, **negative})
+                        if unique_id in seen_ids:
                             continue
                         seen_ids.add(unique_id)
 
                         title = item.get("title", "")
-                        snippets = [item.get("description", "") or ""]
-                        snippets.extend(s for s in (item.get("extra_snippets") or []) if isinstance(s, str))
-                        snippet = "\n".join(dict.fromkeys(snippets))[:6000]
                         if self._is_excluded(title):
                             continue
                         if not self._year_in_range(title + " " + snippet):
@@ -145,6 +150,7 @@ class BraveScraper(BaseScraper):
                         image_url = ((item.get("thumbnail") or {}).get("src")) or ""
 
                         results.append({
+                            **negative,
                             "id": unique_id,
                             "platform": self._extract_platform(url),
                             "title": title,
