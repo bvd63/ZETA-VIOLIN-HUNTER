@@ -11,7 +11,7 @@ import httpx
 import database
 from config import Config
 from provider_state import used
-from willhaben_reader import fetch, ReaderUnavailable, _reserve, _target, MAX_BODY, MAX_WIRE
+from willhaben_reader import fetch, ReaderUnavailable, _reserve, _target, expired_redirect, MAX_BODY, MAX_WIRE
 
 URL='https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=Zeta%20JV5'
 ITEM='https://www.willhaben.at/iad/kaufen-und-verkaufen/d/zeta-violin-12345'
@@ -19,8 +19,8 @@ BASE='http://will-reader.railway.internal:8080'
 
 
 def dto(url=URL, **changes):
-    return {'version':'willhaben-reader-v1','requested':url,'url':url,'status':200,
-            'body':'<html>item</html>','checked':time.time(),'region':'us-east4-eqdc4a',**changes}
+    return {'version':'willhaben-reader-v2','requested':url,'url':url,'status':200,
+            'body':'<html>item</html>','checked':time.time(),'region':'us-east4-eqdc4a','location':None,**changes}
 
 
 class ReaderTests(unittest.IsolatedAsyncioTestCase):
@@ -60,6 +60,7 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_search_and_item_payloads_and_no_redirect(self):
         calls=[]
         async def handler(req):
+            self.assertEqual(req.headers.get('X-Willhaben-Reader-Version'),'2')
             calls.append((str(req.url),json.loads(req.content)))
             return httpx.Response(200,json=dto(URL if len(calls)==1 else ITEM))
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
@@ -139,6 +140,104 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
             results=await asyncio.gather(*(fetch(URL,c) for _ in range(5)))
         self.assertEqual(len(results),5);self.assertEqual(peak,2)
+
+    async def test_redirect_same_id_rechecked_per_hop_and_primary_status(self):
+        from offer_verifier import verify_offer
+        alias=ITEM.replace('zeta-violin','relisted-zeta-violin')+'/'
+        for status,body,state in ((200,'<main><h1>Zeta violin</h1><p>This item has been sold</p></main>','dead'),
+                                  (404,'','dead'),
+                                  (200,'<main><h1>Zeta violin</h1><p id="description">Used Zeta violin</p><p>For sale €1500</p></main>','live')):
+            calls=[]
+            async def handler(request):
+                if request.url.host != 'will-reader.railway.internal': return httpx.Response(403)
+                payload=json.loads(request.content);path=payload['path'];calls.append(path)
+                requested='https://www.willhaben.at'+path
+                if len(calls)==1:
+                    return httpx.Response(200,json=dto(requested,status=308,location=alias))
+                return httpx.Response(200,json=dto(requested,status=status,body=body))
+            item={'id':'x','url':ITEM,'title':'Zeta violin','description':'Used Zeta violin','source':'search'}
+            before=used('willhaben_reader')
+            with self.subTest(status=status,body=body[:20]), \
+                 patch('offer_verifier.public_dns',AsyncMock(return_value=True)), \
+                 patch('primary_page_reserve.fresh_primary_page',AsyncMock(return_value=None)):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    result,_=await verify_offer(item,client)
+                self.assertEqual(result,state)
+                self.assertEqual(len(calls),2)
+                self.assertEqual(used('willhaben_reader')-before,2)
+
+    async def test_redirect_external_other_item_loop_and_hop_limit_withheld(self):
+        foreign='https://evil.test/iad/kaufen-und-verkaufen/d/zeta-violin-12345'
+        other=ITEM.replace('12345','12346')
+        for kind in ('foreign','other','loop','limit'):
+            calls=[]
+            async def handler(request):
+                path=json.loads(request.content)['path'];calls.append(path)
+                current='https://www.willhaben.at'+path
+                if kind=='foreign': destination=foreign
+                elif kind=='other': destination=other
+                elif kind=='loop': destination=ITEM
+                else: destination=ITEM.replace('zeta-violin',f'zeta-violin-{len(calls)}')
+                return httpx.Response(200,json=dto(current,status=308,location=destination))
+            before=used('willhaben_reader')
+            with self.subTest(kind=kind):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with self.assertRaises(ReaderUnavailable): await fetch(ITEM,client)
+            self.assertEqual(len(calls),4 if kind=='limit' else 1)
+            self.assertEqual(used('willhaben_reader')-before,len(calls))
+
+    async def test_redirect_quota_denial_and_total_deadline(self):
+        alias=ITEM.replace('zeta-violin','relisted-zeta-violin')
+        calls=[]
+        async def handler(request):
+            calls.append(request)
+            if len(calls)==1: return httpx.Response(200,json=dto(ITEM,status=308,location=alias))
+            await asyncio.sleep(.2)
+            return httpx.Response(200,json=dto(alias))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with patch('willhaben_reader._reserve',side_effect=[True,False]) as reserve:
+                with self.assertRaises(ReaderUnavailable): await fetch(ITEM,client)
+            self.assertEqual(len(calls),1);self.assertEqual(reserve.call_count,2)
+        calls.clear();before=used('willhaben_reader')
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with self.assertRaises(ReaderUnavailable): await fetch(ITEM,client,timeout=.03)
+        self.assertEqual(len(calls),2);self.assertEqual(used('willhaben_reader')-before,2)
+
+    async def test_three_redirects_and_search_query_binding(self):
+        calls=[]
+        async def handler(request):
+            payload=json.loads(request.content);calls.append(payload)
+            if payload['kind']=='search':
+                return httpx.Response(200,json=dto(URL,status=308,location=URL.replace('JV5','JV4')))
+            path=payload['path'];current='https://www.willhaben.at'+path
+            if len(calls)<=3:
+                alias=ITEM.replace('zeta-violin',f'zeta-alias-{len(calls)}')
+                return httpx.Response(200,json=dto(current,status=308,location=alias))
+            return httpx.Response(200,json=dto(current,status=200,body='verified'))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result=await fetch(ITEM,client)
+            self.assertEqual(result[0:2],(200,'verified'))
+            self.assertEqual(len(calls),4)
+            with self.assertRaises(ReaderUnavailable): await fetch(URL,client)
+        self.assertEqual(used('willhaben_reader'),5)
+
+    async def test_bound_308_expired_category_is_returned_without_follow(self):
+        original='https://www.willhaben.at/iad/kaufen-und-verkaufen/d/zeta-violin-1363838209/'
+        location='https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/saiteninstrumente/geigen-violinen-6553?fromExpiredAdId=1363838209'
+        self.assertTrue(expired_redirect(original,location))
+        for bad in (location.replace('1363838209','1363838210'), location+'&foo=1',
+                    location+'&fromExpiredAdId=1363838209',location.replace('https://www.willhaben.at','https://evil.test'),
+                    location.replace('https://','http://'),location+'#fragment',
+                    location.replace('marktplatz/saiteninstrumente','d/saiteninstrumente'),
+                    location.replace('www.willhaben.at','user@www.willhaben.at')):
+            with self.subTest(location=bad): self.assertFalse(expired_redirect(original,bad))
+        calls=[]
+        async def handler(request):
+            calls.append(request)
+            return httpx.Response(200,json=dto(original,status=308,body='expired',location=location))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            self.assertEqual(await fetch(original,client),(308,'expired',original,location))
+        self.assertEqual(len(calls),1);self.assertEqual(used('willhaben_reader'),1)
 
     @staticmethod
     def native_page(query):
@@ -297,6 +396,54 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
                         state,_=await verify_offer(item,client)
                 self.assertEqual(state,expected)
                 reader.assert_awaited_once();exa.assert_not_awaited()
+
+    async def test_expired_redirect_direct_and_private_are_bound_to_original(self):
+        from offer_verifier import verify_offer
+        loc='https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/saiteninstrumente/geigen-violinen-6553?fromExpiredAdId=12345'
+        for original in (ITEM,ITEM+'?utm_source=google'):
+            for route in ('direct','private'):
+                with self.subTest(original=original,route=route):
+                    calls=[]
+                    def handler(req):
+                        calls.append(str(req.url))
+                        return httpx.Response(308,headers={'location':loc}) if route=='direct' else httpx.Response(403)
+                    item={'url':original,'title':'Zeta violin','description':'original','source':'search'}
+                    with patch('offer_verifier.public_dns',AsyncMock(return_value=True)), \
+                         patch('facebook_discovery.cached_offer',return_value=None), \
+                         patch('willhaben_reader.fetch',AsyncMock(return_value=(308,'',ITEM,loc))) as reader, \
+                         patch('primary_page_reserve.fresh_primary_page',AsyncMock()) as exa:
+                        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                            state,_=await verify_offer(item,client)
+                    self.assertEqual(state,'dead');self.assertEqual(len(calls),1)
+                    if route=='direct': reader.assert_not_awaited()
+                    else:
+                        reader.assert_awaited_once()
+                        self.assertEqual(reader.await_args.args[0],ITEM)
+                    exa.assert_not_awaited()
+
+    async def test_expired_hint_rejects_other_id_parameters_host_and_status(self):
+        from offer_verifier import verify_offer
+        loc='https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/saiteninstrumente/geigen-violinen-6553?fromExpiredAdId=12345'
+        cases=((308,loc.replace('12345','99999')),(308,loc+'&x=1'),
+               (308,loc.replace('www.willhaben.at','willhaben.at.evil.example')),(302,loc),(200,loc))
+        for status,location in cases:
+            for route in ('direct','private'):
+                with self.subTest(status=status,location=location,route=route):
+                    calls=[]
+                    def handler(req):
+                        calls.append(str(req.url))
+                        return httpx.Response(status,headers={'location':location}) if route=='direct' else httpx.Response(403)
+                    item={'url':ITEM,'title':'Zeta violin','description':'original','source':'search'}
+                    with patch('offer_verifier.public_dns',AsyncMock(return_value=True)), \
+                         patch('facebook_discovery.cached_offer',return_value=None), \
+                         patch('willhaben_reader.fetch',AsyncMock(return_value=(status,'',ITEM,location))) as reader, \
+                         patch('primary_page_reserve.fresh_primary_page',AsyncMock(return_value=None)):
+                        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                            state,_=await verify_offer(item,client)
+                    self.assertNotEqual(state,'dead')
+                    self.assertEqual(item['title'],'Zeta violin')
+                    if route=='direct' and status in (302,308):
+                        self.assertEqual(len(calls),1);reader.assert_not_awaited()
 
 
 if __name__=='__main__': unittest.main()

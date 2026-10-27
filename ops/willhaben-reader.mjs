@@ -1,5 +1,5 @@
 // Private, anonymous Willhaben reader; no arbitrary destination or credentials.
-const VERSION = 'willhaben-reader-v1';
+const VERSION = 'willhaben-reader-v2';
 const HOST = 'https://www.willhaben.at';
 const MAX_INPUT = 4096;
 const MAX_BODY = 2 * 1024 * 1024;
@@ -72,6 +72,8 @@ export function createHandler({upstreamFetch = globalThis.fetch, region = 'unkno
     }
     if (path !== '/read') return json({error:'not found'},404);
     if (request.method !== 'POST') return json({error:'method'},405);
+    const protocol = request.headers.get('x-willhaben-reader-version');
+    if (protocol !== null && protocol !== '2') return json({error:'version'},400);
     if (active >= 2) return json({error:'busy'},429);
     active++;
     const abort = new AbortController();
@@ -101,8 +103,15 @@ export function createHandler({upstreamFetch = globalThis.fetch, region = 'unkno
                    'Accept':'text/html,application/xhtml+xml', 'Accept-Language':'de-AT,de;q=0.9,en;q=0.8'}});
         const bytes = await readBounded(response.body, MAX_BODY, abort.signal);
         const body = new TextDecoder().decode(bytes);
-        const result = {version:VERSION, requested:url, url:response.url, status:response.status,
+        let location = null;
+        const rawLocation = response.headers.get('location');
+        if (rawLocation) {
+          try { location = new URL(rawLocation, response.url || url).href; } catch { location = null; }
+        }
+        const result = {version:protocol === '2' ? VERSION : 'willhaben-reader-v1',
+                        requested:url, url:response.url, status:response.status,
                         body, checked:Math.floor(now()), region};
+        if (protocol === '2') result.location = location;
         log(`willhaben ${payload.kind} HTTP ${response.status} bytes ${bytes.length}`);
         return json(result,200);
       };

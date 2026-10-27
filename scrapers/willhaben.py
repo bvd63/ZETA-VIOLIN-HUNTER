@@ -65,7 +65,7 @@ class WillhabenScraper(BaseScraper):
                         try:
                             private = await private_read(str(httpx.URL(search_url,params={'keyword':kw})),client)
                             if private is not None:
-                                code, body, final = private
+                                code, body, final = private[:3]
                                 if code != 200:
                                     raise ReaderUnavailable(f'private US upstream HTTP {code}')
                                 adverts = self._extract(body, expected_query=kw)

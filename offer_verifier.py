@@ -655,16 +655,28 @@ async def _verify_offer(listing: dict, client) -> tuple:
             response = await client.get(current, follow_redirects=False, headers={"User-Agent": UA})
             if response.is_redirect and response.headers.get("location"):
                 from urllib.parse import urljoin
-                current = urljoin(current, response.headers["location"])
+                destination = urljoin(current, response.headers["location"])
+                if response.status_code == 308 and _willhaben_item_id(listing.get('url','')):
+                    from willhaben_reader import expired_redirect
+                    if expired_redirect(listing['url'],destination):
+                        return 'dead', 'Willhaben: redirecționarea primară confirmă ID-ul anunțului expirat'
+                current = destination
                 continue
             state, reason = inspect_page(listing, response.text, response.status_code, current)
             if (state == 'unknown' and (urlsplit(current).hostname or '').lower()
                     in ('willhaben.at','www.willhaben.at')):
                 try:
                     from willhaben_reader import fetch as private_read
-                    private = await private_read(current,client)
+                    from urllib.parse import urlunsplit
+                    parts = urlsplit(current)
+                    private_url = urlunsplit((parts.scheme,parts.netloc,parts.path,'',''))
+                    private = await private_read(private_url,client)
+                    if private is not None and private[0] == 308 and len(private) > 3:
+                        from willhaben_reader import expired_redirect
+                        if expired_redirect(listing['url'],private[3]):
+                            return 'dead', 'Willhaben: redirecționarea primară US confirmă ID-ul anunțului expirat'
                     if private is not None and private[0] in (200,404,410):
-                        code, rendered, final = private
+                        code, rendered, final = private[:3]
                         state, reason = inspect_page(listing, rendered, code, final)
                         reason = 'Private US native: ' + reason
                 except Exception:

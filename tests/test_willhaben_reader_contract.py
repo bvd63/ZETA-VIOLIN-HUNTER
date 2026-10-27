@@ -58,7 +58,7 @@ process.env.RAILWAY_REGION='wrong';
 await import({MODULE!r}+'?startup-test');
 assert.equal(options.hostname,'::');assert.equal(options.port,8080);
 const response=await options.fetch(new Request('http://internal/health'));
-assert.deepEqual(await response.json(),{{version:'willhaben-reader-v1',region:'us-fixture'}});
+assert.deepEqual(await response.json(),{{version:'willhaben-reader-v2',region:'us-fixture'}});
 ''')
 
     def test_dto_one_request_no_redirect_credentials_or_query_mutation(self):
@@ -68,16 +68,17 @@ const h=createHandler({region:'us-test', now:()=>123456, log:s=>logs.push(s), up
  calls.push([url,opts]); let r=new Response('hello',{status:302,headers:{location:'https://evil.test'}});
  Object.defineProperty(r,'url',{value:url}); return r;
 }});
-const req=new Request('http://internal/read',{method:'POST',body:JSON.stringify({kind:'search',keyword:'Jazz & JV5',category:'all'})});
+const req=new Request('http://internal/read',{method:'POST',headers:{'X-Willhaben-Reader-Version':'2'},body:JSON.stringify({kind:'search',keyword:'Jazz & JV5',category:'all'})});
 let r=await h(req), d=await r.json(); assert.equal(r.status,200);
-assert.deepEqual(Object.keys(d).sort(),['body','checked','region','requested','status','url','version'].sort());
-assert.equal(d.version,'willhaben-reader-v1');assert.equal(d.status,302);assert.equal(d.body,'hello');
+assert.deepEqual(Object.keys(d).sort(),['body','checked','region','requested','status','url','version','location'].sort());
+assert.equal(d.version,'willhaben-reader-v2');assert.equal(d.status,302);assert.equal(d.body,'hello');
+assert.equal(d.location,'https://evil.test/');
 assert.equal(d.region,'us-test');assert.equal(d.checked,123456);assert.equal(d.url,d.requested);
 assert.equal(calls.length,1);assert.equal(calls[0][1].redirect,'manual');assert.equal(calls[0][1].method,'GET');
 assert.equal(new URL(calls[0][0]).searchParams.get('keyword'),'Jazz & JV5');
 assert.equal(Object.keys(calls[0][1].headers).some(k=>/cookie|authorization/i.test(k)),false);
 assert.equal(logs.length,1);assert.equal(logs[0].includes('Jazz'),false);assert.equal(logs[0].includes('hello'),false);
-let health=await h(new Request('http://internal/health')); assert.deepEqual(await health.json(),{version:'willhaben-reader-v1',region:'us-test'});
+let health=await h(new Request('http://internal/health')); assert.deepEqual(await health.json(),{version:'willhaben-reader-v2',region:'us-test'});
 assert.equal((await h(new Request('http://internal/read'))).status,405);
 assert.equal((await h(new Request('http://internal/other'))).status,404);
 ''')
@@ -90,6 +91,37 @@ const h=createHandler({log:()=>{},upstreamFetch:async url=>{calls++;let r=new Re
 const request=body=>new Request('http://internal/read',{method:'POST',body});
 assert.equal((await h(request('x'.repeat(4097)))).status,400);assert.equal(calls,0);
 assert.equal((await h(request(JSON.stringify({kind:'search',keyword:'zeta',category:'all'})))).status,502);
+assert.equal(calls,1);
+''')
+
+    def test_relative_location_is_resolved_without_follow(self):
+        run_js('''
+let calls=0;
+const h=createHandler({log:()=>{},upstreamFetch:async (url,options)=>{
+ calls++;assert.equal(options.redirect,'manual');
+ let r=new Response('redirect',{status:308,headers:{location:'/iad/kaufen-und-verkaufen/d/new-slug-123/'}});
+ Object.defineProperty(r,'url',{value:url});return r;
+}});
+const req=new Request('http://internal/read',{method:'POST',headers:{'X-Willhaben-Reader-Version':'2'},body:JSON.stringify({kind:'item',path:'/iad/kaufen-und-verkaufen/d/old-slug-123/'})});
+const result=await (await h(req)).json();
+assert.equal(result.location,'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/new-slug-123/');
+assert.equal(result.status,308);assert.equal(calls,1);
+''')
+
+    def test_legacy_without_header_and_invalid_version(self):
+        run_js('''
+let calls=0;
+const h=createHandler({log:()=>{},upstreamFetch:async url=>{calls++;
+ let r=new Response('old',{status:308,headers:{location:'/iad/kaufen-und-verkaufen/d/new-123'}});
+ Object.defineProperty(r,'url',{value:url});return r;}});
+const body=JSON.stringify({kind:'item',path:'/iad/kaufen-und-verkaufen/d/old-123'});
+let r=await h(new Request('http://internal/read',{method:'POST',body}));
+let d=await r.json();assert.equal(d.version,'willhaben-reader-v1');assert.equal(d.status,308);
+assert.deepEqual(Object.keys(d).sort(),['body','checked','region','requested','status','url','version'].sort());
+for(const version of ['1','3','']) {
+  r=await h(new Request('http://internal/read',{method:'POST',headers:{'X-Willhaben-Reader-Version':version},body}));
+  assert.equal(r.status,400);
+}
 assert.equal(calls,1);
 ''')
 

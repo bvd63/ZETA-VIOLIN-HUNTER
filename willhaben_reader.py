@@ -6,7 +6,7 @@ import math
 import re
 import time
 import unicodedata
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
 import httpx
 from config import Config
@@ -16,7 +16,7 @@ from work_context import work_kind
 MAX_BODY = 2 * 1024 * 1024
 MAX_WIRE = 6 * MAX_BODY + 8192
 REGION = 'us-east4-eqdc4a'
-VERSION = 'willhaben-reader-v1'
+VERSION = 'willhaben-reader-v2'
 _LIMIT = asyncio.Semaphore(2)
 _ALL = '/iad/kaufen-und-verkaufen/marktplatz'
 _MUSIC = _ALL + '/musikinstrumente-noten-6540'
@@ -79,6 +79,24 @@ def _same_target(expected, observed):
     return _item_id(target['path']) == _item_id(expected['path'])
 
 
+def expired_redirect(original_url, location):
+    """The site's explicit expired-item category redirect, bound to its item ID."""
+    try:
+        parts_original = urlsplit(original_url)
+        original = _target(urlunsplit((parts_original.scheme,parts_original.netloc,parts_original.path,'','')))
+        if not original or original['kind'] != 'item' or not isinstance(location,str):
+            return False
+        parts = urlsplit(location)
+        if (parts.scheme != 'https' or (parts.hostname or '').lower() not in ('willhaben.at','www.willhaben.at')
+                or parts.username or parts.password or parts.port not in (None,443) or parts.fragment
+                or not re.fullmatch(re.escape(_ALL) + r'(?:/[a-zA-Z0-9-]+)+/?', parts.path)):
+            return False
+        return parse_qsl(parts.query,keep_blank_values=True,strict_parsing=True) == [
+            ('fromExpiredAdId', _item_id(original['path']))]
+    except (TypeError,ValueError,UnicodeError):
+        return False
+
+
 def _reserve(auxiliary, now=None):
     """Atomic aggregate daily/rolling ceilings and protected core allowance."""
     now = time.time() if now is None else now
@@ -102,7 +120,7 @@ def _reserve(auxiliary, now=None):
 
 
 async def fetch(url: str, client=None, *, auxiliary=None, timeout=15):
-    """Return (status, HTML, URL), None when unconfigured, else ReaderUnavailable."""
+    """Return (status, HTML, URL, location), None when unconfigured, else ReaderUnavailable."""
     configured = getattr(Config, 'WILLHABEN_READER_URL', '')
     if not configured:
         return None
@@ -114,12 +132,10 @@ async def fetch(url: str, client=None, *, auxiliary=None, timeout=15):
     try:
         async with asyncio.timeout(timeout):
             async with _LIMIT:
-                if not await asyncio.to_thread(_reserve, is_aux):
-                    raise ReaderUnavailable('reader allowance unavailable')
                 if client is None:
                     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as own:
-                        return await _read(own, base, target, timeout)
-                return await _read(client, base, target, timeout)
+                        return await _read_redirects(own, base, target, url, is_aux, timeout)
+                return await _read_redirects(client, base, target, url, is_aux, timeout)
     except asyncio.CancelledError:
         raise
     except ReaderUnavailable:
@@ -128,8 +144,33 @@ async def fetch(url: str, client=None, *, auxiliary=None, timeout=15):
         raise ReaderUnavailable('reader unavailable') from None
 
 
+async def _read_redirects(client, base, original, url, auxiliary, timeout):
+    current, visited = url, set()
+    for hop in range(4):
+        normalized = str(httpx.URL(current))
+        if normalized in visited:
+            raise ReaderUnavailable('reader redirect loop')
+        visited.add(normalized)
+        target = _target(current)
+        if not target or not _same_target(original, current):
+            raise ReaderUnavailable('reader redirect target invalid')
+        if not await asyncio.to_thread(_reserve, auxiliary):
+            raise ReaderUnavailable('reader allowance unavailable')
+        status, body, final, location = await _read(client, base, target, timeout)
+        if not 300 <= status < 400:
+            return status, body, final, location
+        if status == 308 and expired_redirect(url, location):
+            return status, body, final, location
+        if (hop == 3 or status not in (301, 302, 303, 307, 308)
+                or not isinstance(location, str) or not _same_target(original, location)):
+            raise ReaderUnavailable('reader redirect target invalid')
+        current = location
+    raise ReaderUnavailable('reader redirect limit')
+
+
 async def _read(client, base, target, timeout):
-    async with client.stream('POST', base + '/read', json=target, follow_redirects=False, timeout=timeout) as response:
+    async with client.stream('POST', base + '/read', json=target, follow_redirects=False, timeout=timeout,
+                             headers={'X-Willhaben-Reader-Version':'2'}) as response:
         if response.status_code != 200:
             raise ReaderUnavailable('reader response unavailable')
         chunks, size = [], 0
@@ -140,15 +181,16 @@ async def _read(client, base, target, timeout):
             chunks.append(chunk)
     try:
         data = json.loads(b''.join(chunks))
-        if (not isinstance(data,dict) or set(data) != {'version','requested','url','status','body','checked','region'}
+        if (not isinstance(data,dict) or set(data) != {'version','requested','url','status','body','checked','region','location'}
                 or data['version'] != VERSION or data['region'] != REGION
                 or not isinstance(data['requested'],str) or not _same_target(target,data['requested'])
                 or not isinstance(data['url'],str) or not _same_target(target,data['url'])
                 or type(data['status']) is not int or not 100 <= data['status'] <= 599
                 or not isinstance(data['body'],str) or len(data['body'].encode('utf-8')) > MAX_BODY
+                or (data['location'] is not None and not isinstance(data['location'],str))
                 or type(data['checked']) not in (int,float) or not math.isfinite(data['checked'])
                 or abs(time.time() - data['checked']) > 120):
             raise ValueError('invalid')
-        return data['status'], data['body'], data['url']
+        return data['status'], data['body'], data['url'], data['location']
     except (ValueError, TypeError, KeyError, UnicodeError, OverflowError):
         raise ReaderUnavailable('reader response invalid') from None
