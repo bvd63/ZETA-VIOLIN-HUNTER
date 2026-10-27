@@ -215,6 +215,19 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await scraper.search(),[])
             exa.assert_awaited_once();self.assertTrue(scraper.health_error())
 
+    async def test_complete_exa_recovers_all_failed_routes_without_phantom_timeout(self):
+        from scrapers.willhaben import WillhabenScraper, SEARCH_URL
+        scraper=WillhabenScraper();scraper.reset_health()
+        # Both direct and private transport actually answer403. A complete,
+        # parser-validated independent result must recover both failed GET paths.
+        with patch.object(scraper,'make_client',return_value=self.tracked_client(scraper,lambda req:httpx.Response(403))), \
+             patch('scrapers.willhaben.search_plan',return_value=[('zeta',SEARCH_URL)]), \
+             patch('scrapers.willhaben.fresh_willhaben_search',AsyncMock(return_value={'text':'0 Anzeigen'})):
+            self.assertEqual(await scraper.search(),[])
+        self.assertEqual(scraper.requests_attempted,2)
+        self.assertEqual(scraper.requests_recovered,2)
+        self.assertEqual(scraper.health_error(),'')
+
     async def test_private_primary_status_and_identity_keep_unknown_distinct(self):
         from offer_verifier import verify_offer
         from filters import classify

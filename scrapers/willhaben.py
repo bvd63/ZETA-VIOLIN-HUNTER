@@ -77,7 +77,7 @@ class WillhabenScraper(BaseScraper):
                         except (ReaderUnavailable, ValueError) as exc:
                             # Keep existing Exa/cache fallback and explicit partial
                             # health; a reader's HTTP200 alone proves nothing.
-                            parse_error = str(exc)
+                            parse_error = '; '.join(v for v in (parse_error,str(exc)) if v)
                     if adverts is None:
                         recovered=await fresh_willhaben_search(str(httpx.URL(search_url,params={'keyword':kw})),client)
                         try:
@@ -87,8 +87,8 @@ class WillhabenScraper(BaseScraper):
                             if cached:
                                 self.content_failures.append('Willhaben: cached search observation; fresh coverage unverified')
                             if complete and not cached:
-                                if resp.status_code != 200:
-                                    self.requests_recovered+=1
+                                self.requests_recovered += (self.requests_attempted-attempts_before
+                                                            -(self.requests_ok-ok_before))
                                 del self.failures[failures_before:]
                             elif not complete:
                                 self.content_failures.append('Willhaben: Exa recovered partial result links')

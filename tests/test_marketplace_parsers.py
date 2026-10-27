@@ -33,6 +33,7 @@ def run(scraper, handler, browser=(0, ""), will_result=None, gum_result=None):
     def client(**kwargs):
         return BaseScraper.make_client(scraper, transport=httpx.MockTransport(handler), **kwargs)
     with patch.object(scraper, 'make_client', client), \
+         patch('scrapers.willhaben.private_read', AsyncMock(return_value=None)), \
          patch('scrapers.gumtree.PublicSearchBrowser.fetch', AsyncMock(return_value=browser)), \
          patch('scrapers.gumtree.node_fetch', AsyncMock(return_value=(0,'',''))), \
          patch('scrapers.willhaben.fresh_willhaben_search', AsyncMock(return_value=will_result or {})), \

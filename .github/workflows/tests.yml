@@ -8,6 +8,9 @@ on:
 jobs:
   filters:
     runs-on: ubuntu-latest
+    env:
+      # Exercise optional-reader configuration; HTTP remains mocked in tests.
+      WILLHABEN_READER_URL: http://will-reader.railway.internal:8080
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
