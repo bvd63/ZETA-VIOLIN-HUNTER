@@ -221,6 +221,13 @@ class StatusTracker:
             status["budgets"] = {"google_per_day": min(96, Config.GOOGLE_DAILY_QUOTA), "brave_per_month": Config.BRAVE_MONTHLY_QUOTA}
             from resource_monitor import snapshot
             status["resources"] = snapshot()
+            from source_review import bind
+            holds = bind(self.conn)
+            held_pending = 0
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pending_alerts'").fetchone():
+                held_pending = self.conn.execute("""SELECT count(*) FROM pending_alerts
+                    WHERE source_review_held(CASE WHEN url LIKE 'drop:%' THEN substr(url,6) ELSE url END)""").fetchone()[0]
+            status['source_review'] = {'held_hosts':sorted(holds),'retained_delivery_items':held_pending}
             from alert_receipts import AlertReceipts
             receipts = AlertReceipts()
             try:

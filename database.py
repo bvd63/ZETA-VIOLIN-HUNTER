@@ -244,7 +244,9 @@ class Database:
         self.conn.commit()
 
     def pending(self, limit: int = 30) -> list:
-        rows = self.conn.execute("SELECT payload FROM pending_alerts WHERE url NOT LIKE 'drop:%' ORDER BY queued_at LIMIT ?", (limit,)).fetchall()
+        from source_review import bind
+        bind(self.conn)
+        rows = self.conn.execute("SELECT payload FROM pending_alerts WHERE url NOT LIKE 'drop:%' AND NOT source_review_held(url) ORDER BY queued_at LIMIT ?", (limit,)).fetchall()
         return [json.loads(row[0]) for row in rows]
 
     def enqueue_price_drop(self, listing: dict, info: dict) -> None:
@@ -254,7 +256,9 @@ class Database:
         self.conn.commit()
 
     def pending_price_drops(self, limit: int = 30) -> list:
-        rows = self.conn.execute("SELECT payload FROM pending_alerts WHERE url LIKE 'drop:%' ORDER BY queued_at LIMIT ?", (limit,)).fetchall()
+        from source_review import bind
+        bind(self.conn)
+        rows = self.conn.execute("SELECT payload FROM pending_alerts WHERE url LIKE 'drop:%' AND NOT source_review_held(substr(url,6)) ORDER BY queued_at LIMIT ?", (limit,)).fetchall()
         data = [json.loads(row[0]) for row in rows]
         return [(entry["listing"], entry["info"]) for entry in data]
 

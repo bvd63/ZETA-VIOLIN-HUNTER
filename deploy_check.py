@@ -24,6 +24,7 @@ def main():
         ("tests.test_auction_recovery", []),
         ("tests.test_duckduckgo", []),
         ("tests.test_public_node_fetch", []),
+        ("tests.test_source_review", []),
         ("tests.test_native_recall", []),
         ("tests.test_native_cards", []),
         ("tests.test_native_asia_cards", []),

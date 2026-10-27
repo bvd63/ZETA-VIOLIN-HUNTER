@@ -23,6 +23,7 @@ from filters import classify, has_primary_identity, has_zeta_signal  # noqa: E40
 from native_candidates import incomplete_pickup_card, detail_priority  # noqa: E402
 from liveness import is_live  # noqa: E402
 from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX, availability_conflict, remember_indexed_closed  # noqa: E402
+from source_review import hold_reason as source_review_hold  # noqa: E402
 from discovery_queue import stage, complete  # noqa: E402
 from work_context import spending_scope  # noqa: E402
 from candidate_audit import record_candidate  # noqa: E402
@@ -88,6 +89,7 @@ DROP_REASON_LABELS = {
     "dead_cached": "known dead page (re-check after 7 days)",
     "liveness_deferred": "search-hit deferred to next cycle (liveness budget)",
     "availability_conflict": "indexed sold status; retained for primary availability recheck",
+    "source_review": "source quarantined by owner; candidate retained without notifications",
     "duplicate_flagged": "flagged as possible duplicate (still sent)",
 }
 MAX_LIVENESS_CHECKS = 60      # per scraper per cycle
@@ -98,7 +100,7 @@ DEAD_CACHE_DAYS = 7
 
 def verification_counts(counts: dict) -> dict:
     """Report retained work separately from actual rejection decisions."""
-    deferred = {'liveness_deferred', 'identity_unverified', 'availability_conflict'}
+    deferred = {'liveness_deferred', 'identity_unverified', 'availability_conflict', 'source_review'}
     observed = {'unverified', 'duplicate_flagged'}
     return {
         'rejected': {k:v for k,v in counts.items() if k not in deferred | observed | {'collection_expanded'}},
@@ -158,6 +160,9 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
         return []
 
     async def check(listing: dict):
+        review = source_review_hold(listing.get('url',''))
+        if review:
+            return listing, ('review_hold', review)
         async with sem:
             return listing, await verify_offer(listing, http)
 
@@ -179,6 +184,11 @@ async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncC
             continue
         listing, (state, why) = outcome
         record_candidate(listing, state, why)
+        if state == 'review_hold':
+            if queue_namespace:
+                complete(queue_namespace, listing, 3600)
+            dropped['source_review'] = dropped.get('source_review',0)+1
+            continue
         if state == 'collection':
             children = listing.pop('_collection_leads', [])
             from discovery_queue import DiscoveryQueue
@@ -448,6 +458,15 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
     from database import canonical_url
     for listing in listings:
         url = canonical_url(listing.get("url", ""))
+        review = source_review_hold(listing.get('url',''))
+        if review:
+            if not db.was_url_alerted(listing.get('url',''),listing.get('auction_end','')):
+                retained = dict(listing)
+                retained.pop('verification', None)
+                retained.pop('liveness', None)
+                db.enqueue(retained)
+            record_candidate(listing,'review_hold',review)
+            continue
         if url in urls or db.was_url_alerted(listing.get("url", ""), listing.get("auction_end", "")):
             if db.was_url_alerted(listing.get("url", ""), listing.get("auction_end", "")):
                 db.discard_pending(listing.get("url", ""))
@@ -532,6 +551,8 @@ async def _notification_tick() -> None:
             # Recovery should not depend on finding the same instrument again.
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
                 for listing in db.pending():
+                    if source_review_hold(listing.get('url','')):
+                        continue
                     if classify(listing):
                         db.discard_pending(listing.get("url", ""))
                         continue
@@ -547,6 +568,8 @@ async def _notification_tick() -> None:
                     listing["verification"], listing["liveness"] = state, why
                     await _deliver(notifier, db, prices, [listing])
                 for listing, info in db.pending_price_drops():
+                    if source_review_hold(listing.get('url','')):
+                        continue
                     if classify(listing):
                         db.finish_price_drop(listing.get("url", ""))
                         continue
@@ -682,6 +705,8 @@ async def _run_search_cycle(*, force_discovery: bool = False, scheduled: bool = 
 
         try:
             for listing, info in db.pending_price_drops():
+                if source_review_hold(listing.get('url','')):
+                    continue
                 if classify(listing):
                     db.finish_price_drop(listing.get("url", ""))
                     continue
@@ -755,6 +780,8 @@ async def _run_search_cycle(*, force_discovery: bool = False, scheduled: bool = 
                     checked_drops = []
                     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
                         for listing, info in all_drops:
+                            if source_review_hold(listing.get('url','')):
+                                continue
                             if listing.get('source') != 'search':
                                 listing['_direct_item_candidate'] = True
                             state, why = await _verify_delivery_offer(listing, http)

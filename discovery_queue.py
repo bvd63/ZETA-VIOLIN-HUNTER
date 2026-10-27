@@ -49,6 +49,8 @@ class DiscoveryQueue:
 
     def claim(self, limit: int, now: float = None) -> list:
         now = time.time() if now is None else now
+        from source_review import active_holds, hold_reason
+        holds = active_holds()
         self.conn.execute("BEGIN IMMEDIATE")
         try:
             if self.namespace.startswith('search:'):
@@ -73,6 +75,13 @@ class DiscoveryQueue:
                 (self.namespace, now)) if is_disabled_source(key)]
             self.conn.executemany("UPDATE discovery_queue SET next_attempt=? WHERE namespace=? AND key=?",
                                   [(253402300799, self.namespace, key) for key in disabled])
+            # Retain quarantined work without consuming other sources' claims.
+            if holds:
+                held = [key for (key,) in self.conn.execute(
+                    'SELECT key FROM discovery_queue WHERE namespace=? AND next_attempt<=?',
+                    (self.namespace,now)) if hold_reason(key,holds)]
+                self.conn.executemany('UPDATE discovery_queue SET next_attempt=? WHERE namespace=? AND key=?',
+                                     [(now+3600,self.namespace,key) for key in held])
             oldest = max(1, limit // 4) if limit > 0 else 0
             rows = self.conn.execute("""SELECT key,payload FROM discovery_queue
                 WHERE namespace=? AND next_attempt<=? ORDER BY next_attempt,created LIMIT ?""",

@@ -81,10 +81,16 @@ class TelegramNotifier:
         return {"inline_keyboard": rows}
 
     async def _send_violin(self, listing: dict, text: str, *, event: str = "new", photo: bool = True) -> bool:
+        from source_review import hold_reason
+        if hold_reason(listing.get('url','')):
+            log.info('Notification retained: source under owner-requested review')
+            return False
         from alert_receipts import AlertReceipts
         receipts = AlertReceipts()
         try:
             receipt_id = receipts.prepare(self.chat_id, listing, text, event)
+            if hold_reason(listing.get('url','')):
+                return False
             if receipts.was_delivered(receipt_id):
                 # Reconcile an accepted message after a crash before the batch
                 # updated delivered_urls. Reuse its existing reminder/ack state.
@@ -96,6 +102,8 @@ class TelegramNotifier:
             if photo and Config.SEND_PHOTOS and image_url and len(text) <= CAPTION_LIMIT:
                 data = await self._request("sendPhoto", {**options, "photo": image_url, "caption": text})
             if not data:
+                if hold_reason(listing.get('url','')):
+                    return False
                 data = await self._request("sendMessage", {**options, "text": text, "disable_web_page_preview": False})
             if not data:
                 receipts.push_immediately(receipt_id)
@@ -140,7 +148,11 @@ class TelegramNotifier:
             if sent:
                 delivered.append(listing)
             else:
-                log.warning(f"NOT delivered (will retry next cycle): {listing.get('title', '')[:60]}")
+                from source_review import hold_reason
+                if hold_reason(listing.get('url','')):
+                    log.info('Candidate retained during source review; no notification attempted')
+                else:
+                    log.warning(f"NOT delivered (will retry next cycle): {listing.get('title', '')[:60]}")
             if i < len(listings):
                 await asyncio.sleep(1.5)
         return delivered
@@ -321,6 +333,10 @@ class TelegramNotifier:
 
     async def send_digest(self, active: list, gone: list, price_stats: dict):
         """Weekly overview: live Zeta listings, ones that disappeared (probably sold), price stats."""
+        from source_review import active_holds, hold_reason
+        holds = active_holds()
+        active = [r for r in active if not hold_reason(r.get('url',''),holds)]
+        gone = [r for r in gone if not hold_reason(r.get('url',''),holds)]
         lines = [f"📰 <b>ZETA VIOLIN HUNTER — rezumat săptămânal</b>",
                  f"🎻 {len(active)} anunț(uri) active, {len(gone)} dispărute în ultimele 2 săptămâni"]
         for r in active[:20]:
