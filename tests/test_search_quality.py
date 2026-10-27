@@ -370,6 +370,72 @@ class QualityTests(unittest.TestCase):
         self.assertEqual([q for q,_ in google],[q for q,_ in brave])
         self.assertTrue(all('dateRestrict' not in p for _,p in google[len(GLOBAL_QUERIES):]))
 
+    def test_easy_live_primary_closed_cannot_be_overridden_by_price_or_watch_buttons(self):
+        url='https://www.easyliveauction.com/catalogue/lot/abc/def/music-lot-3457/'
+        page='''<h1>Zeta electric violin</h1><h4>Hammer</h4><p>£3400</p><p>Watch Lot · Price Guide</p>
+          <div class="auction-section"><div class="lot-status"><div><div class="text-center status">
+          <span class="h4 text-warning"><strong>Closed</strong></span></div></div> Auction Date:12th Jun26</div></div>'''
+        state,reason=inspect_page({**violin(),'url':url},page,200,url)
+        self.assertEqual(state,'dead');self.assertIn('Easy Live Auction',reason)
+
+    def test_easy_live_related_closed_does_not_close_active_primary(self):
+        url='https://www.easyliveauction.com/catalogue/lot/abc/def/music-lot-3457/'
+        page='''<main><h1>Zeta electric violin</h1><p>Current bid £1500</p><button>Place bid</button>
+        <div class="auction-section"><div class="lot-status"><div class="status">Open</div></div></div>
+        <aside><div class="auction-section"><div class="lot-status"><div class="status">Closed</div></div></div></aside></main>'''
+        self.assertEqual(inspect_page({**violin(),'url':url},page,200,url)[0],'live')
+
+    def test_replacement_push_cannot_keep_an_old_closed_receipt_after_uncertain_post(self):
+        from alert_receipts import AlertReceipts
+        receipts=AlertReceipts()
+        try:
+            rid=receipts.prepare('replacement-owner',violin(117799),'fixture')
+            receipts.push_starting(rid);receipts.push_sent(rid,'A'*30,now=1000);receipts.push_finished(rid)
+            receipts.push_starting(rid)  # new POST response may never be received
+            self.assertEqual(receipts.conn.execute('SELECT push_receipt,push_expires,push_closed FROM alert_receipts WHERE id=?',(rid,)).fetchone(),(None,None,None))
+            receipts.close_technically(rid,'replacement-owner','closed item')
+            receipts.push_finished(rid)  # cancellation can race a lost POST response
+            receipts.push_failed(rid)
+            self.assertTrue(receipts.push_active('replacement-owner')[0]['technically_closed'])
+            self.assertIsNone(receipts.conn.execute('SELECT acknowledged_at FROM alert_receipts WHERE id=?',(rid,)).fetchone()[0])
+        finally:
+            receipts.close()
+
+    def test_tavily_usage_preserves_unlimited_key_and_only_whitelisted_totals(self):
+        from provider_metering import tavily_usage
+        data={'key':{'usage':61,'limit':None,'api_key':'do-not-store'},
+              'account':{'plan_usage':61,'plan_limit':1500,'paygo_usage':0,'paygo_limit':0,
+                         'current_plan':'Researcher','email':'do-not-store'},'token':'do-not-store'}
+        saved=tavily_usage(data,100)
+        self.assertIsNone(saved['key']['limit'])
+        self.assertEqual(saved['account']['plan_limit'],1500)
+        self.assertNotIn('do-not-store',json.dumps(saved))
+
+    def test_tavily_malformed_usage_does_not_become_zero_or_unlimited(self):
+        from provider_metering import tavily_usage
+        for invalid in ({}, {'key':{'usage':None,'limit':None},'account':{'plan_usage':1,'plan_limit':1000}},
+                        {'key':{'usage':1,'limit':True},'account':{'plan_usage':1,'plan_limit':1000}},
+                        {'key':{'usage':float('nan'),'limit':1000},'account':{'plan_usage':1,'plan_limit':1000}}):
+            with self.subTest(invalid=invalid),self.assertRaises(ValueError):
+                tavily_usage(invalid,100)
+
+    def test_tavily_zero_key_cap_is_different_from_no_key_cap(self):
+        from resource_monitor import warning_events
+        account={'checked':time.time(),'key':{'usage':0,'limit':None},'account':{'plan_usage':1,'plan_limit':1000}}
+        self.assertFalse(any(key.startswith('tavily:account:') for key,_ in warning_events({'tavily_account':account})))
+        account['key']['limit']=0
+        self.assertTrue(any(key=='tavily:account:3' for key,_ in warning_events({'tavily_account':account})))
+
+    def test_tavily_resource_display_dates_and_labels_stale_totals(self):
+        from resource_monitor import text
+        data={'pushover':{'configured':False},'tavily_account':{
+            'checked':time.time()-13*3600,'key':{'usage':61,'limit':None},
+            'account':{'plan_usage':61,'plan_limit':1500}}}
+        with patch('resource_monitor.snapshot',return_value=data):
+            result=text()
+        self.assertIn('verificat',result)
+        self.assertIn('Tavily pot fi vechi',result)
+
 
 class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -573,6 +639,54 @@ class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await scraper.search(),[])
         self.assertTrue(scraper.skipped)
         mark.assert_not_called();cursor.assert_not_called()
+
+    async def test_technical_closure_survives_late_sends_without_false_owner_read(self):
+        from alert_receipts import AlertReceipts
+        receipts=AlertReceipts()
+        try:
+            rid=receipts.prepare('technical-owner',violin(445566),'fixture')
+            receipts.delivered(rid,1,now=1000);receipts.push_starting(rid)
+            self.assertFalse(receipts.close_technically(rid,'wrong-chat','closed lot'))
+            self.assertTrue(receipts.close_technically(rid,'technical-owner','primary Closed; not owner read'))
+            receipts.delivered(rid,1,now=2000)
+            receipts.reminder_result(rid,True,now=2000)
+            receipts.push_immediately(rid)
+            receipts.push_sent(rid,'A'*30,now=2000)  # response raced the technical stop
+            receipts.push_failed(rid)
+            self.assertFalse(receipts.is_pending(rid))
+            self.assertEqual(receipts.pending_count('technical-owner'),0)
+            self.assertEqual(receipts.claim_due('technical-owner',now=10**10),[])
+            self.assertEqual(receipts.claim_push_due('technical-owner',now=10**10),[])
+            row=receipts.conn.execute('SELECT acknowledged_at,next_reminder,push_next_attempt FROM alert_receipts WHERE id=?',(rid,)).fetchone()
+            self.assertEqual(row,(None,None,None))
+            self.assertTrue(receipts.push_active('technical-owner')[0]['technically_closed'])
+            from pushover_notifier import PushoverNotifier
+            push=PushoverNotifier()
+            with patch.object(push,'is_configured',return_value=True),patch.object(push,'cancel',AsyncMock(return_value=True)) as cancel, \
+                 patch.object(push,'request',AsyncMock(side_effect=AssertionError('no new emergency'))):
+                await push.tick('technical-owner')
+                cancel.assert_awaited_once_with(rid)
+            self.assertEqual(receipts.push_active('technical-owner'),[])
+        finally:
+            receipts.close()
+
+    async def test_tavily_account_refresh_is_read_only_and_does_not_store_secret_fields(self):
+        from resource_monitor import refresh_accounts
+        from provider_state import read
+        data={'key':{'usage':10,'limit':None,'api_key':'not-a-real-secret'},
+              'account':{'plan_usage':10,'plan_limit':1500,'paygo_usage':0,'paygo_limit':0}}
+        async def get(client,url,**kwargs):
+            self.assertEqual(url,'https://api.tavily.com/usage')
+            self.assertEqual(kwargs['headers']['Authorization'],'Bearer fixture')
+            return httpx.Response(200,json=data,request=httpx.Request('GET',url))
+        with patch('resource_monitor.claim_window',return_value=True), \
+             patch.multiple(Config,APIFY_TOKEN='',PUSHOVER_APP_TOKEN='',TAVILY_API_KEY='fixture'), \
+             patch('httpx.AsyncClient.get',get), \
+             patch('httpx.AsyncClient.post',AsyncMock(side_effect=AssertionError('no paid POST'))):
+            await refresh_accounts()
+        saved=read('tavily:account')
+        self.assertEqual(saved['account']['plan_usage'],10)
+        self.assertNotIn('not-a-real-secret',json.dumps(saved))
 
 
 if __name__ == '__main__':

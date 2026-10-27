@@ -96,6 +96,7 @@ def snapshot() -> dict:
                       "period": "ultimele 31 zile", "health": read(name + ":health", {})}
     data["apify_account"] = read("apify:account", {})
     data['apify_forecast'] = apify_forecast(data['apify_account'],now)
+    data['tavily_account'] = read('tavily:account', {})
     data['backup'] = read('operations:backup', {})
     data['detail_worker'] = read('detail_worker:health', {})
     data["pushover"] = {"configured": bool(Config.PUSHOVER_APP_TOKEN and Config.PUSHOVER_USER_KEY),
@@ -134,6 +135,19 @@ async def refresh_accounts() -> None:
                 cached.update({"error": type(exc).__name__, "failed_at": time.time()})
                 write("apify:account", cached)
                 log.warning("Apify metering unavailable (%s)", type(exc).__name__)
+        if Config.TAVILY_API_KEY:
+            cached = read('tavily:account', {})
+            try:
+                from provider_metering import tavily_usage
+                sampled_before = time.time()
+                response = await client.get('https://api.tavily.com/usage',
+                    headers={'Authorization':'Bearer '+Config.TAVILY_API_KEY})
+                response.raise_for_status()
+                write('tavily:account', tavily_usage(response.json(),sampled_before))
+            except (httpx.HTTPError,ValueError,KeyError,TypeError) as exc:
+                cached.update(error=type(exc).__name__,failed_at=time.time())
+                write('tavily:account',cached)
+                log.warning('Tavily usage metering unavailable (%s); search remains independent',type(exc).__name__)
         if Config.PUSHOVER_APP_TOKEN:
             from pushover_notifier import PushoverNotifier
             push = PushoverNotifier()
@@ -174,6 +188,20 @@ def warning_events(data: dict) -> list:
             level = "exhausted" if account['usage_usd'] >= included else "95" if account['usage_usd'] >= included * .95 else "80"
             result.append((f"apify:account:{level}", f"Apify cont: consum ${account['usage_usd']:.2f} din ${included:.2f} incluse în plan; alte taxe/credite pot exista."))
     push = data.get("pushover", {})
+    tavily = data.get('tavily_account', {})
+    if not tavily.get('error') and tavily.get('checked',0) > time.time()-12*3600:
+        scopes = [('plan',tavily.get('account',{}),'plan_usage','plan_limit'),
+                  ('cheie',tavily.get('key',{}),'usage','limit')]
+        high = []
+        for label,row,usage_key,limit_key in scopes:
+            amount,limit = row.get(usage_key),row.get(limit_key)
+            if isinstance(amount,(int,float)) and isinstance(limit,(int,float)) and (limit==0 or amount >= limit*.8):
+                level = 3 if amount>=limit else 2 if amount>=limit*.95 else 1
+                high.append((level,f'{label}: {amount:g}/{limit:g} credite'))
+        if high:
+            result.append(('tavily:account:'+str(max(x[0] for x in high)),
+                'Tavily consum real — '+ '; '.join(x[1] for x in high) +
+                '. Limita cheii și planul sunt separate; pay-as-you-go nu este activat de bot.'))
     if push.get("configured") and (push.get("health") or {}).get("error"):
         result.append(("pushover:access:" + str(push["health"]["error"]),
                        "Pushover: canalul suplimentar raportează o eroare; verifică /resurse."))
@@ -204,6 +232,15 @@ def text() -> str:
         lines.append("Plafonul contului și creditele incluse sunt diferite de soldul disponibil.")
     if account.get("error"):
         lines.append("⚠️ Actualizarea consumului Apify a eșuat; valorile păstrate pot fi vechi.")
+    tavily = data.get('tavily_account', {})
+    if tavily.get('checked'):
+        plan,key = tavily.get('account',{}),tavily.get('key',{})
+        key_limit = 'fără limită proprie' if key.get('limit') is None else str(key['limit'])
+        checked = datetime.fromtimestamp(tavily['checked'],timezone.utc).strftime('%d.%m %H:%M UTC')
+        lines.append(f"Tavily cont: {plan.get('plan_usage','?')}/{plan.get('plan_limit','?')} credite plan; "
+                     f"cheie {key.get('usage','?')}/{key_limit} (verificat {checked}). Pay-as-you-go este separat.")
+    if tavily.get('error') or tavily.get('checked',time.time()) < time.time()-12*3600:
+        lines.append('⚠️ Datele contului Tavily pot fi vechi; rezervările locale nu sunt soldul contului.')
     push = data["pushover"]
     lines.append("🔔 Pushover: " + ("configurat" if push["configured"] else "neconfigurat; Telegram rămâne activ"))
     if push.get("quota"):

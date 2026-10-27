@@ -104,6 +104,13 @@ def primary_closed_reason(soup, host: str) -> str:
         for status in soup.select('span.h4.text-warning, strong'):
             if status.get_text(' ', strip=True).casefold() == 'closed':
                 return 'Gardiner Houlgate: lot încheiat'
+    if host.removeprefix('www.') == 'easyliveauction.com':
+        for status in soup.select('.auction-section .lot-status .status'):
+            if any(p.name in ('aside','nav','footer') or any(word in ' '.join(p.get('class', [])).lower()
+                    for word in ('recommend','related','lot-nav-carousel')) for p in status.parents):
+                continue
+            if status.get_text(' ',strip=True).casefold() == 'closed':
+                return 'Easy Live Auction: starea primară a lotului este Closed'
     if host.removeprefix('www.') == 'musicalinstrument-auctions.co.uk':
         date = gardiner_sale_date(soup)
         if date and date < datetime.now(ZoneInfo('Europe/London')).date():

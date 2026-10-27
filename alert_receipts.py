@@ -9,6 +9,8 @@ import time
 from database import canonical_url, connect
 from config import Config
 
+OPEN_ALERT = 'NOT EXISTS (SELECT 1 FROM operator_alert_closures c WHERE c.receipt_id=alert_receipts.id)'
+
 
 class AlertReceipts:
     def __init__(self):
@@ -19,6 +21,8 @@ class AlertReceipts:
             delivered_at REAL, acknowledged_at REAL, next_reminder REAL,
             reminder_count INTEGER NOT NULL DEFAULT 0, message_id INTEGER
         )""")
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS operator_alert_closures (
+            receipt_id TEXT PRIMARY KEY,reason TEXT NOT NULL,closed_at REAL NOT NULL)''')
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(alert_receipts)")}
         for name, kind in (("push_receipt", "TEXT"), ("push_expires", "REAL"),
                            ("push_next_attempt", "REAL"), ("push_closed", "REAL"),
@@ -55,9 +59,9 @@ class AlertReceipts:
 
     def delivered(self, receipt_id: str, message_id: int = None, now: float = None) -> None:
         now = time.time() if now is None else now
-        self.conn.execute("""UPDATE alert_receipts SET
+        self.conn.execute(f"""UPDATE alert_receipts SET
             delivered_at=coalesce(delivered_at,?), message_id=?,
-            next_reminder=CASE WHEN delivered_at IS NULL AND acknowledged_at IS NULL
+            next_reminder=CASE WHEN delivered_at IS NULL AND acknowledged_at IS NULL AND {OPEN_ALERT}
                 THEN ? ELSE next_reminder END WHERE id=?""",
             (now, message_id, now + Config.ALERT_FIRST_REMINDER_MINUTES * 60, receipt_id))
         self.conn.commit()
@@ -72,8 +76,30 @@ class AlertReceipts:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def close_technically(self, receipt_id: str, chat_id: str, reason: str) -> bool:
+        """Stop an erroneous alert without pretending the owner read it.
+
+        Remote/late Pushover sends remain recorded and are cancelled by tick.
+        This never changes identity filters, seen history or other alerts.
+        """
+        self.conn.execute('BEGIN IMMEDIATE')
+        try:
+            if not reason or not self.conn.execute('SELECT 1 FROM alert_receipts WHERE id=? AND chat_id=?',
+                                                   (receipt_id,str(chat_id))).fetchone():
+                self.conn.rollback()
+                return False
+            self.conn.execute('INSERT OR REPLACE INTO operator_alert_closures VALUES (?,?,?)',
+                              (receipt_id,reason[:500],time.time()))
+            self.conn.execute('UPDATE alert_receipts SET next_reminder=NULL,push_next_attempt=NULL WHERE id=?',
+                              (receipt_id,))
+            self.conn.commit()
+            return True
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def is_pending(self, receipt_id: str) -> bool:
-        return self.conn.execute("SELECT 1 FROM alert_receipts WHERE id=? AND acknowledged_at IS NULL",
+        return self.conn.execute(f"SELECT 1 FROM alert_receipts WHERE id=? AND acknowledged_at IS NULL AND {OPEN_ALERT}",
                                  (receipt_id,)).fetchone() is not None
 
     def claim_due(self, chat_id: str, now: float = None, limit: int = 5) -> list:
@@ -81,9 +107,9 @@ class AlertReceipts:
         now = time.time() if now is None else now
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            rows = self.conn.execute("""SELECT id,url,text,reminder_count,message_id FROM alert_receipts
+            rows = self.conn.execute(f"""SELECT id,url,text,reminder_count,message_id FROM alert_receipts
                 WHERE chat_id=? AND delivered_at IS NOT NULL AND acknowledged_at IS NULL
-                AND next_reminder<=? ORDER BY next_reminder LIMIT ?""", (str(chat_id), now, limit)).fetchall()
+                AND {OPEN_ALERT} AND next_reminder<=? ORDER BY next_reminder LIMIT ?""", (str(chat_id), now, limit)).fetchall()
             self.conn.executemany("UPDATE alert_receipts SET next_reminder=? WHERE id=?",
                                    [(now + 120, row[0]) for row in rows])
             self.conn.commit()
@@ -96,31 +122,32 @@ class AlertReceipts:
         now = time.time() if now is None else now
         # First reminder at 10min; subsequent ones every 30min, until confirmed.
         delay = Config.ALERT_REPEAT_MINUTES * 60 if success else 120
-        self.conn.execute("""UPDATE alert_receipts SET next_reminder=?,
-            reminder_count=reminder_count+? WHERE id=? AND acknowledged_at IS NULL""",
+        self.conn.execute(f"""UPDATE alert_receipts SET next_reminder=?,
+            reminder_count=reminder_count+? WHERE id=? AND acknowledged_at IS NULL AND {OPEN_ALERT}""",
             (now + delay, int(success), receipt_id))
         self.conn.commit()
 
     def pending_count(self, chat_id: str) -> int:
-        return self.conn.execute("""SELECT count(*) FROM alert_receipts WHERE chat_id=?
-            AND delivered_at IS NOT NULL AND acknowledged_at IS NULL""", (str(chat_id),)).fetchone()[0]
+        return self.conn.execute(f"""SELECT count(*) FROM alert_receipts WHERE chat_id=?
+            AND delivered_at IS NOT NULL AND acknowledged_at IS NULL AND {OPEN_ALERT}""", (str(chat_id),)).fetchone()[0]
 
     def push_immediately(self, receipt_id: str) -> None:
-        self.conn.execute("""UPDATE alert_receipts SET push_next_attempt=?
-            WHERE id=? AND acknowledged_at IS NULL AND push_receipt IS NULL AND push_attempts=0""", (time.time(), receipt_id))
+        self.conn.execute(f"""UPDATE alert_receipts SET push_next_attempt=?
+            WHERE id=? AND acknowledged_at IS NULL AND push_receipt IS NULL AND push_attempts=0 AND {OPEN_ALERT}""", (time.time(), receipt_id))
         self.conn.commit()
 
     def push_active(self, chat_id: str) -> list:
-        rows = self.conn.execute("""SELECT id,push_receipt,acknowledged_at,push_expires FROM alert_receipts
+        rows = self.conn.execute(f"""SELECT id,push_receipt,acknowledged_at,push_expires,NOT ({OPEN_ALERT}) FROM alert_receipts
             WHERE chat_id=? AND push_attempts>0 AND push_closed IS NULL LIMIT 100""", (str(chat_id),)).fetchall()
-        return [dict(zip(("id", "receipt", "acknowledged_at", "expires"), row)) for row in rows]
+        return [dict(zip(("id", "receipt", "acknowledged_at", "expires", "technically_closed"), row)) for row in rows]
 
     def claim_push_due(self, chat_id: str, now: float = None) -> list:
         now = time.time() if now is None else now
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            rows = self.conn.execute("""SELECT id,url,text,push_attempts FROM alert_receipts WHERE chat_id=?
+            rows = self.conn.execute(f"""SELECT id,url,text,push_attempts FROM alert_receipts WHERE chat_id=?
                 AND acknowledged_at IS NULL AND push_next_attempt<=?
+                AND {OPEN_ALERT}
                 AND (push_receipt IS NULL OR push_expires<=?) ORDER BY push_next_attempt LIMIT 5""",
                 (str(chat_id), now, now)).fetchall()
             self.conn.executemany("UPDATE alert_receipts SET push_next_attempt=? WHERE id=?",
@@ -132,7 +159,10 @@ class AlertReceipts:
         return [dict(zip(("id", "url", "text", "attempts"), row)) for row in rows]
 
     def push_starting(self, receipt_id: str) -> None:
-        self.conn.execute("UPDATE alert_receipts SET push_attempts=push_attempts+1 WHERE id=?", (receipt_id,))
+        # The previous alarm was cancelled before replacement. Persist a new,
+        # uncertain attempt before POST; an old closed receipt must not mask it.
+        self.conn.execute("""UPDATE alert_receipts SET push_attempts=push_attempts+1,
+            push_receipt=NULL,push_expires=NULL,push_closed=NULL WHERE id=?""", (receipt_id,))
         self.conn.commit()
 
     def push_sent(self, receipt_id: str, receipt: str, now: float = None) -> None:
@@ -140,8 +170,8 @@ class AlertReceipts:
         expires = now + Config.PUSHOVER_EXPIRE_SECONDS
         # Save even if acknowledgement raced the network request: the next tick
         # must know the receipt so it can cancel the remote alarm.
-        self.conn.execute("""UPDATE alert_receipts SET push_receipt=?,push_expires=?,push_closed=NULL,
-            push_next_attempt=CASE WHEN acknowledged_at IS NULL THEN ? ELSE NULL END WHERE id=?""",
+        self.conn.execute(f"""UPDATE alert_receipts SET push_receipt=?,push_expires=?,push_closed=NULL,
+            push_next_attempt=CASE WHEN acknowledged_at IS NULL AND {OPEN_ALERT} THEN ? ELSE NULL END WHERE id=?""",
             (receipt, expires, expires, receipt_id))
         self.conn.commit()
 
@@ -150,8 +180,10 @@ class AlertReceipts:
         self.conn.commit()
 
     def push_failed(self, receipt_id: str) -> None:
-        self.conn.execute("""UPDATE alert_receipts SET push_next_attempt=?
-            WHERE id=? AND acknowledged_at IS NULL""", (time.time() + 300, receipt_id))
+        self.conn.execute(f"""UPDATE alert_receipts SET
+            push_next_attempt=CASE WHEN acknowledged_at IS NULL AND {OPEN_ALERT} THEN ? ELSE NULL END,
+            push_closed=CASE WHEN push_attempts>0 AND (acknowledged_at IS NOT NULL OR NOT ({OPEN_ALERT}))
+                THEN NULL ELSE push_closed END WHERE id=?""", (time.time() + 300, receipt_id))
         self.conn.commit()
 
     def close(self) -> None:

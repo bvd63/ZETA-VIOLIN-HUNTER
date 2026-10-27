@@ -67,7 +67,7 @@ class PushoverNotifier:
         receipts = AlertReceipts()
         try:
             for alert in receipts.push_active(chat_id):
-                if alert["acknowledged_at"] is not None:
+                if alert["acknowledged_at"] is not None or alert.get('technically_closed'):
                     if await self.cancel(alert["id"]):
                         receipts.push_finished(alert["id"])
                     continue
