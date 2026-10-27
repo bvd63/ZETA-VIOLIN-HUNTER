@@ -293,12 +293,19 @@ async def verify_offer(listing: dict, client) -> tuple:
         return "non_sale", "URL public invalid"
     from facebook_discovery import cached_offer
     facebook = cached_offer(url)
-    if facebook and facebook['checked'] >= time.time() - 6 * 3600:
+    if facebook:
         verified = facebook['listing']
         if verified.get('apify_is_sold') is True:
             return 'dead', 'Facebook: vândut la verificarea detaliilor'
+        if (verified.get('apify_is_pending') is True or verified.get('apify_is_hidden') is True
+                or verified.get('apify_is_live') is False):
+            origin = listing.get('source')
+            listing.update(verified)
+            if origin:
+                listing['source'] = origin
+            return 'unknown', 'Facebook: rezervat, ascuns sau momentan indisponibil'
         from scrapers.apify_facebook import available
-        if available(verified):
+        if facebook['checked'] >= time.time() - 6 * 3600 and available(verified):
             origin = listing.get('source')
             listing.update(verified)
             if origin:

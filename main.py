@@ -78,6 +78,7 @@ DROP_REASON_LABELS = {
     "intent": "non-sale intent",
     "sold": "sold/ended",
     "non_zeta": "non-Zeta-violin",
+    "availability_hold": "reserved/hidden/temporarily unavailable",
     "url": "invalid-url",
     "non_sale": "article/review without an instrument for sale",
     "unverified": "offer availability could not be verified",

@@ -77,7 +77,10 @@ def cached_offer(url: str) -> dict:
         row = conn.execute('SELECT details,checked FROM apify_items WHERE url=?',
                            (f'https://www.facebook.com/marketplace/item/{item_id(url)}/',)).fetchone()
         if row and row[0]:
-            return {'listing':json.loads(row[0]),'checked':row[1]}
+            listing = json.loads(row[0])
+            if not isinstance(listing,dict) or item_id(listing.get('url','')) != item_id(url):
+                return {}  # Never transfer another item's sold/live evidence.
+            return {'listing':listing,'checked':row[1]}
         return {}
     finally:
         conn.close()

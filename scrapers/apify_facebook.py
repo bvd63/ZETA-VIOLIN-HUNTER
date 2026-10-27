@@ -20,7 +20,7 @@ import httpx
 
 from config import Config
 from database import connect
-from filters import classify, has_zeta_signal, has_violin_word
+from filters import classify, has_zeta_signal, has_violin_word, has_primary_identity
 from keywords import STRING_VARIANTS, preference_matches
 from scrapers.base import BaseScraper
 from apify_costs import ensure_table, spent_micro, settle
@@ -119,6 +119,49 @@ def normalize(row: dict) -> dict:
 def available(listing: dict) -> bool:
     return (listing.get("apify_is_live") is True and listing.get("apify_is_sold") is False
             and listing.get("apify_is_pending") is False and listing.get("apify_is_hidden") is not True)
+
+
+def unavailable(listing: dict) -> bool:
+    return (listing.get('apify_is_sold') is True or listing.get('apify_is_pending') is True
+            or listing.get('apify_is_hidden') is True or listing.get('apify_is_live') is False)
+
+
+def retain_known_negative_flags(listing: dict, *previous: dict) -> dict:
+    """An omitted flag is not a reactivation of the same item."""
+    listing = dict(listing)
+    for old in previous:
+        if not old or old.get('url') != listing.get('url'):
+            continue
+        for key,negative in (('apify_is_live',False),('apify_is_sold',True),
+                             ('apify_is_pending',True),('apify_is_hidden',True)):
+            if listing.get(key) is None and old.get(key) is negative:
+                listing[key] = negative
+    return listing
+
+
+def unknown_candidate(candidate: dict, details: dict | None, checked: float, cutoff: float) -> dict | None:
+    """Strong identity can reach the shared unknown-availability route.
+
+    A saved discovery card never becomes verified detail. Explicit negative
+    evidence wins, and a complete fresh primary result cannot borrow its title.
+    """
+    if details and details.get('url') != candidate.get('url'):
+        details = None
+    if unavailable(candidate) or (details and unavailable(details)):
+        return None
+    if details and details.get('url') == candidate.get('url'):
+        if checked >= cutoff and all(details.get(k) is not None for k in
+                ('apify_is_live','apify_is_sold','apify_is_pending')):
+            return None
+        if classify(details) in ('noise','other_brand','intent','new_stock'):
+            return None
+    if classify(candidate) or not has_primary_identity(candidate):
+        return None
+    result = {**candidate, 'source':'search', '_direct_item_candidate':True,
+              '_facebook_unverified_details':True}
+    for key in ('verification','liveness','_primary_content_checked','apify_checked_at'):
+        result.pop(key,None)
+    return result
 
 
 def regional_plan(cursor: int) -> list:
@@ -314,7 +357,31 @@ class ApifyFacebookScraper(BaseScraper):
                 if not listing:
                     continue
                 self.fetched += 1
+                observed_negative = unavailable(listing)
+                previous = conn.execute('SELECT candidate,details,checked FROM apify_items WHERE url=?',
+                                        (listing['url'],)).fetchone()
+                if previous:
+                    listing = retain_known_negative_flags(listing,json.loads(previous[0]),
+                                json.loads(previous[1]) if previous[1] else {})
                 if phase == "discovery":
+                    # Keep new negative evidence for an existing URL even when
+                    # it is no longer an eligible discovery result. Otherwise
+                    # stale verified details/unknown cards could still alert.
+                    if previous and unavailable(listing):
+                        flags = {k:listing[k] for k in ('apify_is_live','apify_is_sold','apify_is_pending','apify_is_hidden')
+                                 if listing.get(k) is not None}
+                        candidate = {**json.loads(previous[0]), **flags}
+                        old_detail = json.loads(previous[1]) if previous[1] else {}
+                        if old_detail.get('url') != listing['url']:
+                            old_detail = candidate
+                        detail = {**old_detail, **flags}
+                        conn.execute('UPDATE apify_items SET candidate=?,details=?,checked=? WHERE url=?',
+                                     (json.dumps(candidate),json.dumps(detail),
+                                      time.time() if observed_negative else previous[2],listing['url']))
+                    elif previous and available(listing) and previous[1] and unavailable(json.loads(previous[1])):
+                        # An explicitly reactivated card invalidates an old
+                        # hold; full detail is checked again in the same slots.
+                        conn.execute('UPDATE apify_items SET details=NULL,checked=0 WHERE url=?',(listing['url'],))
                     reason = discovery_reason(listing)
                     if reason or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
                         log.info("Apify discovery %s rejected: %s", listing["url"], reason or "sold/pending")
@@ -341,6 +408,13 @@ class ApifyFacebookScraper(BaseScraper):
                     conn.execute("UPDATE apify_items SET details=?, checked=? WHERE url=?",
                                  (json.dumps(listing, ensure_ascii=False), 0 if incomplete else time.time(), url))
                     if not incomplete:
+                        current = conn.execute('SELECT candidate FROM apify_items WHERE url=?',(url,)).fetchone()
+                        if current:
+                            saved = json.loads(current[0])
+                            saved.update({k:listing[k] for k in
+                                ('apify_is_live','apify_is_sold','apify_is_pending','apify_is_hidden')
+                                if listing.get(k) is not None})
+                            conn.execute('UPDATE apify_items SET candidate=? WHERE url=?',(json.dumps(saved),url))
                         conn.execute('DELETE FROM apify_item_attempts WHERE url=?', (url,))
             if phase == 'details':
                 if expected - observed:
@@ -396,9 +470,14 @@ class ApifyFacebookScraper(BaseScraper):
                             WHERE i.checked<? AND coalesce(a.next_attempt,0)<=?
                             ORDER BY i.checked,i.url''', (cutoff, time.time())):
                         listing = json.loads(candidate)
-                        if discovery_reason(listing) or listing["apify_is_sold"] is True or listing["apify_is_pending"] is True:
+                        # Temporary holds are not terminal. After the unchanged
+                        # detail TTL they can use the same two retry slots even
+                        # if discovery never returns their URL again.
+                        identity = {**listing, **{k:None for k in
+                            ('apify_is_live','apify_is_sold','apify_is_pending','apify_is_hidden')}}
+                        if discovery_reason(identity) or listing["apify_is_sold"] is True:
                             continue
-                        queue.append((bool(classify(listing)), not bool(preference_matches(listing)), {"url": url}))
+                        queue.append((bool(classify(identity)), not bool(preference_matches(listing)), {"url": url}))
                     # One preferred slot, one oldest eligible slot: old Strados
                     # and uncertain identities remain queued without starvation.
                     queue.sort(key=lambda entry: entry[0])
@@ -417,19 +496,38 @@ class ApifyFacebookScraper(BaseScraper):
             self.failures.append("Apify collection deferred: " + label)
             log.warning("Apify collection deferred (%s); reservations and known run IDs retained", label)
         ready = []
+        verified_count = unknown_count = 0
         try:
             with store() as conn:
                 # Reapply current rules to every fresh verified record, including
                 # previously rejected instruments. Main's delivery DB deduplicates.
-                for (details,) in conn.execute("SELECT details FROM apify_items WHERE details IS NOT NULL AND checked>=? ORDER BY url", (cutoff,)):
-                    listing = json.loads(details)
+                for candidate, details, checked in conn.execute('SELECT candidate,details,checked FROM apify_items ORDER BY url'):
+                    candidate = json.loads(candidate)
+                    listing = json.loads(details) if details else None
+                    if listing and listing.get('url') != candidate.get('url'):
+                        self.failures.append('Apify cached detail ID mismatch; original candidate retained')
+                        conn.execute('UPDATE apify_items SET checked=0 WHERE url=?',(candidate['url'],))
+                        listing = None
+                    fallback = unknown_candidate(candidate,listing,checked,cutoff)
+                    if fallback:
+                        ready.append(fallback)
+                        unknown_count += 1
+                        continue
+                    if not listing or checked < cutoff:
+                        continue
+                    if unavailable(candidate):
+                        continue
                     reason = classify(listing)
                     if available(listing) and not reason:
                         ready.append(listing)
+                        verified_count += 1
                         log.info("Apify detail %s eligible", listing["url"])
                     else:
                         log.info("Apify detail %s withheld: %s", listing["url"], reason or "availability unconfirmed/sold/pending/hidden")
+                conn.commit()
         except Exception as exc:
             self.failures.append("Apify cache unavailable: " + type(exc).__name__)
-        log.info("Apify Facebook: %d fetched, %d verified candidates; %s", self.fetched, len(ready), self.health_error() or "OK")
+        self.coverage_stats = {'cached_verified_details':verified_count,'strong_unverified_candidates':unknown_count}
+        log.info("Apify Facebook: %d fetched, %d verified, %d strong unverified candidates; %s",
+                 self.fetched,verified_count,unknown_count,self.health_error() or "OK")
         return ready

@@ -526,6 +526,11 @@ def classify(listing: dict) -> str:
     from config import Config  # local import keeps filters importable in tests
     if listing.get("platform") in DISABLED_SCRAPERS or is_disabled_source(str(listing.get("url", ""))):
         return "disabled_source"
+    if listing.get('apify_is_sold') is True:
+        return 'sold'
+    if (listing.get('apify_is_pending') is True or listing.get('apify_is_hidden') is True
+            or listing.get('apify_is_live') is False):
+        return 'availability_hold'
     title, desc = _text(listing)
     if listing.get("source") == "search" and is_editorial_url(str(listing.get("url", ""))):
         return "non_sale"

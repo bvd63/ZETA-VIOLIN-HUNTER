@@ -34,3 +34,4 @@ jobs:
       - run: python -m tests.test_native_cards
       - run: python -m tests.test_native_asia_cards
       - run: python -m tests.test_apify_compare
+      - run: python -m tests.test_facebook_unknown
