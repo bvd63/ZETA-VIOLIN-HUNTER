@@ -10,7 +10,7 @@ from keywords import market_queries
 
 import logging
 from scrapers.base import BaseScraper
-from filters import has_zeta_signal
+from native_candidates import card_hints
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +54,8 @@ class MercariJPScraper(BaseScraper):
                             continue
 
                         name = getattr(item, "name", "") or ""
-                        if not has_zeta_signal(name):
+                        hints = card_hints(name, "", kw)
+                        if hints is None:
                             continue
 
                         unique_id = self._make_id("mercari_jp", item_id)
@@ -94,6 +95,7 @@ class MercariJPScraper(BaseScraper):
                             "date_posted": date_posted,
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(name),
+                            **hints,
                         })
                 except Exception as e:
                     log.warning(f"Mercari JP '{kw}' error: {e}")

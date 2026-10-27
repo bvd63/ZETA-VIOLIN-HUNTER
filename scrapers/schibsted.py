@@ -13,7 +13,7 @@ import json
 import logging
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
-from filters import has_zeta_signal
+from native_candidates import card_hints
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,8 @@ class SchibstedScraper(BaseScraper):
                             description = (p.get("description") or "").strip()
                             if not item_url or not title:
                                 continue
-                            if not has_zeta_signal(title + " " + description):
+                            hints = card_hints(title, description, kw)
+                            if hints is None:
                                 continue
                             unique_id = self._make_id(label.lower(), item_url)
                             if unique_id in seen_ids:
@@ -74,6 +75,7 @@ class SchibstedScraper(BaseScraper):
                                 continue
 
                             results.append({
+                                **hints,
                                 "id": unique_id,
                                 "platform": label,
                                 "title": title,

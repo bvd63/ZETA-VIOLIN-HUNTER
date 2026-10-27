@@ -41,6 +41,71 @@ def run(scraper, handler, browser=(0, ""), will_result=None, gum_result=None):
 
 
 class MarketplaceParserTests(unittest.TestCase):
+    def test_gumtree_legacy_title_and_paragraph_cannot_borrow_location_brand(self):
+        for heading in ('<h2>Electric violin</h2>', 'Electric violin'):
+            for location in ('span','p'):
+                html=('<article data-q="search-result"><a href="/p/violins/electric-violin/123456789">'
+                      +heading+f'<{location} data-q="tile-location">Zeta Road</{location}>'
+                      '<span data-q="tile-price">£500</span></a></article>')
+                for query in ('Zeta','electric violin'):
+                    with self.subTest(heading=heading,location=location,query=query), patch(
+                            'scrapers.gumtree.market_queries',return_value=[query]):
+                        found=run(GumtreeScraper(),lambda r:httpx.Response(200,text=html))
+                    self.assertEqual(len(found),int(query=='Zeta'))
+                    if found:
+                        self.assertEqual(found[0]['title'],'Electric violin')
+                        self.assertEqual(found[0]['description'],'')
+                        self.assertTrue(found[0]['_query_identity_unverified'])
+                        self.assertEqual(classify(found[0]),'non_zeta')
+
+    def test_gumtree_unscoped_legacy_body_is_a_lead_never_primary_identity(self):
+        html=('<article data-q="search-result"><a href="/p/violins/electric-violin/123456789">'
+              '<h2>Electric violin</h2></a><p>Used Zeta 4 string violin for sale</p></article>')
+        with patch('scrapers.gumtree.market_queries',return_value=['electric violin']):
+            found=run(GumtreeScraper(),lambda r:httpx.Response(200,text=html))
+        self.assertEqual(len(found),1)
+        self.assertEqual(found[0]['description'],'')
+        self.assertTrue(found[0]['_query_identity_unverified'])
+        self.assertEqual(classify(found[0]),'non_zeta')
+
+    def test_willhaben_sparse_cards_keep_query_without_asserting_identity(self):
+        payload={'text':'1 Anzeige', 'extras':{'links':[
+            '/iad/kaufen-und-verkaufen/d/electric-violin-123456/']}}
+        native=next_page({'rowsFound':1,'advertSummaryList':{'advertSummary':[
+            {'id':'123456','attributes':{'attribute':[
+                {'name':'HEADING','values':['Electric violin']},
+                {'name':'SEO_URL','values':['kaufen-und-verkaufen/d/electric-violin-123456/']} ]}}
+        ]}})
+        for query in ('Zeta', 'Yamaha'):
+            for fallback in (False, True):
+                with self.subTest(query=query, fallback=fallback), patch(
+                        'scrapers.willhaben.search_plan', return_value=[(query,SEARCH_URL)]):
+                    found=run(WillhabenScraper(), lambda r:httpx.Response(403 if fallback else 200,text=native),
+                              will_result=payload)
+                self.assertEqual(len(found), int(query=='Zeta'))
+                if found:
+                    self.assertEqual(found[0]['_native_search_query'], 'Zeta')
+                    self.assertTrue(found[0]['_query_identity_unverified'])
+                    self.assertEqual(classify(found[0]), 'non_zeta')
+
+    def test_gumtree_sparse_native_and_extracted_cards_keep_brand_query_only(self):
+        payload={'text':'# 1 ad for Zeta', 'extras':{'links':[
+            '/p/violins/electric-violin/123456789']}}
+        native=('<article data-q="search-result"><a href="/p/violins/electric-violin/123456789">'
+                '<h2>Electric violin</h2></a><span data-q="tile-location">Zeta Road</span></article>')
+        for query in ('Zeta', 'electric violin'):
+            for fallback in (False, True):
+                with self.subTest(query=query, fallback=fallback), patch(
+                        'scrapers.gumtree.market_queries', return_value=[query]):
+                    found=run(GumtreeScraper(), lambda r:httpx.Response(247 if fallback else 200,text=native),
+                              browser=(247,''), gum_result=payload)
+                self.assertEqual(len(found), int(query=='Zeta'))
+                if found:
+                    self.assertEqual(found[0]['description'], '')
+                    self.assertEqual(found[0]['_native_search_query'], 'Zeta')
+                    self.assertTrue(found[0]['_query_identity_unverified'])
+                    self.assertEqual(classify(found[0]), 'non_zeta')
+
     def test_gumtree_last_live_route_recovers_explicit_empty_after_two_blocks(self):
         payload={'text':'Jazz standard violin - Gumtree\n\n# 0 ads for jazz standard violin in All Classifieds',
                  'extras':{'links':[]}}

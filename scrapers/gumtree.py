@@ -13,6 +13,7 @@ import httpx
 from urllib.parse import urljoin, urlsplit, urlunsplit, unquote
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
+from native_candidates import card_hints
 from filters import has_zeta_signal
 from browser_fetch import PublicSearchBrowser
 from primary_page_reserve import fresh_gumtree_search
@@ -23,6 +24,14 @@ SEARCH_URL = "https://www.gumtree.com/search"
 # "electric violin" is broad on purpose: it always returns tiles (so the
 # watchdog sees the site alive) and the Zeta-signal filter picks any Zeta.
 PRICE_RX = re.compile(r"£\s?[\d,]+(?:\.\d{2})?")
+CARD_METADATA = "[data-q='tile-location'], [data-q='tile-price'], [data-testid='rh-standard-card-price'], [data-testid='rh-standard-card-location']"
+
+
+def _card_identity_text(element):
+    copy = BeautifulSoup(str(element), 'lxml')
+    for metadata in copy.select(CARD_METADATA):
+        metadata.decompose()
+    return copy.get_text(' ',strip=True)
 
 
 class GumtreeScraper(BaseScraper):
@@ -99,8 +108,16 @@ class GumtreeScraper(BaseScraper):
 
                     for tile in tiles:
                         text = tile["text"]
-                        if not has_zeta_signal(text):
+                        hints = card_hints(tile['title'], tile['description'], kw)
+                        if hints is None and has_zeta_signal(tile.get('_discovery_text', text)):
+                            # Preserve a weak lead found in an older layout;
+                            # seller/location/other card text is not identity.
+                            hints = {'_native_search_query': kw, '_query_identity_unverified': True,
+                                     '_native_identity_hint': 'unscoped card text'}
+                        if hints is None:
                             continue
+                        if tile.get('_identity_unscoped'):
+                            hints['_query_identity_unverified'] = True
                         unique_id = self._make_id("gumtree", tile["url"])
                         if unique_id in seen_ids:
                             continue
@@ -125,6 +142,7 @@ class GumtreeScraper(BaseScraper):
                             "description": tile["description"],
                             "image_url": tile["image"],
                             "relevance_score": self._relevance_score(title, tile["description"]),
+                            **hints,
                         })
                 except Exception as e:
                     log.warning(f"Gumtree '{kw}' error: {e}")
@@ -178,22 +196,27 @@ class GumtreeScraper(BaseScraper):
             seen.add(url)
             title_el = art.select_one("[data-q='tile-title'], [data-testid='rh-standard-card-title'], h2, h3")
             title = title_el.get_text(" ", strip=True) if title_el else ""
-            desc_el = art.select_one("[data-q='tile-description'], [data-testid='rh-standard-card-description'], p")
+            desc_el = art.select_one("[data-q='tile-description'], [data-testid='rh-standard-card-description']")
             description = desc_el.get_text(" ", strip=True) if desc_el else ""
             loc_el = art.select_one("[data-q='tile-location']")
             location = loc_el.get_text(" ", strip=True) if loc_el else ""
             text = art.get_text(" ", strip=True)
             if not title:
-                # First sentence of the tile text is the title
-                title = text.split(" £")[0][:120]
+                # Anchor text is a discovery clue if this layout has no scoped
+                # title. It must be re-read on the primary page before alerting.
+                title = a.get('title') or a.get('aria-label') or _card_identity_text(a)[:240]
             price_el = art.select_one("[data-q='tile-price'], [data-testid='rh-standard-card-price']")
             price_m = PRICE_RX.search(price_el.get_text(" ", strip=True) if price_el else text)
             img = art.select_one("img")
             image = (img.get("src") or img.get("data-src") or "") if img else ""
             tiles.append({
-                "url": url, "title": title, "description": description or text,
+                # Seller/location/price text is not the item's description.
+                # In particular "Zeta Road" must never establish its brand.
+                "url": url, "title": title, "description": description,
                 "location": location, "price": price_m.group(0) if price_m else "N/A",
                 "image": image if image.startswith("http") else "", "text": text,
+                '_identity_unscoped': title_el is None,
+                '_discovery_text': _card_identity_text(art),
             })
         if not tiles:
             # The current public empty page explicitly says "0 ads for ...".

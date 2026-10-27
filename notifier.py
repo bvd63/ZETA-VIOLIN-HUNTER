@@ -229,6 +229,14 @@ class TelegramNotifier:
             lines.append("ℹ️ Strados — model cu interes redus pentru tine.")
         if listing.get("auction") or "bid)" in price.lower():
             lines.append("🔨 Licitație — suma afișată poate fi oferta curentă, fără comisioane.")
+        if listing.get('auction_name'):
+            lines.append(f"🏛 {html.escape(str(listing['auction_name'])[:160])}")
+        if listing.get('auction_date') and not listing.get('auction_end'):
+            try:
+                date = datetime.fromisoformat(str(listing['auction_date'])[:10])
+                lines.append(f"📅 Data licitației anunțată: {date:%d.%m.%Y}")
+            except ValueError:
+                pass
         if listing.get("auction_end"):
             try:
                 from zoneinfo import ZoneInfo

@@ -11,7 +11,7 @@ from keywords import market_queries
 
 import logging
 from scrapers.base import BaseScraper, BROWSER_UA
-from filters import has_zeta_signal
+from native_candidates import card_hints
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +61,8 @@ class MarktplaatsScraper(BaseScraper):
                             description = (ad.get("description") or "").strip()
                             if not item_id or not title:
                                 continue
-                            if not has_zeta_signal(title + " " + description):
+                            hints = card_hints(title,description,kw)
+                            if hints is None:
                                 continue
                             unique_id = self._make_id(site_name.lower(), item_id)
                             if unique_id in seen_ids:
@@ -93,6 +94,7 @@ class MarktplaatsScraper(BaseScraper):
                                 "date_posted": self._date(str(ad.get("date") or "")),
                                 "image_url": image_url,
                                 "relevance_score": self._relevance_score(title, description),
+                                **hints,
                             })
                     except Exception as e:
                         log.warning(f"{site_name} '{kw}' error: {e}")

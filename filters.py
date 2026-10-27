@@ -113,6 +113,11 @@ ACCESSORY_CLAUSE_RX = _rx([
     "pickup", "bridge", "amplifier", "amp", "controller", "interface", "pedal",
     "synthony", "bow", "case", "cover", "string set",
 ])
+# Unambiguous pickup-object titles. Do not blacklist the word itself: complete
+# violins routinely advertise an original or replacement pickup in the title.
+PICKUP_OBJECT_TITLE_RX = re.compile(
+    r"\s*(?:(?:used|original|vintage|genuine|electric|midi)\s+)*"
+    r"(?:zeta\s+)?(?:violin\s+)?pickups?\s*[.!]?\s*", re.I)
 # A case listing can contain both "Zeta" and "violin" without selling a violin.
 # Require explicit bundle language to treat a case in the title as included gear.
 CASE_RX = _rx(["case", "cases", "hardcase", "gig bag", "gigbag", "etui", "étui",
@@ -364,6 +369,20 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None,
         return True
     if not INTENT_RX.search(title) and is_standalone_case(title, metadata):
         return True
+    if PICKUP_OBJECT_TITLE_RX.fullmatch(title):
+        # A poorly named item may still be a whole violin. Only an independent
+        # instrument clause can override a clear accessory title; "Zeta violin
+        # pickup for sale" describes the pickup, not a bundled instrument.
+        instrument_clause = False
+        for entry in re.split(r"[,;\n]|(?<=[.!?])\s+", description):
+            clauses = [entry] + [entry[:bundle.start()] for bundle in CASE_BUNDLE_RX.finditer(entry)]
+            if any(is_zeta_violin(clause) and not ACCESSORY_CLAUSE_RX.search(clause)
+                   and not has_noise(clause) and not is_excluded_intent(clause)
+                   for clause in clauses):
+                instrument_clause = True
+                break
+        if not instrument_clause:
+            return True
     if INSTRUMENT_ABSENT_RX.search(description):
         return True
     if not description:

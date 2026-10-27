@@ -53,3 +53,11 @@ Verifică SQLite/WAL, backup+restore, readiness/monitorizare, autentificarea end
 Raportul final trebuie să distingă implementat/testat/activ de propus și blocat extern, cu dovezi, beneficii măsurate și limite investigate. Nu marca obiectivul complet doar pentru că s-a încheiat un mesaj. Fără monitorizare permanentă nouă nesolicitată sau subagenți neautorizați.
 
 Auditul de pornire și dovezile de producție sunt păstrate local în outputs/research-20261027/ (ignorat de Git); identificatorii operaționali rămân în obiectivul privat Codex.
+
+## Stadiu de execuție la 27octombrie, înaintea turei naturale de10:00
+
+- Publicate și verificate CI/deploy:994911f,8bbb47e,ddb1f16. Două cicluri auxiliare complete au păstrat guardurile programate; numai prima probă a avut16interogări Brave noi. Nu se confundă cu o tură nouă a tuturor furnizorilor.
+- Eroarea live EasyLive Closed a fost corectată, mesajul original editat și reamintirile închise tehnic, fără confirmare de citire inventată. Backup/restaurare izolată verificate, inclusiv registrul noii închideri.
+- Auditul cardurilor native adaugă3suite obligatorii (total18), cu verificarea primară înainte de alertă pentru pistele incomplete, separarea metadatelor/contextului și păstrare la refuz. Implementarea este supusă propriului CI/deploy și ciclului final, nu este acceptată doar dintr-un test izolat.
+- Verificare unică programată după tura naturală10:00, la10:20, fără declanșare de alt ciclu. Va controla interogările noi pe furnizor, resursele, stările parțiale/cozile, livrarea și eventualele regresii. Obiectivul rămâne activ până la rezolvarea/verificarea lucrărilor necesare.
+- Comparațiile Actorilor rămân condiționate de credit verificat peste rezerva turelor; protocoalele gratuite Facebook testate au fost necitibile. Aceste limite externe nu sunt raportate drept funcții active și nu se ocolesc prin resetarea protecțiilor sau achiziții automate.

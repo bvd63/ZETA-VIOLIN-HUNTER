@@ -11,7 +11,7 @@ from keywords import market_queries
 
 import logging
 from scrapers.base import BaseScraper, BROWSER_UA
-from filters import has_zeta_signal
+from native_candidates import card_hints
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +74,8 @@ class HiBidScraper(BaseScraper):
                         description = (lot.get("description") or "").strip()
                         if not lot_id or not title:
                             continue
-                        if not has_zeta_signal(title + " " + description):
+                        hints = card_hints(title, description, q)
+                        if hints is None:
                             continue
                         state = lot.get("lotState") or {}
                         if state.get("isArchived") or str(state.get("status", "OPEN")).upper() not in ("OPEN", "BIDDING", ""):
@@ -103,6 +104,7 @@ class HiBidScraper(BaseScraper):
                             continue
 
                         results.append({
+                            **hints,
                             "id": unique_id,
                             "auction": True,
                             "platform": f"HiBid ({house.get('name', 'auction')})"[:60],
@@ -110,8 +112,9 @@ class HiBidScraper(BaseScraper):
                             "price": price,
                             "location": location or "USA",
                             "url": f"https://hibid.com/lot/{lot_id}",
-                            "description": (f"{auction.get('eventName', '')} — ends {str(auction.get('eventDateEnd', ''))[:10]}. "
-                                            f"{description}"),
+                            "description": description,
+                            "auction_name": str(auction.get('eventName') or ''),
+                            "auction_date": str(auction.get('eventDateEnd') or '')[:10],
                             "date_posted": "",
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, description),

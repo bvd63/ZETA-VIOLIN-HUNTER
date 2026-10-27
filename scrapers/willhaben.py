@@ -16,7 +16,7 @@ import httpx
 from urllib.parse import urlsplit, urljoin, unquote
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
-from filters import has_zeta_signal
+from native_candidates import card_hints
 from primary_page_reserve import fresh_willhaben_search
 
 log = logging.getLogger(__name__)
@@ -84,7 +84,8 @@ class WillhabenScraper(BaseScraper):
                         seo = attrs.get("SEO_URL", "")
                         if not item_id or not title or not seo:
                             continue
-                        if not has_zeta_signal(title + " " + description):
+                        hints = card_hints(title, description, kw)
+                        if hints is None:
                             continue
                         unique_id = self._make_id("willhaben", item_id)
                         if unique_id in seen_ids:
@@ -119,6 +120,7 @@ class WillhabenScraper(BaseScraper):
                             "date_posted": attrs.get("PUBLISHED_String", "")[:10],
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, description),
+                            **hints,
                         })
                 except Exception as e:
                     log.warning(f"Willhaben '{kw}' error: {e}")

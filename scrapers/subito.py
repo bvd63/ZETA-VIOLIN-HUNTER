@@ -14,7 +14,7 @@ import json
 import logging
 from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_UA
-from filters import has_zeta_signal
+from native_candidates import card_hints
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,8 @@ class SubitoScraper(BaseScraper):
                         body = (ad.get("body") or "").strip()
                         if not item_url or not title:
                             continue
-                        if not has_zeta_signal(title + " " + body):
+                        hints = card_hints(title, body, kw)
+                        if hints is None:
                             continue
 
                         unique_id = self._make_id("subito", item_url)
@@ -76,6 +77,7 @@ class SubitoScraper(BaseScraper):
                             continue
 
                         results.append({
+                            **hints,
                             "id": unique_id,
                             "platform": "Subito",
                             "title": title,

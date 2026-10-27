@@ -19,7 +19,8 @@ warnings.filterwarnings("ignore", message=".*utcnow.*", category=DeprecationWarn
 
 from database import Database, connect  # noqa: E402
 from notifier import TelegramNotifier  # noqa: E402
-from filters import classify, has_primary_identity  # noqa: E402
+from filters import classify, has_primary_identity, has_zeta_signal  # noqa: E402
+from native_candidates import incomplete_pickup_card  # noqa: E402
 from liveness import is_live  # noqa: E402
 from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX  # noqa: E402
 from discovery_queue import stage, complete  # noqa: E402
@@ -125,7 +126,8 @@ def build_scrapers() -> list:
 
 def _needs_primary_identity(listing: dict, state: str) -> bool:
     return (state == "unknown" and listing.get("source") == "search"
-            and not listing.get("_primary_content_checked") and not has_primary_identity(listing))
+            and not listing.get("_primary_content_checked")
+            and (listing.get('_query_identity_unverified') is True or not has_primary_identity(listing)))
 
 
 async def _verify_search_hits(candidates: list, db: Database, http: httpx.AsyncClient, dropped: dict,
@@ -260,9 +262,18 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                 for listing in listings:
                     record_candidate(listing, 'discovered')
                     reason = classify(listing)
-                    if reason == "non_zeta" and listing.get("source") == "search":
-                        # An index snippet is not the complete listing. Identity
-                        # is checked again against the actual item page below.
+                    native_clue = has_zeta_signal(str(listing.get('title') or '') + ' ' +
+                                                  str(listing.get('description') or '')) or listing.get('_query_identity_unverified') is True
+                    if ((reason == "non_zeta" and (listing.get("source") == "search" or native_clue))
+                            or (not reason and listing.get('_query_identity_unverified') is True)
+                            or incomplete_pickup_card(listing, reason)):
+                        # Native cards can be as incomplete as index snippets.
+                        # Preserve provenance and require primary-page identity;
+                        # a blocked bare brand/model card must never alert alone.
+                        if listing.get('source') != 'search':
+                            listing['_native_card_source'] = listing.get('source') or scraper.name
+                            listing['_direct_item_candidate'] = True
+                            listing['source'] = 'search'
                         listing["_discovery_priority"] = 2
                         reason = None
                     if reason:

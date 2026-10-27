@@ -30,3 +30,6 @@ jobs:
       - run: python -m tests.test_pushover
       - run: python -m tests.test_operations
       - run: python -m tests.test_search_quality
+      - run: python -m tests.test_native_recall
+      - run: python -m tests.test_native_cards
+      - run: python -m tests.test_native_asia_cards

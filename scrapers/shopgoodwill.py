@@ -12,7 +12,7 @@ from keywords import market_queries
 import httpx
 import logging
 from scrapers.base import BaseScraper, BROWSER_UA
-from filters import has_zeta_signal
+from native_candidates import card_hints
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +74,8 @@ class ShopGoodwillScraper(BaseScraper):
                             description = (item.get("description") or "").strip()
                             if not item_id or not title:
                                 continue
-                            if not has_zeta_signal(title + " " + description):
+                            hints = card_hints(title, description, q)
+                            if hints is None:
                                 continue
                             unique_id = self._make_id("shopgoodwill", item_id)
                             if unique_id in seen_ids:
@@ -91,6 +92,7 @@ class ShopGoodwillScraper(BaseScraper):
                                 continue
 
                             results.append({
+                                **hints,
                                 "id": unique_id,
                                 "platform": "ShopGoodwill", "auction": True,
                                 "title": title,

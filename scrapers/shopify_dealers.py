@@ -15,7 +15,8 @@ import asyncio
 import logging
 import re
 from scrapers.base import BaseScraper, BROWSER_UA
-from filters import has_zeta_signal
+from filters import has_zeta_signal, has_violin_word
+from native_candidates import card_hints
 from keywords import market_queries
 
 log = logging.getLogger(__name__)
@@ -76,14 +77,34 @@ class ShopifyDealersScraper(BaseScraper):
                             "q": term, "resources[type]": "product", "resources[limit]": 10,
                         })
                         if resp.status_code == 200:
-                            products.extend(((resp.json().get("resources") or {}).get("results") or {}).get("products") or [])
+                            for p in (((resp.json().get("resources") or {}).get("results") or {}).get("products") or []):
+                                products.append({**p, "_suggest_queries": [term]})
                         else:
                             log.warning("%s suggest '%s' HTTP %s", label, term, resp.status_code)
                     except Exception as e:
                         log.warning(f"{label} suggest '{term}' error: {e}")
                 self.fetched += len(products)
 
+                # A suggestion's query belongs only to that returned product.
+                # Merge duplicate IDs before filtering so a sparse suggestion
+                # cannot erase the collection's full body or used marker.
+                merged = {}
                 for p in products:
+                    pid = str(p.get("id") or "")
+                    if not pid:
+                        continue
+                    if pid not in merged:
+                        merged[pid] = dict(p)
+                        continue
+                    existing = merged[pid]
+                    queries = list(dict.fromkeys(existing.get("_suggest_queries", []) + p.get("_suggest_queries", [])))
+                    for key, value in p.items():
+                        if key != "_suggest_queries" and value and not existing.get(key):
+                            existing[key] = value
+                    if queries:
+                        existing["_suggest_queries"] = queries
+
+                for p in merged.values():
                     pid = str(p.get("id") or "")
                     title = (p.get("title") or "").strip()
                     handle = p.get("handle") or ""
@@ -95,7 +116,14 @@ class ShopifyDealersScraper(BaseScraper):
                     # `body_html`. Keep the entire description for later filters.
                     body = TAG_RX.sub(" ", p.get("body_html") or p.get("body") or "")
                     body = re.sub(r"\s+", " ", body).strip()
-                    if not has_zeta_signal(f"{title} {tags_text} {body}"):
+                    queries = p.get("_suggest_queries", [])
+                    hints = next((hint for query in queries if (hint := card_hints(title, body, query)) is not None), None)
+                    if (hints is None and has_zeta_signal(tags_text)
+                            and not has_zeta_signal(f"{title} {body}")
+                            and has_violin_word(f"{title} {body}")):
+                        hints = {"_native_identity_hint": "product tags",
+                                 "_query_identity_unverified": True}
+                    if not has_zeta_signal(f"{title} {tags_text} {body}") and hints is None:
                         continue
                     unique_id = self._make_id("shopify", f"{base}:{pid}")
                     if unique_id in seen_ids:
@@ -142,6 +170,8 @@ class ShopifyDealersScraper(BaseScraper):
                         "date_posted": str(p.get("published_at") or p.get("created_at") or "")[:10],
                         "image_url": image_url,
                         "relevance_score": self._relevance_score(title, body),
+                        **(hints or {}),
+                        **({"_native_search_queries": queries} if queries else {}),
                     })
 
         log.info(f"Violin dealers (Shopify): {len(results)} listings found")
