@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from public_node_fetch import allowed_url, fetch, same_target, MAX_BYTES
@@ -132,8 +133,8 @@ class GumRecoveryTests(unittest.IsolatedAsyncioTestCase):
              patch('asyncio.sleep',new_callable=AsyncMock):
             await scraper.search()
         self.assertEqual(node.await_count,2)
-        self.assertIn('q=Zeta%20violin',node.await_args_list[0].args[0])
-        self.assertIn('q=Zeta%20JV5',node.await_args_list[1].args[0])
+        self.assertEqual(parse_qs(urlsplit(node.await_args_list[0].args[0]).query)['q'],['Zeta violin'])
+        self.assertEqual(parse_qs(urlsplit(node.await_args_list[1].args[0]).query)['q'],['Zeta JV5'])
         self.assertEqual(scraper.requests_attempted,6)
         self.assertEqual(scraper.requests_ok,2)
         self.assertEqual(scraper.requests_recovered,4)
