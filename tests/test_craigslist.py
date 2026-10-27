@@ -121,6 +121,48 @@ class CraigslistTests(unittest.TestCase):
                 _, found, _ = self.search(["Zeta Strados electric violin"], {"token1": (status, body)})
                 self.assertEqual(found, [])
 
+    def test_removed_individual_postings_are_dead_without_source_access_alarm(self):
+        async def check(status, url, redirect=False):
+            scraper=CraigslistScraper()
+            def handler(request):
+                if redirect and request.url.path.startswith('/view/'):
+                    return httpx.Response(302,headers={'Location':'https://phoenix.craigslist.org/msg/d/violin/1234567890.html'})
+                return httpx.Response(status,text='posting unavailable')
+            async with scraper.make_client(transport=httpx.MockTransport(handler)) as client:
+                item=listing(url=url)
+                self.assertFalse(await scraper._enrich(client,item))
+                self.assertNotIn('verification',item)
+            self.assertEqual(scraper.coverage_stats['detail_dead'],1)
+            self.assertEqual(scraper.coverage_stats['detail_unverified'],0)
+            self.assertEqual(scraper.health_error(),'')
+            self.assertEqual(scraper.requests_attempted,scraper.requests_ok)
+        for status in (404,410):
+            for url,redirect in [(listing()['url'],False),
+                     ('https://phoenix.craigslist.org/msg/d/violin/1234567890.html',False),
+                     (listing()['url'],True)]:
+                with self.subTest(status=status,url=url,redirect=redirect):
+                    asyncio.run(check(status,url,redirect))
+
+    def test_terminal_posting_cannot_hide_search_or_access_failure(self):
+        urls=['https://sapi.craigslist.org/web/v8/postings/search/full',
+              'https://reference.craigslist.org/Areas','https://phoenix.craigslist.org/search/msa',
+              'https://craigslist.org.evil/view/d/violin/token','https://other.example/view/d/violin/token']
+        async def check(status,url):
+            scraper=CraigslistScraper()
+            async with scraper.make_client(transport=httpx.MockTransport(
+                    lambda r:httpx.Response(status,text='unavailable'))) as client:
+                await client.get(url)
+                # A terminal item later in the same batch cannot clear an
+                # earlier failed search/reference/access request.
+                if status in (404,410):
+                    await client.get(listing()['url'])
+            self.assertIn('HTTP '+str(status),scraper.health_error())
+        for status in (404,410):
+            for url in urls:
+                with self.subTest(status=status,url=url):asyncio.run(check(status,url))
+        for status in (403,429,500):
+            with self.subTest(status=status):asyncio.run(check(status,listing()['url']))
+
     def test_detail_cap_applies_even_to_conclusive_titles(self):
         scraper, found, requests = self.search([f"Zeta Strados electric violin {i}" for i in range(5)], {}, cap=2)
         self.assertEqual(len(found), 2)

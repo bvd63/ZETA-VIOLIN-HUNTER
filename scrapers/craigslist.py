@@ -68,6 +68,18 @@ class CraigslistScraper(BaseScraper):
     name = "Craigslist"
 
     @staticmethod
+    def _missing_posting(response: httpx.Response) -> bool:
+        host, path = response.request.url.host, response.request.url.path
+        return (response.status_code in (404,410)
+                and (host == 'craigslist.org' or host.endswith('.craigslist.org'))
+                and bool(re.fullmatch(r'/view/d/[^/]+/[^/]+/?|/(?:[^/]+/)*d/[^/]+/\d+\.html',path)))
+
+    async def _response_is_healthy(self, response: httpx.Response) -> bool:
+        # A removed individual posting is a terminal item result, not a broken
+        # search/access route. API/search errors and access blocks still count.
+        return self._missing_posting(response) or await super()._response_is_healthy(response)
+
+    @staticmethod
     def plan_queries() -> list:
         """Four requests per area; brand/model discovery spans every sale category."""
         aliases = [*MODEL_CODES, *[f'("{artist}" violin)' for artist in ARTISTS]]
@@ -269,7 +281,7 @@ class CraigslistScraper(BaseScraper):
         try:
             resp = await client.get(item["url"], headers={**HEADERS, "Accept": "text/html,*/*;q=0.8"})
             if resp.status_code != 200:
-                self.coverage_stats["detail_unverified"] += 1
+                self.coverage_stats['detail_dead' if self._missing_posting(resp) else 'detail_unverified'] += 1
                 log.info("Craigslist detail %s withheld: HTTP %s", item["url"], resp.status_code)
                 return False
             dead = looks_dead(resp.status_code, item["url"], str(resp.url), resp.text)
