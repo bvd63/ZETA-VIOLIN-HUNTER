@@ -65,7 +65,9 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
         with patch('offer_verifier.public_dns',AsyncMock(return_value=True)), \
              patch('primary_page_reserve.fresh_primary_page',AsyncMock(return_value=None)):
             async with httpx.AsyncClient(transport=transport) as client:
-                return await self.main._verify_search_hits(items,self.db,client,{},'search:Facebook Marketplace')
+                self.primary_counts = {}
+                result = await self.main._verify_search_hits(items,self.db,client,self.primary_counts,'search:Facebook Marketplace')
+                return result
 
     async def test_strong_card_missing_details_reaches_unknown_outbox_without_seen(self):
         candidate=card();self.put(candidate)
@@ -82,6 +84,9 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([x['url'] for x in self.db.pending()],[candidate['url']])
         self.assertFalse(self.db.is_seen(candidate['id']))
         self.assertFalse(self.db.was_url_alerted(candidate['url']))
+        counts = self.main.verification_counts(self.primary_counts)
+        self.assertEqual(counts['rejected'], {})
+        self.assertEqual(counts['observations']['unverified'], 1)
         from notifier import TelegramNotifier
         buttons=TelegramNotifier._alert_buttons('a'*24,candidate['url'])
         self.assertTrue(any('seen:' in button.get('callback_data','') for row in buttons['inline_keyboard'] for button in row))
@@ -124,6 +129,9 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items),1)
         self.assertEqual(await self.primary(items,403),[])
         self.assertEqual(self.db.pending(),[])
+        counts = self.main.verification_counts(self.primary_counts)
+        self.assertEqual(counts['rejected'], {})
+        self.assertEqual(counts['observations']['unverified'], 1)
 
     async def test_wrong_id_partial_detail_never_replaces_original_candidate(self):
         candidate=card(50);wrong=card(51,'Zeta Jazz Fusion JV5 violin',isLive=True)

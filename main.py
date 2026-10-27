@@ -81,7 +81,7 @@ DROP_REASON_LABELS = {
     "availability_hold": "reserved/hidden/temporarily unavailable",
     "url": "invalid-url",
     "non_sale": "article/review without an instrument for sale",
-    "unverified": "offer availability could not be verified",
+    "unverified": "availability unknown (eligible route retained; delivery dedup applies)",
     "already_alerted": "same URL already delivered",
     "dead_link": "ended/expired page",
     "dead_cached": "known dead page (re-check after 7 days)",
@@ -92,6 +92,18 @@ MAX_LIVENESS_CHECKS = 60      # per scraper per cycle
 LIVENESS_CONCURRENCY = 6
 LIVENESS_TIMEOUT_SEC = 180
 DEAD_CACHE_DAYS = 7
+
+
+def verification_counts(counts: dict) -> dict:
+    """Report retained work separately from actual rejection decisions."""
+    deferred = {'liveness_deferred', 'identity_unverified'}
+    observed = {'unverified', 'duplicate_flagged'}
+    return {
+        'rejected': {k:v for k,v in counts.items() if k not in deferred | observed | {'collection_expanded'}},
+        'deferred': {k:v for k,v in counts.items() if k in deferred},
+        'observations': {k:v for k,v in counts.items() if k in observed},
+        'collection_expanded': counts.get('collection_expanded', 0),
+    }
 
 
 def build_scrapers() -> list:
@@ -338,8 +350,15 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                     recent_alerts.append({"title": listing.get("title", ""), "price_usd": price_usd,
                                           "platform": listing.get("platform", ""), "url": listing.get("url", "")})
 
-                for reason, count in dropped.items():
-                    log.info(f"   Filtered out {count} {DROP_REASON_LABELS.get(reason, reason)} listing(s) from {scraper.name}")
+                counts = verification_counts(dropped)
+                for group, action in (('rejected','Filtered out'), ('deferred','Deferred'),
+                                      ('observations','Observed')):
+                    for reason, count in counts[group].items():
+                        if count:
+                            log.info(f"   {action} {count} {DROP_REASON_LABELS.get(reason, reason)} listing(s) from {scraper.name}")
+                if counts['collection_expanded']:
+                    log.info('   Expanded %s individual collection leads from %s',
+                             counts['collection_expanded'], scraper.name)
                 log.info(f"   ✅ {len(new_listings)} NEW listings from {scraper.name}"
                          + (f", {len(drops)} price drop(s)" if drops else ""))
                 return {
@@ -349,7 +368,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                     "error": scraper.health_error(),
                     "details": {"requests_ok": scraper.requests_ok, "requests_attempted": scraper.requests_attempted,
                                 "requests_recovered": getattr(scraper, "requests_recovered", 0),
-                                "rejected": dropped, "coverage": getattr(scraper, "coverage_stats", {}),
+                                **counts, "coverage": getattr(scraper, "coverage_stats", {}),
                                 "discovery_queries_attempted": getattr(scraper, "discovery_queries_attempted", 0),
                                 "manual_fresh": getattr(scraper, "manual_fresh", False)},
                 }
