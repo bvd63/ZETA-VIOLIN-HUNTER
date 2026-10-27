@@ -624,7 +624,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
     host = (urlsplit(url).hostname or "").lower()
     if reverb and (host == "reverb.com" or host.endswith(".reverb.com")):
         try:
-            from reverb_api import get_listing, listing_state
+            from reverb_api import get_listing, listing_state, remember_availability
             response = await get_listing(client, reverb.group(1))
             if response.status_code == 404:
                 return "dead", "reverb: not found"
@@ -634,6 +634,8 @@ async def _verify_offer(listing: dict, client) -> tuple:
                 except (ValueError, TypeError):
                     data = None
                 state = listing_state(data, reverb.group(1))
+                if state != 'unknown':
+                    remember_availability(data)
                 if state not in ('unknown', 'live'):
                     return "dead", f"reverb state={state}"
                 if state == "live":

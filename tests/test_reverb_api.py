@@ -197,6 +197,28 @@ class ReverbApiTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(item['_primary_content_checked'])
                     self.assertEqual(classify(item),'')
 
+    async def test_detail_sold_is_shared_across_providers_until_current_bound_live(self):
+        from offer_verifier import availability_conflict, saved_indexed_closed_reason
+        sold={'id':123,'state':{'slug':'sold'},'_links':{'web':{'href':URL}}}
+        live={'id':123,'state':{'slug':'live'},'_links':{'web':{'href':URL}},
+              'title':'Zeta Jazz Fusion violin','description':'Used electric violin'}
+        other={'url':'https://www.reverb.com/en-ro/item/123-other-slug',
+               'title':'Zeta violin','source':'search','platform':'Other provider'}
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)), \
+             patch('facebook_discovery.cached_offer',return_value=None), \
+             patch('primary_page_reserve.fresh_primary_page',AsyncMock(return_value='')):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json=sold))) as c:
+                self.assertEqual((await verify_offer({'url':URL,'title':'Zeta violin','source':'search'},c))[0],'dead')
+            self.assertTrue(saved_indexed_closed_reason(other))
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(403))) as c:
+                state,_=await verify_offer(other,c)
+            self.assertEqual(state,'unknown')
+            self.assertTrue(availability_conflict(other,state))
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json=live))) as c:
+                self.assertEqual((await verify_offer({'url':URL,'title':'Zeta violin','source':'search'},c))[0],'live')
+            self.assertFalse(saved_indexed_closed_reason(other))
+            self.assertFalse(availability_conflict({k:v for k,v in other.items() if k != '_availability_conflict'},'unknown'))
+
     async def test_reverb_other_id_or_host_never_fetches_or_borrows_status(self):
         from offer_verifier import inspect_page
         for original in (URL,URL+'?utm_source=google'):
