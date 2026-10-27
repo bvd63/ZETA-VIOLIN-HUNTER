@@ -205,8 +205,27 @@ def compare(baseline, candidate):
            for c, summary in ((ac,a),(bc,b))):
         reasons.append('result limit reached; output may be truncated')
     additional = sorted(set(b['actor_output_eligible_urls']) - set(a['actor_output_eligible_urls'])) if not reasons else None
+    # Valid Actor contracts inherently differ (Curious bounds pages, Official
+    # results, Black/Memo different availability). Preserve strict equivalence,
+    # but make the observed sets usable without pretending equal coverage.
+    observation_blockers = [reason for reason in reasons if reason != 'different collection context']
+    paired = None
+    if not observation_blockers:
+        baseline_urls, candidate_urls = set(a['actor_output_eligible_urls']), set(b['actor_output_eligible_urls'])
+        overlap = sorted(baseline_urls & candidate_urls)
+        candidate_only, baseline_only = sorted(candidate_urls - baseline_urls), sorted(baseline_urls - candidate_urls)
+        paired = {
+            'basis': 'Matching declared query URLs and start times within one hour; context is not API verified.',
+            'scope_differences': {key:{'baseline':ac['collection'][key], 'candidate':bc['collection'][key]}
+                                  for key in ac['collection'] if ac['collection'][key] != bc['collection'][key]},
+            'counts': {'overlap':len(overlap), 'candidate_only':len(candidate_only), 'baseline_only':len(baseline_only)},
+            'overlap_urls':overlap, 'candidate_only_urls':candidate_only, 'baseline_only_urls':baseline_only,
+            'note': 'Observed eligible Actor output only. Different bounds/states can explain differences; '
+                    'this is not evidence of superiority, missed violins, equal coverage or independently confirmed stock.',
+        }
     return {'comparable':not reasons, 'incomparable_reasons':reasons,
             'baseline':a, 'candidate':b, 'additional_actor_output_eligible_urls':additional,
+            'paired_observation':paired, 'paired_observation_blockers':observation_blockers,
             'note':'Actor-output eligibility only; these are not independently confirmed violins or live offers.'}
 
 

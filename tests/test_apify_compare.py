@@ -99,6 +99,47 @@ class CompareTests(unittest.TestCase):
         self.assertNotIn('token=',output)
         self.assertNotIn('zeta+violin',output)
         self.assertIn('not independently confirmed',result['note'])
+        self.assertEqual(result['paired_observation']['counts'],{'overlap':1,'candidate_only':2,'baseline_only':0})
+        self.assertEqual(result['paired_observation']['scope_differences'],{})
+
+    def test_valid_alternative_contracts_have_observations_without_false_equivalence(self):
+        baseline=doc([row(1),row(2)])
+        for actor in ('curious','black','memo'):
+            with self.subTest(actor=actor):
+                configured=plan(actor,URL,20,1)
+                candidate=doc([row(2),row(3),row(3)],actor=configured['actor'],collection=configured['collection'])
+                result=compare(baseline,candidate)
+                self.assertFalse(result['comparable'])
+                self.assertIsNone(result['additional_actor_output_eligible_urls'])
+                self.assertEqual(result['incomparable_reasons'],['different collection context'])
+                observed=result['paired_observation']
+                self.assertEqual(observed['counts'],{'overlap':1,'candidate_only':1,'baseline_only':1})
+                self.assertEqual(observed['overlap_urls'],['https://www.facebook.com/marketplace/item/2/'])
+                self.assertEqual(observed['candidate_only_urls'],['https://www.facebook.com/marketplace/item/3/'])
+                self.assertEqual(observed['baseline_only_urls'],['https://www.facebook.com/marketplace/item/1/'])
+                differences=observed['scope_differences']
+                if actor=='curious':
+                    self.assertEqual(differences['bound_kind'],{'baseline':'results','candidate':'pages'})
+                    self.assertEqual(differences['bound'],{'baseline':20,'candidate':1})
+                else:
+                    self.assertEqual(differences['availability_scope']['candidate'],
+                                     'all' if actor=='black' else 'in_stock')
+                self.assertEqual(result['candidate']['counts']['duplicates'],1)
+                self.assertIn('not evidence of superiority',observed['note'])
+                self.assertNotIn('token=',json.dumps(result))
+
+    def test_alternative_observation_retains_all_non_scope_guards(self):
+        configured=plan('curious',URL,20,1)
+        for overrides,items in [({'query_urls':[URL.replace('chicago','seattle')]},[row(3)]),
+                ({'status':'FAILED'},[row(3)]),({'started_at':'2026-10-27T11:00:01Z'},[row(3)]),
+                ({'actual_cost_usd':None},[row(3)]),({'coverage_complete':False},[row(3)]),
+                ({},[{'error':'SECRET failure'}]),({},[None])]:
+            with self.subTest(overrides=overrides,items=items):
+                context={'actor':configured['actor'],'collection':configured['collection'],**overrides}
+                result=compare(doc([row(1)]),doc(items,**context))
+                self.assertIsNone(result['paired_observation'])
+                self.assertTrue(result['paired_observation_blockers'])
+                self.assertNotIn('SECRET',json.dumps(result))
 
     def test_missing_context_different_query_failed_and_time_window(self):
         cases=[({},'missing or invalid query URLs'),
@@ -119,17 +160,21 @@ class CompareTests(unittest.TestCase):
                 self.assertFalse(out['comparable'])
                 self.assertIn(reason,out['incomparable_reasons'])
                 self.assertIsNone(out['additional_actor_output_eligible_urls'])
+                self.assertIsNone(out['paired_observation'])
         self.assertTrue(compare(doc([]),doc([],started_at='2026-10-27T11:00:00Z'))['comparable'])
         inconsistent=compare(doc([]),doc([],actor='curious'))
         self.assertFalse(inconsistent['comparable'])
         self.assertIn('collection context inconsistent with actor contract',inconsistent['incomparable_reasons'])
+        self.assertIsNone(inconsistent['paired_observation'])
         inconsistent=compare(doc([]),doc([],actor='memo'))
         self.assertFalse(inconsistent['comparable'])
+        self.assertIsNone(inconsistent['paired_observation'])
 
     def test_error_rows_make_comparison_inconclusive(self):
         result=compare(doc([{'error':'SECRET failure'}]),doc([row(2)]))
         self.assertFalse(result['comparable'])
         self.assertIsNone(result['additional_actor_output_eligible_urls'])
+        self.assertIsNone(result['paired_observation'])
         self.assertEqual(result['baseline']['counts']['errors'],1)
         self.assertNotIn('SECRET',json.dumps(result))
 
@@ -161,6 +206,7 @@ class CompareTests(unittest.TestCase):
                 self.assertFalse(result['comparable'])
                 self.assertIn(reason,result['incomparable_reasons'])
                 self.assertIsNone(result['additional_actor_output_eligible_urls'])
+                self.assertIsNone(result['paired_observation'])
                 if items and items[0] is not None:
                     self.assertEqual(len(result['candidate']['actor_output_eligible_urls']),1)
 

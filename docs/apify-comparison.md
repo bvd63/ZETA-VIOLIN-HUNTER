@@ -12,6 +12,14 @@ Actorii acceptați sunt `official`, `curious`, `black`, `memo`. Se acceptă exac
 
 **Pentru Official și Curious, disponibilitatea este `provider_default`: schema nu demonstrează că toate stările sunt incluse. Black solicită `all` prin `availableOnly=false`, iar Memo are implicit `in_stock`. Curious limitează pagini, nu rezultate:** `--max-pages` este 1–5, iar `--limit` nu este un plafon de rezultate pentru acest Actor. Volumul, prețul și completitudinea pot diferi astfel de celelalte planuri. Schema Memo are implicit disponibilitatea „in stock” și nu oferă în acest câmp o opțiune „all”; nu pretindem că stările sau raza sunt comparabile cu celelalte implementări. Schema publică salvată nu definește tipurile elementelor din array-uri; testul verifică tipurile și câmpurile de nivel superior și formele descrise de contract, nu dovedește executarea payloadului. Nu există garanția că un start URL sau o pagină de detalii este accesibilă din Railway.
 
+## Observația între Actori cu contracte diferite
+
+Planurile valide Official/Curious/Black/Memo nu au toate aceeași limită sau aceleași stări de disponibilitate. Prin urmare, comparația strictă Official–alternativă rămâne necomparabilă când aceste câmpuri diferă; nu inventăm echivalența pentru a obține un rezultat pozitiv.
+
+Raportul include separat `paired_observation`: URL-uri eligibile observate în ambele rulări (`overlap_urls`), numai în candidat (`candidate_only_urls`) și numai în bază (`baseline_only_urls`), cu numere unice și `scope_differences` pentru detalii, tipul/valoarea limitei și disponibilitate. Această observație este disponibilă doar când trec toate celelalte garduri: actori/contracte valide, aceleași căutări declarate, începuturi valide la maximum o oră, SUCCEEDED, costuri reale furnizate, completitudine declarată și fără erori, rânduri invalide sau plafon de rezultate atins. `paired_observation_blockers` arată de ce observația a fost reținută. Comparația strictă și câmpul ei suplimentar rămân neschimbate.
+
+Diferențele observate nu demonstrează superioritate, acoperire egală, viori ratate sau stoc activ confirmat. Limitele și stările diferite pot explica singure diferențele. Contextul, completitudinea și costurile furnizate nu sunt verificate prin API de acest instrument offline. Regresiile folosesc planurile valide ale celor trei alternative, plus gardurile pentru date nevalide/incomplete și redacția câmpurilor sensibile. Nu a fost lansat niciun Actor.
+
 ## Comparație locală
 
 ```sh
