@@ -198,10 +198,25 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
             with patch('willhaben_reader._reserve',side_effect=[True,False]) as reserve:
                 with self.assertRaises(ReaderUnavailable): await fetch(ITEM,client)
             self.assertEqual(len(calls),1);self.assertEqual(reserve.call_count,2)
-        calls.clear();before=used('willhaben_reader')
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            with self.assertRaises(ReaderUnavailable): await fetch(ITEM,client,timeout=.03)
-        self.assertEqual(len(calls),2);self.assertEqual(used('willhaben_reader')-before,2)
+        # Deadline behavior is independent of SQLite/thread startup speed.
+        # Durable per-hop accounting is exercised above and in redirect tests.
+        # Stall the second HTTP hop; without a cumulative deadline this never
+        # completes (MockTransport does not enforce httpx's per-request timeout).
+        calls.clear()
+        async def stalled(request):
+            calls.append(request)
+            if len(calls)==1:
+                return httpx.Response(200,json=dto(ITEM,status=308,location=alias))
+            await asyncio.Event().wait()
+        async def inline(function,*args):
+            return function(*args)
+        with patch('willhaben_reader._reserve',return_value=True) as reserve, \
+             patch('willhaben_reader.asyncio.to_thread',side_effect=inline):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(stalled)) as client:
+                with self.assertRaises(ReaderUnavailable):
+                    await asyncio.wait_for(fetch(ITEM,client,timeout=.2),2)
+            self.assertEqual(reserve.call_count,2)
+        self.assertEqual(len(calls),2)
 
     async def test_three_redirects_and_search_query_binding(self):
         calls=[]
