@@ -81,12 +81,20 @@ def snapshot() -> dict:
                 if row:
                     data[provider]["health"] = {"error": row[0] or "", "checked_at": row[1]}
         if "discovery_queue" in tables:
-            data["deferred_details"] = {name: {"saved": total, "due": due} for name, total, due in conn.execute(
-                "SELECT namespace,count(*),sum(next_attempt<=?) FROM discovery_queue GROUP BY namespace", (time.time(),))}
-            for name, never_claimed, oldest in conn.execute('''SELECT namespace,sum(attempts=0),min(created)
-                    FROM discovery_queue GROUP BY namespace'''):
-                data['deferred_details'][name].update({'never_claimed': never_claimed,
-                    'oldest_saved_hours': round(max(0, time.time() - oldest) / 3600, 1)})
+            checked = time.time()
+            data['deferred_details'] = {}
+            for name,total,due,never_claimed,oldest,due_never_claimed,oldest_due_never in conn.execute('''
+                    SELECT namespace,count(*),sum(next_attempt<=?),sum(attempts=0),min(created),
+                        sum(CASE WHEN attempts=0 AND next_attempt<=? THEN 1 ELSE 0 END),
+                        min(CASE WHEN attempts=0 AND next_attempt<=? THEN created END)
+                    FROM discovery_queue GROUP BY namespace''', (checked,checked,checked)):
+                data['deferred_details'][name] = {
+                    'saved':total, 'due':due, 'never_claimed':never_claimed,
+                    'oldest_saved_hours':round(max(0,checked-oldest)/3600,1),
+                    'due_never_claimed':due_never_claimed,
+                    'oldest_due_never_claimed_hours':(
+                        round(max(0,checked-oldest_due_never)/3600,1) if oldest_due_never is not None else None),
+                }
     finally:
         conn.close()
     for name, key, limit, scale in (("tavily", Config.TAVILY_API_KEY, Config.TAVILY_ROLLING_CREDITS, 1),

@@ -436,6 +436,28 @@ class QualityTests(unittest.TestCase):
         self.assertIn('verificat',result)
         self.assertIn('Tavily pot fi vechi',result)
 
+    def test_queue_age_distinguishes_due_unclaimed_work_from_saved_rechecks(self):
+        from resource_monitor import snapshot
+        now=time.time();namespace='search:MetricsFixture'
+        with DiscoveryQueue(namespace) as q:
+            q.conn.execute('DELETE FROM discovery_queue WHERE namespace=?',(namespace,));q.conn.commit()
+            q.put([violin(701),violin(702),violin(703)])
+            for number,age,next_attempt,attempts in ((701,100,now-1,4),(702,12,now+3600,0),(703,4,now-1,0)):
+                q.conn.execute('UPDATE discovery_queue SET created=?,next_attempt=?,attempts=? WHERE namespace=? AND key=?',
+                    (now-age*3600,next_attempt,attempts,namespace,violin(number)['url']))
+            q.conn.commit()
+            before=q.conn.execute('SELECT key,created,next_attempt,attempts FROM discovery_queue WHERE namespace=? ORDER BY key',(namespace,)).fetchall()
+            with patch('resource_monitor.time.time',return_value=now):
+                metrics=snapshot()['deferred_details'][namespace]
+            self.assertEqual(metrics,{'saved':3,'due':2,'never_claimed':2,'oldest_saved_hours':100.0,
+                                      'due_never_claimed':1,'oldest_due_never_claimed_hours':4.0})
+            self.assertEqual(before,q.conn.execute('SELECT key,created,next_attempt,attempts FROM discovery_queue WHERE namespace=? ORDER BY key',(namespace,)).fetchall())
+            q.finish(violin(703),3600)
+            metrics=snapshot()['deferred_details'][namespace]
+            self.assertEqual(metrics['due'],1)
+            self.assertEqual(metrics['due_never_claimed'],0)
+            self.assertIsNone(metrics['oldest_due_never_claimed_hours'])
+
 
 class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
