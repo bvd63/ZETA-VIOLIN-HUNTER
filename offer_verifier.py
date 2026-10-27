@@ -126,6 +126,20 @@ def _offerup_item_id(url: str) -> str:
     return match[1].lower() if match else ''
 
 
+def _willhaben_item_id(url: str) -> str:
+    # Bind redirects and native recovery to the ORIGINAL offer, including
+    # negative statuses. Another item's 404/SOLD cannot close this candidate.
+    from willhaben_reader import _item_id
+    try:
+        p = urlsplit(url)
+        if (p.scheme != 'https' or (p.hostname or '').lower() not in ('willhaben.at','www.willhaben.at')
+                or p.username or p.password or p.port not in (None,443)):
+            return ''
+        return _item_id(p.path)  # Tracking parameters cannot erase the original ID.
+    except (TypeError,ValueError,UnicodeError):
+        return ''
+
+
 def index_card_negative(url: str, snippet: str) -> dict:
     """Only an associated index-card snippet may use short Reverb status text."""
     if not isinstance(snippet,str):
@@ -365,6 +379,9 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     original_offerup = _offerup_item_id(listing.get('url', ''))
     if original_offerup and _offerup_item_id(final_url) != original_offerup:
         return 'unknown', 'OfferUp: redirecționare către alt anunț; necesită reverificare'
+    original_willhaben = _willhaben_item_id(listing.get('url', ''))
+    if original_willhaben and _willhaben_item_id(final_url) != original_willhaben:
+        return 'unknown', 'Willhaben: redirecționare către alt anunț; necesită reverificare'
     reason = looks_dead(status, listing["url"], final_url, text)
     if reason:
         return "dead", reason
@@ -626,6 +643,9 @@ async def _verify_offer(listing: dict, client) -> tuple:
     try:
         current = url
         for _ in range(5):
+            original_willhaben = _willhaben_item_id(listing.get('url', ''))
+            if original_willhaben and _willhaben_item_id(current) != original_willhaben:
+                return 'unknown', 'Willhaben: redirecționare către alt anunț; necesită reverificare'
             if is_disabled_source(current):
                 return "non_sale", "redirecționare către o sursă eliminată"
             if not public_url(current):
@@ -638,6 +658,17 @@ async def _verify_offer(listing: dict, client) -> tuple:
                 current = urljoin(current, response.headers["location"])
                 continue
             state, reason = inspect_page(listing, response.text, response.status_code, current)
+            if (state == 'unknown' and (urlsplit(current).hostname or '').lower()
+                    in ('willhaben.at','www.willhaben.at')):
+                try:
+                    from willhaben_reader import fetch as private_read
+                    private = await private_read(current,client)
+                    if private is not None and private[0] in (200,404,410):
+                        code, rendered, final = private
+                        state, reason = inspect_page(listing, rendered, code, final)
+                        reason = 'Private US native: ' + reason
+                except Exception:
+                    pass  # Existing independent reserve remains; never invent stock.
             if (state == 'unknown' and response.status_code in (247,403)
                     and (urlsplit(current).hostname or '').lower() in ('gumtree.com','www.gumtree.com')):
                 try:

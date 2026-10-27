@@ -91,6 +91,9 @@ class Config:
     DUCKDUCKGO_GUARD_HOURS = max(10, int(os.getenv('DUCKDUCKGO_GUARD_HOURS','10')))
     DETAIL_WORKER_ENABLED = _bool('DETAIL_WORKER_ENABLED', 'true')
     DETAIL_WORKER_BATCH = min(12, max(1, int(os.getenv('DETAIL_WORKER_BATCH', '12'))))
+    # Optional fixed-host anonymous reader on the project's private US network.
+    # Empty keeps the historical direct/Exa paths. No public proxy or cookies.
+    WILLHABEN_READER_URL = os.getenv('WILLHABEN_READER_URL', '')
 
     # Apify Facebook: invoked by the existing scheduler, never a second cron.
     APIFY_TOKEN = os.getenv("APIFY_TOKEN", "")

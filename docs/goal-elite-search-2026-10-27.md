@@ -62,6 +62,8 @@ Codul fără licență ori dependent de sesiunea Chrome/macOS nu se copiază orb
 
 ## Verificare, publicare și încheiere
 
+Actualizare28octombrie: carantina Classy cerută explicit este publicată înca6de43/CI40595270742 și confirmată în instanța reală (ready/private200,unauth401,SQLiteok,10receipts păstrate/timere0). Activarea readerului privat US Willhaben adaugă rută nativă, nu înlocuiește interogări ori cote existente;26suite obligatorii, legare dequery/IDoriginal și rezervă40/zi exclusiv căutărilor core. Testele simulate și probele US10query nu reprezintă acceptarea live a integrării: se verifică commitul/CI/deploymentul efectiv, ruta privată și apoi un ciclu normal complet, fără fresh=1/resetări. Apify la ultima citire4.257288USD/5incluse, maximum planificat16ture×.085=1.36USD fațăde.7427rămase: nu se cumpără automat și nu se deblochează piloturi auxiliare din rezerva turelor.
+
 Baseline8204a53. Difful complet trebuie revizuit împreună cu contractul de acoperire. Păstrează14suite și adaugă regresii semnificative pentru bugurile reale, concurență/bugete, schema Actorilor, pagini multilingve/listă/produs/ended, restart/cozi/deadline, outbox și oprirea alarmelor. Niciun test plătit sau TEST live repetitiv.
 
 Actualizează CLAUDE.md/docs; commit/push main după verificări; CI/predeploy și versiunea Railway efectivă se verifică. Citește până la capăt o rulare relevantă: interogări NOI, nu doar cache/cozi; rezultate brute, nu număr presupus de viori; livrare, nu citire presupusă. Nu reseta cote/cursori sau istoric pentru un rezultat verde.

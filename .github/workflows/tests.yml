@@ -34,6 +34,8 @@ jobs:
       - run: python -m tests.test_duckduckgo
       - run: python -m tests.test_public_node_fetch
       - run: python -m tests.test_source_review
+      - run: python -m tests.test_willhaben_reader
+      - run: python -m tests.test_willhaben_reader_contract
       - run: python -m tests.test_native_recall
       - run: python -m tests.test_native_cards
       - run: python -m tests.test_native_asia_cards

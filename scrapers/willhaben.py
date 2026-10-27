@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 from scrapers.base import BaseScraper, BROWSER_HEADERS
 from native_candidates import card_hints
 from primary_page_reserve import fresh_willhaben_search, remember_market_search
+from willhaben_reader import fetch as private_read, ReaderUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ class WillhabenScraper(BaseScraper):
             for kw, search_url in search_plan():
                 try:
                     failures_before=len(self.failures)
+                    attempts_before=self.requests_attempted
+                    ok_before=self.requests_ok
+                    self.record_discovery_query(f'native keyword={kw!r} category={search_url}')
                     resp = await client.get(search_url, params={"keyword": kw})
                     adverts=None
                     parse_error=None
@@ -57,6 +61,23 @@ class WillhabenScraper(BaseScraper):
                             adverts = self._extract(resp.text)
                         except ValueError as exc:
                             parse_error=str(exc)
+                    if adverts is None:
+                        try:
+                            private = await private_read(str(httpx.URL(search_url,params={'keyword':kw})),client)
+                            if private is not None:
+                                code, body, final = private
+                                if code != 200:
+                                    raise ReaderUnavailable(f'private US upstream HTTP {code}')
+                                adverts = self._extract(body, expected_query=kw)
+                                self.requests_recovered += (self.requests_attempted-attempts_before
+                                                            -(self.requests_ok-ok_before))
+                                del self.failures[failures_before:]
+                                log.info("Willhaben private US native keyword=%r category=%s: %s raw adverts",
+                                         kw,search_url,len(adverts))
+                        except (ReaderUnavailable, ValueError) as exc:
+                            # Keep existing Exa/cache fallback and explicit partial
+                            # health; a reader's HTTP200 alone proves nothing.
+                            parse_error = str(exc)
                     if adverts is None:
                         recovered=await fresh_willhaben_search(str(httpx.URL(search_url,params={'keyword':kw})),client)
                         try:
@@ -168,7 +189,7 @@ class WillhabenScraper(BaseScraper):
         return adverts,len(adverts)==min(total,30)
 
     @staticmethod
-    def _extract(html: str) -> list:
+    def _extract(html: str, expected_query: str = None) -> list:
         soup = BeautifulSoup(html, "lxml")
         el = soup.find("script", id="__NEXT_DATA__")
         if not el or not el.string:
@@ -183,6 +204,8 @@ class WillhabenScraper(BaseScraper):
             raise ValueError("Willhaben searchResult missing (access or layout change)") from exc
         if not isinstance(sr, dict):
             raise ValueError("Willhaben searchResult missing (access or layout change)")
+        if expected_query is not None and sr.get('searchTitle') != expected_query:
+            raise ValueError('Willhaben: native search keyword echo mismatch')
         summary = sr.get("advertSummaryList") or {}
         if not isinstance(summary, dict):
             raise ValueError("Willhaben advert list invalid")
