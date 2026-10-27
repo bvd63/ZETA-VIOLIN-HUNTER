@@ -141,6 +141,60 @@ class GumRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scraper.health_error(),'')
         self.assertGreater(scraper.fetched,0)
 
+    async def test_node_http_response_and_layout_failures_are_counted_separately(self):
+        for status,html in ((200,'<html>unrecognized shell</html>'),(247,'challenge')):
+            with self.subTest(status=status):
+                scraper=GumtreeScraper();scraper.reset_health()
+                async def requested(request): scraper.requests_attempted += 1
+                async def responded(response): scraper.failures.append('HTTP 247 (gumtree.com)')
+                client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(247)),
+                    event_hooks={'request':[requested],'response':[responded]})
+                class Browser:
+                    async def __aenter__(self): return self
+                    async def __aexit__(self,*args): pass
+                    async def fetch(self,*args): return 247,''
+                with patch.object(scraper,'make_client',return_value=client), \
+                     patch('scrapers.gumtree.PublicSearchBrowser',return_value=Browser()), \
+                     patch('scrapers.gumtree.node_fetch',AsyncMock(return_value=(status,html,URL))), \
+                     patch('scrapers.gumtree.market_queries',return_value=['zeta']), \
+                     patch('scrapers.gumtree.fresh_gumtree_search',AsyncMock(return_value={'_error':'unavailable'})), \
+                     patch('asyncio.sleep',new_callable=AsyncMock):
+                    self.assertEqual(await scraper.search(),[])
+                self.assertEqual(scraper.requests_attempted,4)
+                self.assertEqual(scraper.requests_ok,1 if status==200 else 0)
+                self.assertEqual(scraper.fetched,0)
+                health=scraper.health_error()
+                self.assertTrue(health)
+                self.assertNotIn('without response',health)
+                self.assertNotIn('Gumtree Node fallback ValueError',health)
+                if status==200:
+                    self.assertTrue(any('Node layout:' in error for error in scraper.content_failures))
+                else:
+                    self.assertIn('Node HTTP 247 (gumtree.com)',scraper.failures)
+
+    async def test_browser_recovery_after_node_200_invalid_layout(self):
+        fixture=(Path(__file__).parent/'fixtures/gumtree_cards_2026.html').read_text()
+        scraper=GumtreeScraper();scraper.reset_health()
+        async def requested(request): scraper.requests_attempted += 1
+        async def responded(response): scraper.failures.append('HTTP 247 (gumtree.com)')
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(247)),
+            event_hooks={'request':[requested],'response':[responded]})
+        class Browser:
+            async def __aenter__(self): return self
+            async def __aexit__(self,*args): pass
+            async def fetch(self,*args): return 200,fixture
+        with patch.object(scraper,'make_client',return_value=client), \
+             patch('scrapers.gumtree.PublicSearchBrowser',return_value=Browser()), \
+             patch('scrapers.gumtree.node_fetch',AsyncMock(return_value=(200,'<html>shell</html>',URL))), \
+             patch('scrapers.gumtree.market_queries',return_value=['zeta']), \
+             patch('scrapers.gumtree.fresh_gumtree_search',AsyncMock()) as exa, \
+             patch('asyncio.sleep',new_callable=AsyncMock):
+            await scraper.search()
+        self.assertEqual((scraper.requests_attempted,scraper.requests_ok,scraper.requests_recovered),(4,2,2))
+        self.assertEqual(scraper.health_error(),'')
+        self.assertGreater(scraper.fetched,0)
+        exa.assert_not_awaited()
+
 
 if __name__ == '__main__':
     unittest.main()

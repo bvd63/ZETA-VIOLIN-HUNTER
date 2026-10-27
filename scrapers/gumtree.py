@@ -73,13 +73,18 @@ class GumtreeScraper(BaseScraper):
                             code, node_html, _ = await node_fetch(str(httpx.URL(SEARCH_URL,
                                 params={'search_category':'all', 'q':kw})))
                             if code != 200:
-                                raise ValueError(f'HTTP {code}')
-                            tiles = self._extract(node_html)
-                            self.requests_ok += 1
-                            self.requests_recovered += max(0, self.requests_attempted-attempted_before-(self.requests_ok-ok_before))
-                            del self.failures[failures_before:]
-                            del self.content_failures[content_before:]
-                            log.info("Gumtree '%s': Node recovered %s cards", kw, len(tiles))
+                                self.failures.append(f'Node HTTP {code} (gumtree.com)')
+                            else:
+                                self.requests_ok += 1
+                                try:
+                                    tiles = self._extract(node_html)
+                                except ValueError as exc:
+                                    self.content_failures.append('Gumtree Node layout: ' + str(exc))
+                                if tiles is not None:
+                                    self.requests_recovered += max(0, self.requests_attempted-attempted_before-(self.requests_ok-ok_before))
+                                    del self.failures[failures_before:]
+                                    del self.content_failures[content_before:]
+                                    log.info("Gumtree '%s': Node recovered %s cards", kw, len(tiles))
                         except Exception as exc:
                             self.content_failures.append('Gumtree Node fallback '+type(exc).__name__)
                     if tiles is None and (resp.status_code in (200, 247, 403)):
