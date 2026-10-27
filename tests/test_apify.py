@@ -36,6 +36,52 @@ CASE, STRADOS_2001 = json.loads((Path(__file__).parent / "fixtures/facebook_2200
 
 
 class ApifyTests(unittest.TestCase):
+    def test_operator_preview_cannot_reserve_scheduled_actor_work(self):
+        import apify_preview
+        from work_context import work_kind, spending_scope
+        observed={}
+        async def inspect(scraper):
+            observed.update(auxiliary=scraper.auxiliary_work,lane=work_kind.get())
+            return []
+        with patch.object(ApifyFacebookScraper,'search',inspect), spending_scope('core'):
+            result=asyncio.run(apify_preview.preview('',True))
+            self.assertEqual(work_kind.get(),'core')
+        self.assertEqual(observed,{'auxiliary':True,'lane':'auxiliary'})
+        self.assertEqual(result['verified_count'],0)
+
+    def test_curious_primary_description_and_snake_photos_are_preserved(self):
+        row={'listingUrl':'https://www.facebook.com/marketplace/item/123456/',
+             'marketplace_listing_title':'Instrument in excellent condition',
+             'redacted_description':{'text':'Used Zeta Jazz Fusion JV5 violon with original pickup and case.'},
+             'location_text':{'text':'Seattle, WA'},
+             'listing_photos':[{'image':{'uri':'https://example.com/violin.jpg'}}],
+             'listing_price':{'amount':'1700','currency':'USD'},
+             'is_live':True,'is_sold':False,'is_pending':False}
+        item=normalize(row)
+        self.assertEqual(item['description'],row['redacted_description']['text'])
+        self.assertEqual(item['image_url'],'https://example.com/violin.jpg')
+        self.assertEqual(item['location'],'Seattle, WA')
+        self.assertEqual(classify(item),'')
+        self.assertTrue(available(item))
+        self.assertEqual(normalize({**row,'description':{'text':None}})['description'],item['description'])
+        self.assertEqual(normalize({**row,'description':'Full primary Zeta violin description'})['description'],
+                         'Full primary Zeta violin description')
+
+    def test_malformed_text_and_nonfinite_price_do_not_become_listing_evidence(self):
+        row={'url':'https://www.facebook.com/marketplace/item/123456/','title':'Zeta JV5',
+             'description':{'text':None},'priceValue':float('nan'),'isLive':True,'isSold':False,'isPending':False}
+        item=normalize(row)
+        self.assertEqual(item['description'],'')
+        self.assertEqual(item['price'],'N/A')
+        self.assertEqual(normalize({**row,'title':{'text':['Zeta','violin']}}),{})
+        for field in ('listingPrice','listing_price'):
+            for amount in (True,False,float('nan'),float('inf'),10**400,-4,'-4','NaN','Infinity'):
+                with self.subTest(field=field,amount=amount):
+                    self.assertEqual(normalize({**row,field:{'amount':amount,'currency':'USD'}})['price'],'N/A')
+            for amount in (0,'1500.00','1,500.00','1.500,00'):
+                with self.subTest(field=field,amount=amount):
+                    self.assertEqual(normalize({**row,field:{'amount':amount,'currency':'EUR'}})['price'],f'{amount} EUR')
+
     def setUp(self):
         self.config = patch.multiple(Config, APIFY_TOKEN="test-token", APIFY_ENABLED=True,
             APIFY_DISCOVERY_TASK_ID="discoveryTask", APIFY_DETAILS_TASK_ID="detailsTask",

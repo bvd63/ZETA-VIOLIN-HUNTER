@@ -37,12 +37,26 @@ def _money(value: float) -> int:
 
 
 def _text(value: object) -> str:
-    return str(value.get("text", "")) if isinstance(value, dict) else str(value or "")
+    value = value.get('text') if isinstance(value,dict) else value
+    return value if isinstance(value,str) else ''
 
 
 def _flag(row: dict, camel: str, snake: str) -> object:
     value = row.get(camel, row.get(snake))
     return value if isinstance(value, bool) else None
+
+
+def _price_amount(value: object):
+    if isinstance(value,bool):
+        return None
+    if isinstance(value,(int,float)):
+        try:
+            return value if math.isfinite(value) and value >= 0 else None
+        except OverflowError:
+            return None
+    if isinstance(value,str) and re.fullmatch(r'[0-9]+(?:[.,\s][0-9]+)*',value.strip()):
+        return value.strip()
+    return None
 
 
 def normalize(row: dict) -> dict:
@@ -65,16 +79,18 @@ def normalize(row: dict) -> dict:
     price = row.get("listingPrice") or row.get("listing_price") or {}
     if not isinstance(price, dict):
         price = {}
-    if not price and isinstance(row.get('priceValue'), (int, float)) and not isinstance(row.get('priceValue'), bool):
+    amount = _price_amount(price.get('amount'))
+    if amount is None and _price_amount(row.get('priceValue')) is not None:
         price = {'amount': row['priceValue'], 'currency': row.get('priceCurrency') or 'USD'}
-    location = _text(row.get("locationText"))
+        amount = _price_amount(row['priceValue'])
+    location = _text(row.get("locationText")) or _text(row.get('location_text'))
     if not location:
         raw_location = row.get("location")
         geo = raw_location.get("reverse_geocode", {}) if isinstance(raw_location, dict) else {}
         geo = geo if isinstance(geo, dict) else {}
         location = ", ".join(str(geo[k]) for k in ("city", "state") if geo.get(k))
     photo = row.get("primaryListingPhoto") or row.get("primary_listing_photo") or {}
-    photos = row.get("listingPhotos") or []
+    photos = row.get("listingPhotos") or row.get('listing_photos') or []
     if not photo and isinstance(photos, list) and photos:
         photo = photos[0]
     photo = photo if isinstance(photo, dict) else {}
@@ -87,9 +103,9 @@ def normalize(row: dict) -> dict:
     return {
         "id": BaseScraper()._make_id("facebook_marketplace", item_id),
         "platform": "Facebook Marketplace", "title": title,
-        "price": f"{price['amount']} {price.get('currency', 'USD')}" if price.get("amount") is not None else "N/A",
+        "price": f"{amount} {price.get('currency', 'USD')}" if amount is not None else "N/A",
         "location": location or "Unknown", "url": f"https://www.facebook.com/marketplace/item/{item_id}/",
-        "description": _text(row.get("description") or (
+        "description": (_text(row.get('description')) or _text(row.get('redacted_description')) or _text(
             row.get('moreDetails', {}).get('redacted_description') if isinstance(row.get('moreDetails'), dict) else '')),
         "condition": _text(row.get("condition")),
         "image_url": image, "relevance_score": 8, "provider": "apify",

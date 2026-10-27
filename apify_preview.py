@@ -23,7 +23,12 @@ async def preview(run_id: str, search: bool, check: bool = False) -> dict:
     if not scraper.is_configured():
         raise RuntimeError("Apify is not configured")
     if search:
-        listings = await scraper.search()
+        # An operator preview must never take a scheduled discovery guard or
+        # borrow its account-credit reserve. This does not force discovery.
+        from work_context import spending_scope
+        scraper.auxiliary_work = True
+        with spending_scope('auxiliary'):
+            listings = await scraper.search()
     else:
         async with scraper.make_client(timeout=30, follow_redirects=False,
                 headers={"Authorization": "Bearer " + Config.APIFY_TOKEN}) as client:

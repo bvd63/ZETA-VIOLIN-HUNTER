@@ -1,0 +1,634 @@
+{
+  "checkedAt": "2026-10-27",
+  "source": "Public Apify actor input schemas and pricing snapshot",
+  "actors": {
+    "curious_coder/facebook-marketplace": {
+      "id": "Y0QGH7cuqgKtNbEgt",
+      "modifiedAt": "2026-10-23T15:12:20.207Z",
+      "pricing": {
+        "model": "PAY_PER_EVENT",
+        "userTier": "FREE",
+        "events": [
+          {
+            "title": "Listing item basic info",
+            "priceUsd": 0.0005
+          },
+          {
+            "title": "Listing item full details",
+            "priceUsd": 0.001
+          },
+          {
+            "title": "Actor Start",
+            "priceUsd": 5e-05
+          }
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "urls": {
+            "type": "array"
+          },
+          "searchKeyword": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "radiusKm": {
+            "type": "integer"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "sortBy": {
+            "type": "string",
+            "default": "",
+            "enum": [
+              "creation_time_descend",
+              "price_ascend",
+              "price_descend",
+              "distance_ascend"
+            ]
+          },
+          "minPrice": {
+            "type": "integer"
+          },
+          "maxPrice": {
+            "type": "integer"
+          },
+          "condition": {
+            "type": "array"
+          },
+          "daysSinceListed": {
+            "type": "string",
+            "default": "",
+            "enum": [
+              "1",
+              "7",
+              "30"
+            ]
+          },
+          "availability": {
+            "type": "string",
+            "default": "",
+            "enum": [
+              "in_stock",
+              "out_of_stock"
+            ]
+          },
+          "deliveryMethod": {
+            "type": "string",
+            "default": "",
+            "enum": [
+              "local_pickup",
+              "shipping"
+            ]
+          },
+          "getListingDetails": {
+            "type": "boolean",
+            "default": true
+          },
+          "getAllListingPhotos": {
+            "type": "boolean",
+            "default": true
+          },
+          "strictFiltering": {
+            "type": "boolean",
+            "default": false
+          },
+          "maxPagesPerUrl": {
+            "type": "integer"
+          },
+          "untilDate": {
+            "type": "string"
+          },
+          "proxy": {
+            "type": "object"
+          },
+          "cookies": {
+            "type": "string"
+          },
+          "onlyNewListings": {
+            "type": "boolean",
+            "default": false
+          },
+          "cacheStorageId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "blackfalcondata/facebook-marketplace-scraper": {
+      "id": "NpEChqaFXdnxtywjD",
+      "modifiedAt": "2026-10-26T19:45:49.541Z",
+      "pricing": {
+        "model": "PAY_PER_EVENT",
+        "userTier": "FREE",
+        "events": [
+          {
+            "title": "Actor Start",
+            "priceUsd": 0.005
+          },
+          {
+            "title": "Result",
+            "priceUsd": 0.0009
+          }
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "startUrls": {
+            "type": "array",
+            "default": []
+          },
+          "location": {
+            "type": "string"
+          },
+          "radiusKm": {
+            "type": "integer",
+            "default": 65
+          },
+          "strictRadius": {
+            "type": "boolean",
+            "default": false
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "minPrice": {
+            "type": "integer"
+          },
+          "maxPrice": {
+            "type": "integer"
+          },
+          "conditions": {
+            "type": "array",
+            "default": []
+          },
+          "categories": {
+            "type": "array",
+            "default": []
+          },
+          "sortBy": {
+            "type": "string",
+            "default": "relevance",
+            "enum": [
+              "relevance",
+              "newest",
+              "price_low_to_high",
+              "price_high_to_low",
+              "distance"
+            ]
+          },
+          "availableOnly": {
+            "type": "boolean",
+            "default": true
+          },
+          "deliveryMethod": {
+            "type": "string",
+            "default": "any",
+            "enum": [
+              "any",
+              "local_pickup",
+              "shipping"
+            ]
+          },
+          "daysSinceListed": {
+            "type": "integer"
+          },
+          "categoryId": {
+            "type": "string"
+          },
+          "strictQueryMatch": {
+            "type": "boolean",
+            "default": false
+          },
+          "browseWithoutQuery": {
+            "type": "boolean",
+            "default": false
+          },
+          "maxResults": {
+            "type": "integer",
+            "default": 100
+          },
+          "includeDetails": {
+            "type": "boolean",
+            "default": true
+          },
+          "descriptionMaxLength": {
+            "type": "integer",
+            "default": 0
+          },
+          "compact": {
+            "type": "boolean",
+            "default": false
+          },
+          "incrementalMode": {
+            "type": "boolean",
+            "default": false
+          },
+          "stateKey": {
+            "type": "string"
+          },
+          "emitUnchanged": {
+            "type": "boolean",
+            "default": false
+          },
+          "telegramToken": {
+            "type": "string"
+          },
+          "telegramChatId": {
+            "type": "string"
+          },
+          "discordWebhookUrl": {
+            "type": "string"
+          },
+          "slackWebhookUrl": {
+            "type": "string"
+          },
+          "whatsappAccessToken": {
+            "type": "string"
+          },
+          "whatsappPhoneNumberId": {
+            "type": "string"
+          },
+          "whatsappTo": {
+            "type": "string"
+          },
+          "webhookUrl": {
+            "type": "string"
+          },
+          "webhookHeaders": {
+            "type": "object"
+          },
+          "notificationLimit": {
+            "type": "integer",
+            "default": 5
+          },
+          "notifyOnlyChanges": {
+            "type": "boolean",
+            "default": false
+          },
+          "appConnector": {
+            "type": "string"
+          },
+          "mcpIssueTeam": {
+            "type": "string"
+          },
+          "excludeEmptyFields": {
+            "type": "boolean",
+            "default": false
+          },
+          "descriptionFormat": {
+            "type": "string",
+            "default": "all",
+            "enum": [
+              "all",
+              "text",
+              "html",
+              "markdown"
+            ]
+          },
+          "cityName": {
+            "type": "string"
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lon": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "memo23/facebook-marketplace-scraper-ppe": {
+      "id": "eaycjEuCMKHBDuL9z",
+      "modifiedAt": "2026-10-25T13:37:17.237Z",
+      "pricing": {
+        "model": "PAY_PER_EVENT",
+        "userTier": "FREE",
+        "events": [
+          {
+            "title": "result",
+            "priceUsd": 0.0015
+          },
+          {
+            "title": "Additional cost for monitoring mode",
+            "priceUsd": 0.001
+          },
+          {
+            "title": "Actor Start",
+            "priceUsd": 0.005
+          },
+          {
+            "title": "Detail page enrichment",
+            "priceUsd": 0.001
+          }
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "startUrls": {
+            "type": "array"
+          },
+          "searchQuery": {
+            "type": "string"
+          },
+          "sortBy": {
+            "type": "string",
+            "default": "best_match",
+            "enum": [
+              "best_match",
+              "creation_time_descend",
+              "price_ascend",
+              "price_descend",
+              "distance_ascend"
+            ]
+          },
+          "daysSinceListed": {
+            "type": "string",
+            "default": "0",
+            "enum": [
+              "0",
+              "1",
+              "7",
+              "30"
+            ]
+          },
+          "availability": {
+            "type": "string",
+            "default": "in stock",
+            "enum": [
+              "in stock",
+              "out of stock"
+            ]
+          },
+          "deliveryMethod": {
+            "type": "string",
+            "default": "all",
+            "enum": [
+              "all",
+              "local_pick_up",
+              "shipping"
+            ]
+          },
+          "conditionNew": {
+            "type": "boolean",
+            "default": false
+          },
+          "conditionUsedLikeNew": {
+            "type": "boolean",
+            "default": false
+          },
+          "conditionUsedGood": {
+            "type": "boolean",
+            "default": false
+          },
+          "conditionUsedFair": {
+            "type": "boolean",
+            "default": false
+          },
+          "minPrice": {
+            "type": "integer",
+            "default": 0
+          },
+          "maxPrice": {
+            "type": "integer",
+            "default": 0
+          },
+          "countryPreset": {
+            "type": "string",
+            "default": "",
+            "enum": [
+              "usa",
+              "usa_full",
+              "can",
+              "mex",
+              "bra",
+              "arg",
+              "aus",
+              "nzl",
+              "ind",
+              "gbr",
+              "fra",
+              "spa",
+              "usa_metros",
+              "can_full",
+              "mex_full",
+              "bra_full",
+              "arg_full",
+              "aus_full",
+              "nzl_full",
+              "ind_full",
+              "gbr_full",
+              "fra_full",
+              "spa_full"
+            ]
+          },
+          "marketplaceLocation": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "radiusKm": {
+            "type": "integer",
+            "default": 200
+          },
+          "exact": {
+            "type": "boolean",
+            "default": false
+          },
+          "categories": {
+            "type": "array"
+          },
+          "categoryId": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "includeSeller": {
+            "type": "boolean",
+            "default": false
+          },
+          "mustMentionKeywords": {
+            "type": "array"
+          },
+          "excludeKeywords": {
+            "type": "array"
+          },
+          "flattenOutput": {
+            "type": "boolean",
+            "default": false
+          },
+          "monitoringMode": {
+            "type": "boolean",
+            "default": false
+          },
+          "maxListingAgeHours": {
+            "type": "integer",
+            "default": 0
+          },
+          "untilDate": {
+            "type": "string"
+          },
+          "cacheStorageId": {
+            "type": "string"
+          },
+          "resetMonitoringCache": {
+            "type": "boolean",
+            "default": false
+          },
+          "preciseLocation": {
+            "type": "boolean",
+            "default": false
+          },
+          "locationResultsMode": {
+            "type": "string",
+            "default": "maximize_results",
+            "enum": [
+              "maximize_results",
+              "mark_far_results",
+              "only_nearby_results"
+            ]
+          },
+          "cookies": {
+            "type": "array"
+          },
+          "maxItems": {
+            "type": "integer",
+            "default": 100
+          },
+          "minDelay": {
+            "type": "integer",
+            "default": 2
+          },
+          "maxDelay": {
+            "type": "integer",
+            "default": 5
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "default": 10
+          },
+          "minConcurrency": {
+            "type": "integer",
+            "default": 1
+          },
+          "maxRequestRetries": {
+            "type": "integer",
+            "default": 10
+          },
+          "proxy": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "apify/facebook-marketplace-scraper": {
+      "id": "U5DUNxhH3qKt5PnCf",
+      "modifiedAt": "2026-10-26T20:12:39.962Z",
+      "pricing": {
+        "model": "PAY_PER_EVENT",
+        "userTier": "FREE",
+        "events": [
+          {
+            "title": "Listing",
+            "tieredPricing": [
+              {
+                "tier": "FREE",
+                "priceUsd": 0.0062
+              },
+              {
+                "tier": "BRONZE",
+                "priceUsd": 0.005
+              },
+              {
+                "tier": "SILVER",
+                "priceUsd": 0.0038
+              },
+              {
+                "tier": "GOLD",
+                "priceUsd": 0.0026
+              },
+              {
+                "tier": "PLATINUM",
+                "priceUsd": 0.0015
+              },
+              {
+                "tier": "DIAMOND",
+                "priceUsd": 0.0008
+              }
+            ]
+          },
+          {
+            "title": "Add-on: Listing details",
+            "tieredPricing": [
+              {
+                "tier": "FREE",
+                "priceUsd": 0.0062
+              },
+              {
+                "tier": "BRONZE",
+                "priceUsd": 0.005
+              },
+              {
+                "tier": "SILVER",
+                "priceUsd": 0.0038
+              },
+              {
+                "tier": "GOLD",
+                "priceUsd": 0.0026
+              },
+              {
+                "tier": "PLATINUM",
+                "priceUsd": 0.0015
+              },
+              {
+                "tier": "DIAMOND",
+                "priceUsd": 0.0008
+              }
+            ]
+          }
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "startUrls"
+        ],
+        "properties": {
+          "startUrls": {
+            "type": "array"
+          },
+          "resultsLimit": {
+            "type": "integer"
+          },
+          "includeListingDetails": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    }
+  }
+}
