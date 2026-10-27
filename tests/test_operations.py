@@ -22,6 +22,28 @@ import main
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_predeploy_children_cannot_write_the_injected_live_database(self):
+        import deploy_check
+        paths = []
+        with tempfile.TemporaryDirectory() as temp:
+            live = Path(temp) / 'live.db'
+            live.write_bytes(b'live database must remain untouched')
+            before = live.read_bytes()
+            def child(command, *, check, env):
+                path = Path(env['DB_PATH'])
+                self.assertNotEqual(path,live)
+                self.assertTrue(path.parent.is_dir())
+                with sqlite3.connect(path) as conn:
+                    conn.execute('CREATE TABLE isolated_fixture (marker TEXT)')
+                paths.append(path)
+            with patch.dict(os.environ,{'DB_PATH':str(live)}), patch('deploy_check.subprocess.run',side_effect=child):
+                deploy_check.main()
+                self.assertEqual(os.environ['DB_PATH'],str(live))
+            self.assertEqual(live.read_bytes(),before)
+        self.assertTrue(paths)
+        self.assertEqual(len(paths),len(set(paths)))
+        self.assertTrue(all(not path.exists() for path in paths))
+
     def test_online_backup_contains_uncheckpointed_wal_and_restores_separately(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'live.db'

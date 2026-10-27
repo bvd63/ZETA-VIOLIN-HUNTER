@@ -2,10 +2,13 @@
 
 import subprocess
 import sys
+import os
+import tempfile
+from pathlib import Path
 
 
 def main():
-    for module, arguments in (
+    checks = (
         ("tests.test_filters", []),
         ("tests.test_trackers", []),
         ("tests.test_dedup", []),
@@ -27,15 +30,23 @@ def main():
         ("tests.test_source_review", []),
         ("tests.test_willhaben_reader", []),
         ("tests.test_willhaben_reader_contract", []),
+        ("tests.test_reverb_api", []),
+        ("tests.test_reverb_discovery", []),
+        ("tests.test_reverb_workflow", []),
         ("tests.test_native_recall", []),
         ("tests.test_native_cards", []),
         ("tests.test_native_asia_cards", []),
         ("tests.test_apify_compare", []),
         ("tests.test_facebook_unknown", []),
         ("apify_preview", ["--check"]),
-    ):
-        print(f"Pre-deploy check: {module}", flush=True)
-        subprocess.run([sys.executable, "-m", module, *arguments], check=True)
+    )
+    # Railway injects the live DB_PATH into pre-deploy commands. Every child
+    # gets an isolated file even if a future test forgets its own fixture.
+    with tempfile.TemporaryDirectory(prefix='zeta-predeploy-') as directory:
+        for module, arguments in checks:
+            print(f"Pre-deploy check: {module}", flush=True)
+            env = {**os.environ, 'DB_PATH':str(Path(directory) / (module + '.db'))}
+            subprocess.run([sys.executable, "-m", module, *arguments], check=True, env=env)
     print("Pre-deploy checks complete", flush=True)
 
 

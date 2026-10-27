@@ -39,6 +39,9 @@ jobs:
       - run: python -m tests.test_source_review
       - run: python -m tests.test_willhaben_reader
       - run: python -m tests.test_willhaben_reader_contract
+      - run: python -m tests.test_reverb_api
+      - run: python -m tests.test_reverb_discovery
+      - run: python -m tests.test_reverb_workflow
       - run: python -m tests.test_native_recall
       - run: python -m tests.test_native_cards
       - run: python -m tests.test_native_asia_cards

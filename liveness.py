@@ -94,20 +94,45 @@ async def is_live(url: str, client: httpx.AsyncClient) -> tuple:
     """(alive: bool, reason: str). Network errors count as alive (we prefer a
     stale alert over a missed instrument)."""
     m = REVERB_ITEM_RX.search(url)
-    if m:
+    host = (urlsplit(url).hostname or '').lower()
+    if m and (host == 'reverb.com' or host.endswith('.reverb.com')):
         try:
-            r = await client.get(
-                f"https://api.reverb.com/api/listings/{m.group(1)}",
-                headers={"Accept": "application/hal+json", "Accept-Version": "3.0", "User-Agent": UA},
-            )
+            from reverb_api import get_listing, listing_state
+            r = await get_listing(client, m.group(1))
             if r.status_code == 404:
                 return False, "reverb: not found"
             if r.status_code == 200:
-                state = ((r.json().get("state") or {}).get("slug") or "").lower()
-                return (state == "live"), f"reverb state={state or '?'}"
+                try:
+                    data = r.json()
+                    state = listing_state(data, m.group(1))
+                    if state == 'live' and (any(data.get(k) is not None and not isinstance(data[k],str)
+                            for k in ('title','description','make','model','finish'))
+                            or any(data.get(k) is not None and not isinstance(data[k],dict)
+                                   for k in ('condition','price'))):
+                        state = 'unknown'
+                except (ValueError, TypeError):
+                    state = 'unknown'
+                if state != 'unknown':
+                    return (state == 'live'), f"reverb state={state}"
         except Exception as e:
             log.debug(f"reverb liveness error {url}: {e}")
     try:
+        from offer_verifier import _reverb_item_id, inspect_page
+        from urllib.parse import urljoin
+        original = _reverb_item_id(url)
+        if original:
+            current = url
+            for _ in range(5):
+                if _reverb_item_id(current) != original:
+                    return True, 'reverb redirect identity unknown (kept)'
+                r = await client.get(current, follow_redirects=False, headers={"User-Agent": UA,
+                    "Accept":"text/html,*/*;q=0.8", "Accept-Language":"en-US,en;q=0.9"})
+                if r.is_redirect and r.headers.get('location'):
+                    current = urljoin(current,r.headers['location'])
+                    continue
+                state, reason = inspect_page({'url':url,'title':'','source':'search'},r.text,r.status_code,current)
+                return state != 'dead', reason
+            return True, 'reverb redirect limit (kept)'
         r = await client.get(url, headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.8",
                                            "Accept-Language": "en-US,en;q=0.9"})
         reason = looks_dead(r.status_code, url, str(r.url), r.text)

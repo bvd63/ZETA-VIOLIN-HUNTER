@@ -323,7 +323,12 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                         db.touch_active(listing)  # still live on its platform this cycle
                     url_delivered = db.was_url_alerted(listing.get("url", ""), listing.get("auction_end", ""))
                     new_auction = bool(listing.get("auction_end")) and not url_delivered
-                    if (db.is_seen(listing["id"]) and not new_auction) or url_delivered:
+                    # A primary Reverb LIVE response can reopen an item whose
+                    # old terminal check marked it seen without ever delivering.
+                    # Keep all history and the stronger URL-delivery dedup.
+                    reopened_reverb = (scraper.name == 'Reverb' and listing.get('_reverb_api_live') is True
+                                       and listing.get('source') != 'search' and not url_delivered)
+                    if (db.is_seen(listing["id"]) and not new_auction and not reopened_reverb) or url_delivered:
                         if listing.get("source") == "search":
                             to_verify.append(listing)
                             continue

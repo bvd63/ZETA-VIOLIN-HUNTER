@@ -1,5 +1,15 @@
 # Resurse și criterii de integrare
 
+## Recuperare Reverb prin contractul API oficial
+
+Proba actuală din serverul Railway Singapore a comparat aceeași cheie existentă pe același endpoint public: X-Auth-Token403, X-Auth-Token cu Content-Type HAL403, Bearer cu Content-Type HAL200/listă validă, anonim403. Prin urmare, schimbarea de autentificare are dovadă de acces util pentru acest cont și egress, fără a presupune că orice403 se rezolvă prin token sau IPamerican. Nu s-a schimbat sau exportat secretul și nu s-a cumpărat acces nou.
+
+[Autentificarea curentă](https://www.reverb-api.com/docs/authentication) documentează PAT în Authorization Bearer, [scope public](https://www.reverb-api.com/docs/personal-token-scopes-1) permite citirea datelor publice, iar [antetele](https://www.reverb-api.com/docs/http-headers) descriu HAL/version3/User-Agent și filtrul opțional de livrare. Implementarea păstrează matricea10keywords+makeZeta și2pagini×50, fără filtrul RO. Probele comparabile makeZeta au întors15oferte/default,5RO și12US; toate sunt rezultate brute, inclusiv accesorii/bass/stoc nou. [Ajutorul oficial despre livrare](https://help.reverb.com/hc/en-us/articles/41988476058523-How-can-I-find-items-that-ship-to-my-country) explică de ce regiunea schimbă vizibilitatea. Aceste cifre nu demonstrează întreg inventarul sau15viori dorite.
+
+[Detaliile API](https://www.reverb-api.com/docs/updating-your-listing) au confirmat cele două exemple103084523 și102519209 ca sold. Citirea folosește același token numai pe hostul API fix, fără redirect autorizat. Starea și identitatea se validează separat; status-only nu transformă textul din index în conținut primar. Descrierile primare și metadatele permit identificarea fără cuvântul violin în titlu. Răspunsurile incomplete continuă pe HTML; probele închise sunt durabile înainte de dedup și confirmarea live actuală poate prevala. O ofertă reactivată, niciodată livrată, poate depăși vechiul seen fără ștergerea istoricului.29suite obligatorii includ regresii pentru aceste cazuri și izolarea DB a predeployului.
+
+Nu s-a găsit RSS oficial verificat sau sortare newest documentată suficient pentru activare. [Feedul și emailul zilnic](https://help.reverb.com/hc/en-us/articles/41988383227163-Saving-items-on-Reverb) pot fi o rezervă manuală; nu sunt o alertă instantanee promisă și nu au fost configurate în cont. Nu se adaugă un cron sau noi interogări plătite din această cercetare. Activarea, performanța nativă și livrarea se verifică după CI/deploy.
+
 ## Recuperare Willhaben prin rută privată regională
 
 Proba paginii individuale cunoscute1363838209 a primit308 către categoria Willhaben cu parametrul unic `fromExpiredAdId=1363838209`: aceasta confirmă expirarea acelei oferte, fără a inventa HTTP410 sau disponibilitate activă. Contractul v2 păstrează Location și statusul real; verificatorul recunoaște numai semnalul legat de ID-ul original. Redirecturile spre aceeași ofertă/interogare se pot urmări în maximum3hopuri, cu rezervare separată pentru fiecare cerere și același deadline total. Categoria cu alt ID, parametrii suplimentari, alte gazde și buclele rămân neconfirmate.

@@ -174,8 +174,8 @@ class Config:
     REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
     REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "ZetaViolinHunter/1.0")
 
-    # --- Reverb API token — OPTIONAL. The API works without it when a browser
-    # User-Agent is sent; a token only raises rate limits. ---
+    # Personal Access Token: sent only to the fixed Reverb API using Bearer.
+    # Anonymous access is not guaranteed; never expose this value in logs.
     REVERB_API_TOKEN = os.getenv("REVERB_API_TOKEN", "")
 
     # --- OpenAI API (kept for reference, AI re-verification removed) ---

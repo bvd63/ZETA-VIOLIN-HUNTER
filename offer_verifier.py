@@ -99,6 +99,9 @@ def _reverb_item_id(url: str) -> str:
         return ''
     try:
         parts = urlsplit(url)
+        if (parts.scheme not in ('http','https') or parts.username or parts.password
+                or parts.port not in (None,80,443)):
+            return ''
     except ValueError:
         return ''
     if (parts.hostname or '').lower() not in ('reverb.com', 'www.reverb.com'):
@@ -379,6 +382,9 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     original_offerup = _offerup_item_id(listing.get('url', ''))
     if original_offerup and _offerup_item_id(final_url) != original_offerup:
         return 'unknown', 'OfferUp: redirecționare către alt anunț; necesită reverificare'
+    original_reverb = _reverb_item_id(listing.get('url', ''))
+    if original_reverb and _reverb_item_id(final_url) != original_reverb:
+        return 'unknown', 'Reverb: redirecționare către alt anunț; necesită reverificare'
     original_willhaben = _willhaben_item_id(listing.get('url', ''))
     if original_willhaben and _willhaben_item_id(final_url) != original_willhaben:
         return 'unknown', 'Willhaben: redirecționare către alt anunț; necesită reverificare'
@@ -618,20 +624,38 @@ async def _verify_offer(listing: dict, client) -> tuple:
     host = (urlsplit(url).hostname or "").lower()
     if reverb and (host == "reverb.com" or host.endswith(".reverb.com")):
         try:
-            response = await client.get(f"https://api.reverb.com/api/listings/{reverb.group(1)}",
-                headers={"User-Agent": UA, "Accept": "application/hal+json", "Accept-Version": "3.0"})
+            from reverb_api import get_listing, listing_state
+            response = await get_listing(client, reverb.group(1))
             if response.status_code == 404:
                 return "dead", "reverb: not found"
             if response.status_code == 200:
-                data = response.json()
-                state = (data.get("state") or {}).get("slug")
-                if state and state != "live":
+                try:
+                    data = response.json()
+                except (ValueError, TypeError):
+                    data = None
+                state = listing_state(data, reverb.group(1))
+                if state not in ('unknown', 'live'):
                     return "dead", f"reverb state={state}"
                 if state == "live":
+                    if (any(data.get(k) is not None and not isinstance(data[k],str)
+                            for k in ('title','description','make','model','finish'))
+                            or any(data.get(k) is not None and not isinstance(data[k],dict)
+                                   for k in ('condition','price'))):
+                        raise ValueError('invalid Reverb listing attributes')
                     from scrapers.reverb import identity_fields
-                    listing["title"] = data.get("title") or listing.get("title", "")
-                    listing["description"] = BeautifulSoup(data.get("description") or "", "lxml").get_text(" ", strip=True)
-                    listing.update(identity_fields(data))
+                    from filters import is_zeta_violin
+                    identity = identity_fields(data)
+                    api_title = (data.get('title') or '').strip()
+                    api_description = BeautifulSoup(data.get('description') or '', 'lxml').get_text(' ',strip=True)
+                    if not api_title and not is_zeta_violin('',api_description,brand=identity['brand'],
+                                                          model=identity['model'],categories=identity['categories']):
+                        # Live status alone does not identify the offered object.
+                        # Keep weak discovery in the queue if HTML is blocked.
+                        listing['_query_identity_unverified'] = True
+                        raise ValueError('Reverb primary item identity missing')
+                    listing["title"] = api_title
+                    listing["description"] = api_description
+                    listing.update(identity)
                     listing["_primary_content_checked"] = True
                     listing["condition"] = (data.get("condition") or {}).get("display_name", "")
                     price = data.get("price") or {}
@@ -643,6 +667,9 @@ async def _verify_offer(listing: dict, client) -> tuple:
     try:
         current = url
         for _ in range(5):
+            original_reverb = _reverb_item_id(listing.get('url', ''))
+            if original_reverb and _reverb_item_id(current) != original_reverb:
+                return 'unknown', 'Reverb: redirecționare către alt anunț; necesită reverificare'
             original_willhaben = _willhaben_item_id(listing.get('url', ''))
             if original_willhaben and _willhaben_item_id(current) != original_willhaben:
                 return 'unknown', 'Willhaben: redirecționare către alt anunț; necesită reverificare'
