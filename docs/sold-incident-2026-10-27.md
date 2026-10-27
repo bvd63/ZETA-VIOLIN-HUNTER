@@ -7,7 +7,7 @@ The owner reported an already sold violin. Natural cycles99/100 completed at10RO
 | 10:00 | 08:00 | 242.702338s | 8493 | 2 |
 | 22:00 | 20:00 | 153.265028s | 6928 | 1 |
 
-Both cycles report22modules and6partial/error sources. The minute worker additionally delivered a Marktplaats alert around20:02:31UTC, separate from cycle100's single new alert. Counts include nonviolins and queued work; they are not confirmed active inventory.
+Both cycles report22modules and6partial/error sources. A Marktplaats price-drop alert (EUR2200→1800,18%) was delivered around20:02:31UTC, separate from cycle100's single new alert; its stored receipt confirms the alert type. Counts include nonviolins and queued work; they are not confirmed active inventory.
 
 Each cycle attempted16freshTavily queries and6freshExa queries, including broad/model/string-count/international and Facebook regional slots. Google attempted one query and received API eligibility403. Brave attempted zeroHTTP requests. Facebook discovery/details ran naturally twice per cycle: morningASgTWhdiKe84lAHwz/spK74qbNiG76fYGGf had dataset/request failures despiteSUCCEEDED; evening4ZvfntpqlU2GoPUZn/rLQ9QOW24zkJzwPYC had no request failures. Existing saved details were reused separately. Willhaben native403 and Gumtree247 fallback extraction calls executed; recoveredlinks are not proof of available violins. GovDeals/AllSurplus empty204 detail responses remain unverified and retained. Gardiner's calendar had two unpublished previews, not a verified empty catalog.
 
