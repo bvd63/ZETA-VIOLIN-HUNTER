@@ -413,7 +413,6 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
         if listing.get('source') != 'search':
             listing['_direct_item_candidate'] = True
         db.enqueue(listing)
-        listing["price_context"] = price_tracker.record_listing(listing)
         unique.append(listing)
     if not unique:
         return 0
@@ -457,6 +456,9 @@ async def _deliver(notifier: TelegramNotifier, db: Database, price_tracker: Pric
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks,return_exceptions=True)
+    for item in ready:
+        item['price_context'] = price_tracker.record_listing(item)
+        item['price_usd'] = item['price_context'].get('price_usd')
     delivered = await notifier.send_listings(ready) if ready else []
     for listing in delivered:
         db.mark_seen(listing["id"], listing)

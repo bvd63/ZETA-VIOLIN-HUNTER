@@ -87,6 +87,7 @@ class ReserveSearch(BaseScraper):
                 if not reserve_work(self.engine, self.units, self.rolling_limit(), self.daily_limit,
                                     planned, auxiliary=getattr(self, 'auxiliary_work', False) or getattr(self, 'manual_fresh', False)):
                     self.content_failures.append("bot reservation limit (scheduled capacity protected); other sources continue")
+                    self.skipped = getattr(self, 'discovery_queries_attempted', 0) == 0
                     break
                 # Advance BEFORE HTTP. A restart cannot re-spend the same slot.
                 if index < count:

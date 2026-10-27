@@ -12,7 +12,8 @@ Per run:
     anything fresh anywhere on the web.
   * a rotating slice of the (keyword × site-group) MATRIX; a cursor stored in
     SQLite makes consecutive runs continue where the previous stopped, so the
-    whole matrix is covered over successive runs within the quota.
+    whole matrix is covered over successive runs within the quota. This facet
+    has no age cutoff: an old indexed offer may still be available.
 
 NOTE: Google retires this API on 2027-01-01 (already closed to new customers).
 """
@@ -205,9 +206,9 @@ class GoogleScraper(BaseScraper):
         remaining = budget - len(plan)
         n = len(matrix)
         for i in range(min(remaining, n)):
-            # pages indexed within the last year — older hits are almost always ended
+            # Preserve all terms/slots, including old but still-active inventory.
             plan.append((f"({MATRIX_KEYWORDS[((cursor + i) % n) // len(SITE_GROUPS)]}) "
-                         f"({SITE_GROUPS[(cursor + i) % len(SITE_GROUPS)]})", {"dateRestrict": "y1"}))
+                         f"({SITE_GROUPS[(cursor + i) % len(SITE_GROUPS)]})", {}))
         next_cursor = (cursor + min(remaining, n)) % n if n else 0
         return plan, next_cursor
 
@@ -242,7 +243,7 @@ class GoogleScraper(BaseScraper):
                 try:
                     if not reserve_request("google", min(96, Config.GOOGLE_DAILY_QUOTA),
                                            manual=getattr(self, 'manual_fresh', False) or getattr(self, 'auxiliary_work', False)):
-                        log.info("Google daily budget exhausted — no further HTTP requests")
+                        log.info("Google local allowance held/exhausted — no further HTTP requests")
                         break
                     spent += 1
                     params = {"key": self.api_key, "cx": self.cse_id, "q": q, "num": 10, **extra}
@@ -302,7 +303,7 @@ class GoogleScraper(BaseScraper):
                             "price": price or "See listing",
                             "location": location or "Unknown",
                             "url": url,
-                            "description": snippet[:1000],
+                            "description": snippet,
                             "image_url": image_url,
                             "relevance_score": self._relevance_score(title, snippet),
                             "source": "search",  # main.py verifies the page is still live
@@ -310,6 +311,9 @@ class GoogleScraper(BaseScraper):
                 except Exception as e:
                     log.warning(f"Google search '{q[:60]}' error: {e}")
 
+        if spent == 0:
+            self.skipped = True  # no request is not a healthy zero-result search
+            return results
         consumed_matrix = max(0, spent - min(len(GLOBAL_QUERIES), len(plan)))
         self._set_cursor((cursor + consumed_matrix) % (len(MATRIX_KEYWORDS) * len(SITE_GROUPS)))
         self._mark_run()

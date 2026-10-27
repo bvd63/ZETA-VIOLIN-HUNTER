@@ -6,7 +6,9 @@ account/plan fields are stored; credentials and personal profile are discarded.
 import html
 import logging
 import time
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 from config import Config
@@ -14,6 +16,36 @@ from database import connect
 from provider_state import read, write, used, claim_window
 
 log = logging.getLogger(__name__)
+
+
+def apify_forecast(account: dict, now=None) -> dict:
+    """Upper-bound scheduled costs, not a prediction of actual charges/balance."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        raw_end = account['usage_cycle']['endAt']
+        if not isinstance(raw_end, str):
+            return {}
+        end = datetime.fromisoformat(raw_end.replace('Z', '+00:00'))
+        included, spent = float(account['included_monthly_usd']), float(account['usage_usd'])
+        if not math.isfinite(included) or not math.isfinite(spent) or included < 0 or spent < 0:
+            return {}
+        if end.tzinfo is None or end <= now or end > now + timedelta(days=32):
+            return {}
+        local = now.astimezone(ZoneInfo(Config.SEARCH_TIMEZONE))
+        hours = {int(h) for h in Config.SEARCH_HOURS.split(',') if h.strip().isdigit() and 0 <= int(h) <= 23}
+        cycles = 0
+        for day in range(34):
+            date = local + timedelta(days=day)
+            for hour in hours:
+                slot = date.replace(hour=hour,minute=0,second=0,microsecond=0)
+                cycles += int(now < slot < end)
+        cap = cycles * (Config.APIFY_DISCOVERY_CAP_USD + Config.APIFY_DETAILS_CAP_USD)
+        remaining = max(0, included-spent)
+        return {'scheduled_cycles':cycles, 'scheduled_cap_usd':round(cap,4),
+                'included_remaining_usd':round(remaining,4),
+                'cap_above_included_usd':round(max(0,cap-remaining),4)}
+    except (KeyError, TypeError, ValueError):
+        return {}
 
 
 def snapshot() -> dict:
@@ -63,6 +95,7 @@ def snapshot() -> dict:
                       "limit": limit, "unit": "credite" if name == "tavily" else "USD",
                       "period": "ultimele 31 zile", "health": read(name + ":health", {})}
     data["apify_account"] = read("apify:account", {})
+    data['apify_forecast'] = apify_forecast(data['apify_account'],now)
     data['backup'] = read('operations:backup', {})
     data['detail_worker'] = read('detail_worker:health', {})
     data["pushover"] = {"configured": bool(Config.PUSHOVER_APP_TOKEN and Config.PUSHOVER_USER_KEY),
@@ -130,6 +163,12 @@ def warning_events(data: dict) -> list:
                            f"{name.title()}: ultimul acces a eșuat ({row['health']['error']})."))
     account = data.get("apify_account", {})
     if not account.get("error") and account.get("checked", 0) > time.time() - 12 * 3600:
+        forecast = data.get('apify_forecast') or apify_forecast(account)
+        if forecast.get('cap_above_included_usd', 0) > 0:
+            result.append(('apify:forecast:included',
+                f"Apify: pentru {forecast['scheduled_cycles']} ture până la reînnoire, plafonul planificat este "
+                f"${forecast['scheduled_cap_usd']:.2f}, față de ${forecast['included_remaining_usd']:.2f} credite incluse rămase. "
+                "Consumul efectiv poate fi mai mic; verifică resursele înainte de epuizare. Nu s-au cumpărat credite."))
         included = account.get("included_monthly_usd")
         if isinstance(included, (int, float)) and included > 0 and account.get("usage_usd", 0) >= included * 0.8:
             level = "exhausted" if account['usage_usd'] >= included else "95" if account['usage_usd'] >= included * .95 else "80"

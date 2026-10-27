@@ -179,7 +179,10 @@ class ApifyFacebookScraper(BaseScraper):
                     account = json.loads(row[0]) if row else {}
                 account_safe = False
                 try:
-                    end = datetime.fromisoformat(account['usage_cycle']['endAt'].replace('Z', '+00:00'))
+                    raw_end = account['usage_cycle']['endAt']
+                    if not isinstance(raw_end, str):
+                        raise ValueError('account cycle unavailable')
+                    end = datetime.fromisoformat(raw_end.replace('Z', '+00:00'))
                     account_days = max(0, (end - now).total_seconds() / 86400)
                     account_protected = math.ceil(account_days) * Config.RUNS_PER_DAY * pair_cap
                     # The cached account meter cannot include later/uncertain jobs.

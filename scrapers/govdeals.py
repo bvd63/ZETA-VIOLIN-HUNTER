@@ -19,6 +19,10 @@ HOME = "https://www.govdeals.com/"
 API = "https://maestro.lqdt1.com"
 
 
+class IncompleteAuctionDetails(ValueError):
+    """A successful but empty public API response is not proof of closure."""
+
+
 def auction_end(value: str) -> str:
     if not value:
         return ""
@@ -51,7 +55,7 @@ class GovDealsClient:
         key = re.search(r'maestroApiKey\s*:\s*"([^"\s]+)"', js.text)
         if not key:
             raise ValueError("GovDeals anonymous frontend configuration changed")
-        self.headers = {"x-api-key": key.group(1), "x-user-id": "-1",
+        self.headers = {**BROWSER_HEADERS, "x-api-key": key.group(1), "x-user-id": "-1",
                         "x-api-correlation-id": str(uuid4())}
 
     async def search(self, query: str, page: int = 1) -> list:
@@ -73,6 +77,8 @@ class GovDealsClient:
         response = await self.client.post(f"{API}/assets/{asset_id}/{account_id}/false",
             headers=self.headers, json={"businessId": self.business_id, "siteId": self.site_id})
         response.raise_for_status()
+        if response.status_code == 204 or not response.content.strip():
+            raise IncompleteAuctionDetails(f"HTTP {response.status_code} empty auction detail")
         return response.json()
 
 
@@ -173,8 +179,9 @@ class GovDealsScraper(BaseScraper):
                 except Exception as exc:
                     complete(self.name, row, 3600)
                     self.coverage_stats["detail_unverified"] += 1
-                    self.content_failures.append("auction detail " + type(exc).__name__)
-                    log.warning("%s detail failed (%s); retained for retry", self.name, type(exc).__name__)
+                    failure = str(exc) if isinstance(exc, IncompleteAuctionDetails) else type(exc).__name__
+                    self.content_failures.append("auction detail " + failure)
+                    log.warning("%s detail failed (%s) %s; retained for retry", self.name, failure, row['url'])
         return results
 
 

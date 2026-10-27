@@ -306,7 +306,7 @@ async def verify_offer(listing: dict, client) -> tuple:
         return "unknown", "destinația publică nu poate fi verificată"
     gov = GOVDEALS_RX.search(url)
     if gov:
-        from scrapers.govdeals import GovDealsClient, parse_asset, asset_closed_reason
+        from scrapers.govdeals import GovDealsClient, parse_asset, asset_closed_reason, IncompleteAuctionDetails
         try:
             is_surplus = (urlsplit(url).hostname or "").endswith("allsurplus.com")
             api = GovDealsClient(client, "AD" if is_surplus else "GD", 2 if is_surplus else 1)
@@ -321,6 +321,8 @@ async def verify_offer(listing: dict, client) -> tuple:
             listing.update({k: v for k, v in verified.items() if k not in ("id", "source")})
             listing["_primary_content_checked"] = True
             return "live", "GovDeals: licitație activă verificată prin API"
+        except IncompleteAuctionDetails:
+            return 'unknown', 'GovDeals: API răspunde fără detaliile lotului; necesită reverificare'
         except Exception:
             return "unknown", "GovDeals: API indisponibil"
     reverb = REVERB_ITEM_RX.search(url)

@@ -340,6 +340,36 @@ class QualityTests(unittest.TestCase):
         finally:
             tracker.close()
 
+    def test_apify_forecast_counts_actual_upcoming_slots_in_account_cycle(self):
+        from resource_monitor import apify_forecast
+        account={'usage_cycle':{'endAt':'2026-11-05T00:00:00Z'},'included_monthly_usd':5,'usage_usd':4.12}
+        with patch.multiple(Config,SEARCH_HOURS='10,22',SEARCH_TIMEZONE='Europe/Bucharest',
+                            APIFY_DISCOVERY_CAP_USD=.065,APIFY_DETAILS_CAP_USD=.02):
+            result=apify_forecast(account,datetime(2026,10,27,tzinfo=timezone.utc))
+        self.assertEqual(result,{'scheduled_cycles':18,'scheduled_cap_usd':1.53,
+                                 'included_remaining_usd':.88,'cap_above_included_usd':.65})
+        self.assertEqual(apify_forecast({},datetime(2026,10,27,tzinfo=timezone.utc)),{})
+
+    def test_forecast_rejects_invalid_cycle_and_matches_scheduler_duplicate_hours(self):
+        from resource_monitor import apify_forecast
+        account={'usage_cycle':{},'included_monthly_usd':5,'usage_usd':4.12}
+        now=datetime(2026,10,27,tzinfo=timezone.utc)
+        for invalid in (None,12,[],{},'bad'):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(apify_forecast({**account,'usage_cycle':{'endAt':invalid}},now),{})
+        account['usage_cycle']['endAt']='2026-10-28T00:00:00Z'
+        with patch.multiple(Config,SEARCH_HOURS='10,10,22',SEARCH_TIMEZONE='Europe/Bucharest'):
+            self.assertEqual(apify_forecast(account,now)['scheduled_cycles'],2)
+
+    def test_google_matrix_keeps_old_active_inventory_without_changing_query_slots(self):
+        from scrapers.google import GoogleScraper, GLOBAL_QUERIES
+        from scrapers.brave import BraveScraper
+        with patch.multiple(Config,GOOGLE_QUERIES_PER_RUN=48,BRAVE_QUERIES_PER_RUN=48):
+            google,_=GoogleScraper('fixture','fixture').plan_queries(0)
+            brave,_=BraveScraper().plan_queries(0)
+        self.assertEqual([q for q,_ in google],[q for q,_ in brave])
+        self.assertTrue(all('dateRestrict' not in p for _,p in google[len(GLOBAL_QUERIES):]))
+
 
 class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -406,6 +436,51 @@ class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
              patch('scrapers.govdeals.GovDealsClient.initialize',AsyncMock()), \
              patch('scrapers.govdeals.GovDealsClient.asset',AsyncMock(return_value={'assetStatusCd':'SOLD'})):
             self.assertEqual((await verify_offer(item,None))[0],'dead')
+
+    async def test_auction_verifier_sends_browser_headers_to_both_init_and_asset(self):
+        from offer_verifier import verify_offer
+        calls=[]
+        def reply(request):
+            calls.append(request)
+            if request.url.path=='/': return httpx.Response(200,text='<script src="/main.fixture.js"></script>')
+            if request.url.path=='/main.fixture.js': return httpx.Response(200,text='maestroApiKey:"anonymous-public-fixture"')
+            if 'Chrome/' not in request.headers.get('User-Agent',''): return httpx.Response(403)
+            return httpx.Response(200,json={'assetStatusCd':'SOLD'})
+        item={**violin(), 'url':'https://www.govdeals.com/en/asset/370/12180'}
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+                self.assertEqual((await verify_offer(item,client))[0],'dead')
+        self.assertEqual(len(calls),3)
+        self.assertTrue(all('Chrome/' in r.headers['User-Agent'] for r in calls))
+
+    async def test_empty_204_auction_detail_is_explicit_unknown_and_retained(self):
+        from offer_verifier import verify_offer
+        def reply(request):
+            if request.url.path=='/': return httpx.Response(200,text='<script src="/main.fixture.js"></script>')
+            if request.url.path=='/main.fixture.js': return httpx.Response(200,text='maestroApiKey:"anonymous-public-fixture"')
+            return httpx.Response(204)
+        item={**violin(),'url':'https://www.govdeals.com/en/asset/42/32464'}
+        with patch('offer_verifier.public_dns',AsyncMock(return_value=True)):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+                state,reason=await verify_offer(item,client)
+        self.assertEqual(state,'unknown')
+        self.assertIn('fără detaliile',reason)
+
+    async def test_outbox_uses_price_from_refreshed_primary_page(self):
+        from price_tracker import PriceTracker
+        item={**violin(889900),'price':'1000 USD'}
+        async def verify(candidate,http):
+            candidate['price']='1800 USD';candidate['_primary_content_checked']=True
+            return 'live','primary price'
+        notifier=SimpleNamespace(send_listings=AsyncMock(side_effect=lambda xs:xs))
+        db=database.Database();prices=PriceTracker()
+        try:
+            with patch('main.verify_offer',side_effect=verify):
+                self.assertEqual(await self.main._deliver(notifier,db,prices,[item]),1)
+            self.assertEqual(db.conn.execute('SELECT price_usd FROM alerts WHERE id=?',(item['id'],)).fetchone()[0],1800)
+            self.assertEqual(item['price_context']['price_usd'],1800)
+        finally:
+            db.close();prices.close()
 
     async def test_gardiner_transport_error_uses_public_browser_without_paid_calls(self):
         from scrapers.gardiner import GardinerHoulgateScraper
@@ -487,6 +562,17 @@ class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
              patch('httpx.AsyncClient.get',get),patch('apify_costs.reconcile',AsyncMock(return_value=0)):
             await refresh_accounts()
         self.assertEqual(read('apify:account')['checked'],100)
+
+    async def test_google_zero_attempt_allowance_hold_is_skipped_not_searched(self):
+        from scrapers.google import GoogleScraper
+        scraper=GoogleScraper('fixture','fixture');scraper.manual_fresh=True
+        with patch('scrapers.google.reserve_request',return_value=False), \
+             patch.object(scraper,'_quota_used_today',return_value=0), \
+             patch.object(scraper,'_mark_run') as mark,patch.object(scraper,'_set_cursor') as cursor, \
+             patch('httpx.AsyncClient.get',AsyncMock(side_effect=AssertionError('no HTTP after denied reservation'))):
+            self.assertEqual(await scraper.search(),[])
+        self.assertTrue(scraper.skipped)
+        mark.assert_not_called();cursor.assert_not_called()
 
 
 if __name__ == '__main__':
