@@ -42,7 +42,7 @@ def preference_matches(listing: dict) -> list:
     if JLP_RX.search(text):
         matches.append("Jean-Luc Ponty / JLP menționat")
     primary = normalize_identity_text(" ".join(str(listing.get(k) or "") for k in ("title", "model")))
-    if re.search(r"\bjazz\b|\bjv(?:44|45|4|5)\b|\bjvs4\b", primary, re.I):
+    if re.search(r"\bjazz\b|\bjv[\s-]?(?:44|45|4|5)\b|\bjvs[\s-]?4\b", primary, re.I):
         matches.append("Jazz / JV menționat; căluș de confirmat în fotografii")
     if BURST_RX.search(text):
         matches.append("finisaj sunburst / burst menționat")

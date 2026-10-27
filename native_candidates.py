@@ -1,5 +1,6 @@
 """A native search card is a discovery clue, not the complete item page."""
 from filters import has_zeta_signal, has_violin_word, PICKUP_OBJECT_TITLE_RX, INSTRUMENT_ABSENT_RX
+from keywords import preference_matches
 
 
 def card_hints(title: str, description: str, query: str) -> dict | None:
@@ -19,3 +20,17 @@ def incomplete_pickup_card(listing: dict, reason: str) -> bool:
     return bool(reason == 'noise' and listing.get('_native_search_query')
                 and not INSTRUMENT_ABSENT_RX.search(str(listing.get('description') or ''))
                 and PICKUP_OBJECT_TITLE_RX.fullmatch(str(listing.get('title') or '')))
+
+
+def detail_priority(listing: dict) -> int:
+    """Order verification, never exclude: preferences, instrument clues, others.
+
+    The durable queue still reserves its oldest-item share in every batch.
+    This prevents broad Zeta homonyms from consuming every instrument slot.
+    """
+    if preference_matches(listing):
+        return 0
+    text = str(listing.get('title') or '') + ' ' + str(listing.get('description') or '')
+    if has_violin_word(text) or str(listing.get('title') or '').strip().casefold() in ('zeta','zetta','zeta music'):
+        return 1
+    return 2

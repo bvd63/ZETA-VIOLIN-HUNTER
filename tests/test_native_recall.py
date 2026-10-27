@@ -74,6 +74,51 @@ def product_page(title='Zeta Jazz Fusion JV-4 violin', body='Used Zeta 4 string 
 
 
 class NativeRecallTests(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_native_backlog_reprioritizes_without_rediscovery_or_lease_reset(self):
+        namespace='search:legacy-native-priority'
+        old=[{'url':f'https://example.com/item/old-{n}', 'title':'ZETA RACING handlebar',
+              '_native_card_source':'MercariJP', '_discovery_priority':2} for n in range(80)]
+        preferred={'url':'https://example.com/item/old-jv4','title':'JV-4',
+                   '_native_card_source':'MercariJP','_discovery_priority':2}
+        leased={**preferred,'url':'https://example.com/item/still-leased','title':'JLP5'}
+        with DiscoveryQueue(namespace) as queue:
+            queue.put(old+[preferred,leased])
+            queue.conn.execute('UPDATE discovery_queue SET next_attempt=9999999999,attempts=3 WHERE namespace=? AND key=?',
+                               (namespace,leased['url']))
+            queue.conn.commit()
+        with DiscoveryQueue(namespace) as queue:  # restart without any new put
+            selected=queue.claim(20)
+            self.assertIn(preferred['url'],{x['url'] for x in selected})
+            self.assertNotIn(leased['url'],{x['url'] for x in selected})
+            self.assertTrue(any('/old-0' in x['url'] for x in selected))
+            self.assertEqual(queue.conn.execute('SELECT priority FROM discovery_queue WHERE namespace=? AND key=?',
+                                               (namespace,preferred['url'])).fetchone()[0],0)
+            self.assertEqual(queue.conn.execute('SELECT next_attempt,attempts FROM discovery_queue WHERE namespace=? AND key=?',
+                                               (namespace,leased['url'])).fetchone(),(9999999999,3))
+            self.assertEqual(queue.conn.execute('SELECT count(*) FROM discovery_queue WHERE namespace=?',
+                                               (namespace,)).fetchone()[0],82)
+
+    async def test_sparse_preferred_models_are_not_buried_by_homonym_backlog(self):
+        from native_candidates import detail_priority
+        from keywords import preference_matches
+        preferred = ['JV-4','JV 5','JV44','JV-45','JVS 4','JLP5','Jean Luc Ponty','Zeta sunburst','Zeta Jazz Fusion']
+        items = [{'url':f'https://example.com/item/noise-{n}', 'title':'ZETA RACING handlebar',
+                  'description':'', '_discovery_priority':2} for n in range(80)]
+        for number,title in enumerate(preferred + ['Electric violin','Zeta','Zeta Strados violin']):
+            item={'url':f'https://example.com/item/instrument-{number}', 'title':title, 'description':''}
+            item['_discovery_priority']=detail_priority(item)
+            items.append(item)
+        for title in preferred:
+            self.assertTrue(preference_matches({'title':title}),title)
+        self.assertEqual(detail_priority({'title':'Zeta Strados sunburst violin'}),1)
+        with DiscoveryQueue('search:priority-regression') as queue:
+            queue.put(items)
+            selected=queue.claim(20)
+            self.assertTrue({x['url'] for x in items[80:]} <= {x['url'] for x in selected})
+            self.assertTrue(any('noise-' in x['url'] for x in selected))
+            self.assertEqual(queue.conn.execute('SELECT count(*) FROM discovery_queue WHERE namespace=?',
+                                              (queue.namespace,)).fetchone()[0],len(items))
+
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.db_patch = patch.object(database, 'DB_PATH', str(Path(self.tmp.name) / 'native.db'))

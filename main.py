@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore", message=".*utcnow.*", category=DeprecationWarn
 from database import Database, connect  # noqa: E402
 from notifier import TelegramNotifier  # noqa: E402
 from filters import classify, has_primary_identity, has_zeta_signal  # noqa: E402
-from native_candidates import incomplete_pickup_card  # noqa: E402
+from native_candidates import incomplete_pickup_card, detail_priority  # noqa: E402
 from liveness import is_live  # noqa: E402
 from offer_verifier import verify_offer, is_item_url, GOVDEALS_RX  # noqa: E402
 from discovery_queue import stage, complete  # noqa: E402
@@ -274,7 +274,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
                             listing['_native_card_source'] = listing.get('source') or scraper.name
                             listing['_direct_item_candidate'] = True
                             listing['source'] = 'search'
-                        listing["_discovery_priority"] = 2
+                        listing["_discovery_priority"] = detail_priority(listing)
                         reason = None
                     if reason:
                         record_candidate(listing, 'rejected', reason)
