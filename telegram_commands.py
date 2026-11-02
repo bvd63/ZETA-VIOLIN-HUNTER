@@ -103,18 +103,21 @@ class TelegramCommands:
         message = callback.get("message") or {}
         chat_id = str((message.get("chat") or {}).get("id", ""))
         data = callback.get("data", "")
-        if chat_id != self.chat_id or not re.fullmatch(r"(?:seen|not_violin|ended):[a-f0-9]{24}", data):
+        if chat_id != self.chat_id or not re.fullmatch(r"(?:seen|not_violin|ended|fake|clear_fake):[a-f0-9]{24}", data):
             return
         action, receipt_id = data.split(':', 1)
         receipts = AlertReceipts()
         try:
             acknowledged = (receipts.acknowledge(receipt_id, chat_id) if action == 'seen' else
                             receipts.feedback(receipt_id, chat_id, action))
+            state = receipts.feedback_state(receipt_id,chat_id) if acknowledged else {}
         finally:
             receipts.close()
         await self.notifier._post("answerCallbackQuery", {
             "callback_query_id": callback.get("id"),
-            "text": ("Confirmat. Am oprit reamintirile." if action == 'seen' else
+            "text": ("FAKE salvat pentru acest anunț. Reamintirile sunt oprite." if action == 'fake' else
+                     "FAKE anulat. Căutările rămân active; alarmele vechi rămân oprite." if action == 'clear_fake' else
+                     "Confirmat. Am oprit reamintirile." if action == 'seen' else
                      "Corecție salvată. Am oprit reamintirile acestui anunț.") if acknowledged else "Alerta nu mai este disponibilă.",
         })
         if acknowledged:
@@ -122,7 +125,8 @@ class TelegramCommands:
             await PushoverNotifier().cancel(receipt_id)
             await self.notifier._post("editMessageReplyMarkup", {
                 "message_id": message.get("message_id"),
-                "reply_markup": {"inline_keyboard": [[{"text": "✅ Confirmată" if action == 'seen' else "✅ Corecție salvată", "callback_data": data}]]},
+                "reply_markup": self.notifier._alert_buttons(receipt_id,self.notifier._normalize_url(state['url']),
+                    acknowledged=state['acknowledged'],fake=state['fake']),
             })
 
     async def _handle(self, message: dict) -> None:
@@ -160,6 +164,7 @@ class TelegramCommands:
                 "/active — viorile Zeta văzute live în ultimele 3 zile\n"
                 "/verifica LINK — verifică un anunț și istoricul notificării\n"
                 "🔔 Alertele cu viori se repetă după 10 min, apoi la 30 min, până apeși «Am văzut».\n"
+                "🚩 FAKE — marchezi anunțul suspect și oprești alertele lui; «Anulează FAKE» corectează o apăsare greșită.\n"
                 "/help — acest mesaj"
             )
 
@@ -175,6 +180,9 @@ class TelegramCommands:
         labels = {"live": "Ofertă verificată", "unknown": "Disponibilitate neverificată",
                   "dead": "Anunț / licitație încheiată", "non_sale": "Fără ofertă de vânzare"}
         lines = [f"🔎 <b>{labels.get(state, state)}</b>", html.escape(why)]
+        from listing_feedback import hold_reason as feedback_hold
+        if feedback_hold(url):
+            lines.append('🚩 <b>FAKE — marcat de tine.</b> Acest marcaj nu dovedește automat autenticitatea instrumentului sau frauda.')
         if listing.get("title"):
             lines.append(html.escape(listing["title"][:250]))
             reason = classify(listing)

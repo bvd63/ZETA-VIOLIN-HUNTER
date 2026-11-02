@@ -20,6 +20,7 @@ def main():
         ("tests.test_coverage_contract", []),
         ("tests.test_marketplace_parsers", []),
         ("tests.test_notifications", []),
+        ("tests.test_listing_feedback", []),
         ("tests.test_search_reserves", []),
         ("tests.test_pushover", []),
         ("tests.test_operations", []),

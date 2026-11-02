@@ -71,13 +71,16 @@ class TelegramNotifier:
 
     # --- high level ----------------------------------------------------------
     @staticmethod
-    def _alert_buttons(receipt_id: str, url: str) -> dict:
+    def _alert_buttons(receipt_id: str, url: str, *, acknowledged: bool = False, fake: bool = False) -> dict:
         rows = []
         if url:
             rows.append([{"text": "🎻 Deschide anunțul", "url": url}])
         rows.append([{"text": "Nu e vioară", "callback_data": "not_violin:" + receipt_id},
                      {"text": "Vândut / încheiat", "callback_data": "ended:" + receipt_id}])
-        rows.append([{"text": "✅ Am văzut — oprește reamintirile", "callback_data": "seen:" + receipt_id}])
+        rows.append([{"text": "🚩 FAKE — marcat de tine" if fake else "🚩 FAKE", "callback_data": "fake:" + receipt_id}])
+        if fake:
+            rows.append([{"text": "↩️ Anulează FAKE", "callback_data": "clear_fake:" + receipt_id}])
+        rows.append([{"text": "✅ Am văzut — confirmată" if acknowledged else "✅ Am văzut — oprește reamintirile", "callback_data": "seen:" + receipt_id}])
         return {"inline_keyboard": rows}
 
     async def _send_violin(self, listing: dict, text: str, *, event: str = "new", photo: bool = True) -> bool:

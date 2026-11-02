@@ -29,21 +29,68 @@ class AlertReceipts:
                            ("push_attempts", "INTEGER NOT NULL DEFAULT 0")):
             if name not in columns:
                 self.conn.execute(f"ALTER TABLE alert_receipts ADD COLUMN {name} {kind}")
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS alert_feedback (
+            receipt_id TEXT PRIMARY KEY, label TEXT NOT NULL, updated_at REAL NOT NULL)''')
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS alert_feedback_history (
+            id INTEGER PRIMARY KEY, receipt_id TEXT NOT NULL, label TEXT NOT NULL,
+            previous_label TEXT, updated_at REAL NOT NULL, url TEXT NOT NULL, alert_text TEXT NOT NULL)''')
         self.conn.commit()
 
     def feedback(self, receipt_id: str, chat_id: str, label: str) -> bool:
         """Owner correction, separate from identity rules and explicit reading."""
-        if label not in ('not_violin', 'ended'):
+        if label not in ('not_violin', 'ended', 'fake', 'clear_fake'):
             return False
-        if not self.conn.execute('SELECT 1 FROM alert_receipts WHERE id=? AND chat_id=?',
-                                 (receipt_id, str(chat_id))).fetchone():
-            return False
-        self.conn.execute('''CREATE TABLE IF NOT EXISTS alert_feedback (
-            receipt_id TEXT PRIMARY KEY, label TEXT NOT NULL, updated_at REAL NOT NULL)''')
-        self.conn.execute('INSERT OR REPLACE INTO alert_feedback VALUES (?,?,?)',
-                          (receipt_id, label, time.time()))
-        self.conn.commit()
-        return self.acknowledge(receipt_id, chat_id)
+        from listing_feedback import offer_key
+        now = time.time()
+        self.conn.create_function('feedback_offer_key', 1, offer_key, deterministic=True)
+        self.conn.execute('BEGIN IMMEDIATE')
+        try:
+            row = self.conn.execute('SELECT url,text FROM alert_receipts WHERE id=? AND chat_id=?',
+                                    (receipt_id,str(chat_id))).fetchone()
+            if not row:
+                self.conn.rollback()
+                return False
+            url, text = row
+            previous = self.conn.execute('SELECT label FROM alert_feedback WHERE receipt_id=?',(receipt_id,)).fetchone()
+            if label == 'clear_fake':
+                # Undo the exact offer, including any price-drop receipts for it.
+                # Existing acknowledgements stay; old alarms are never restarted.
+                targets = self.conn.execute('''SELECT r.id,r.url,r.text FROM alert_receipts r
+                    JOIN alert_feedback f ON f.receipt_id=r.id WHERE r.chat_id=? AND f.label='fake'
+                    AND feedback_offer_key(r.url)=?''',(str(chat_id),offer_key(url))).fetchall() if offer_key(url) else []
+                for target, target_url, target_text in targets:
+                    old = self.conn.execute('''SELECT previous_label FROM alert_feedback_history
+                        WHERE receipt_id=? AND label='fake' ORDER BY id DESC LIMIT 1''',(target,)).fetchone()
+                    if old and old[0] in ('not_violin','ended'):
+                        self.conn.execute('INSERT OR REPLACE INTO alert_feedback VALUES (?,?,?)',(target,old[0],now))
+                    else:
+                        self.conn.execute('DELETE FROM alert_feedback WHERE receipt_id=?',(target,))
+                    self.conn.execute('INSERT INTO alert_feedback_history(receipt_id,label,previous_label,updated_at,url,alert_text) VALUES (?,?,?,?,?,?)',
+                                      (target,label,'fake',now,target_url,target_text))
+            else:
+                if not previous or previous[0] != label:
+                    self.conn.execute('INSERT INTO alert_feedback_history(receipt_id,label,previous_label,updated_at,url,alert_text) VALUES (?,?,?,?,?,?)',
+                                      (receipt_id,label,previous[0] if previous else None,now,url,text))
+                    self.conn.execute('INSERT OR REPLACE INTO alert_feedback VALUES (?,?,?)',(receipt_id,label,now))
+                if label == 'fake' and offer_key(url):
+                    self.conn.execute('''UPDATE alert_receipts SET next_reminder=NULL,push_next_attempt=NULL
+                        WHERE chat_id=? AND feedback_offer_key(url)=?''',(str(chat_id),offer_key(url)))
+            self.conn.execute('''UPDATE alert_receipts SET acknowledged_at=coalesce(acknowledged_at,?),
+                next_reminder=NULL,push_next_attempt=NULL WHERE id=? AND chat_id=?''',(now,receipt_id,str(chat_id)))
+            self.conn.commit()
+            return True
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def feedback_state(self, receipt_id: str, chat_id: str) -> dict:
+        from listing_feedback import active_holds, hold_reason
+        row = self.conn.execute('SELECT url,acknowledged_at FROM alert_receipts WHERE id=? AND chat_id=?',
+                                (receipt_id,str(chat_id))).fetchone()
+        if not row:
+            return {}
+        return {'url':row[0], 'acknowledged':row[1] is not None,
+                'fake':bool(hold_reason(row[0],active_holds(self.conn)))}
 
     def prepare(self, chat_id: str, listing: dict, text: str, event: str = "new") -> str:
         identity = "|".join((str(chat_id), canonical_url(listing.get("url", "")),

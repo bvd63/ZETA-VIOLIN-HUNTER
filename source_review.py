@@ -23,10 +23,15 @@ def host(value: str) -> str:
         return ''
 
 
-def active_holds() -> dict:
+def active_holds(conn=None) -> dict:
     holds = {}
-    with store() as conn:
+    if conn is None:
+        with store() as current:
+            rows = current.execute('SELECT key,value FROM provider_state WHERE key GLOB ?', (PREFIX+'*',)).fetchall()
+    elif conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_state'").fetchone():
         rows = conn.execute('SELECT key,value FROM provider_state WHERE key GLOB ?', (PREFIX+'*',)).fetchall()
+    else:
+        rows = []
     for key,raw in rows:
         name = host(key[len(PREFIX):])
         if not name:
@@ -44,14 +49,22 @@ def active_holds() -> dict:
 
 
 def hold_reason(url: str, holds=None) -> str:
+    from listing_feedback import active_holds as listing_holds, hold_reason as listing_hold
     name = host(url)
-    return (active_holds() if holds is None else holds).get(name,'') if name else ''
+    if holds is not None:
+        return holds.get(name,'') or listing_hold(url)
+    with store() as conn:
+        source = active_holds(conn).get(name,'') if name else ''
+        return source or listing_hold(url,listing_holds(conn))
 
 
 def bind(conn) -> dict:
     """Snapshot for one SQL claim; last-mile checks read current state again."""
-    holds = active_holds()
-    conn.create_function('source_review_held',1,lambda url:int(bool(hold_reason(url,holds))),deterministic=True)
+    holds = active_holds(conn)
+    from listing_feedback import active_holds as listing_holds, hold_reason as listing_hold
+    offers = listing_holds(conn)
+    conn.create_function('source_review_held',1,
+        lambda url:int(bool(holds.get(host(url),'') or listing_hold(url,offers))),deterministic=True)
     return holds
 
 

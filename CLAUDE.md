@@ -5,6 +5,12 @@
 
 ---
 
+## November2 — bounded platform research and owner FAKE feedback
+
+The original broad goal remains paused. New standalone owner request: first evaluate REA and alternative monitoring platforms, then add a manual FAKE button to alerts. Research is saved locally in outputs/research-20261102/platform-comparison.md and rea-proof.json. REA6.8.0/Node24.22.1 analyzed four public Crawlbench UI modules as inert text; no backend, authenticated results, paid trial or superior Zeta recall is claimed. No proprietary platform code was incorporated. Public Outpost rules omit some old/quiet-hour offers; do not import these or profit/AI rejection thresholds. Crawlbench price-lookup's ASCII helper is not suitable for multilingual violin matching. Existing search sources/terms/regions/caps/10–22 schedule are unchanged.
+
+Owner FAKE feedback is exact-offer and reversible. Preserve receipt URL/text and append history; suppress that offer's delivery/drop/digest/reminder through the existing shared review guards, never a model, price band, merchant or all Zeta offers. Reverb/eBay canonical IDs and exact Facebook item IDs bind locale/tracking aliases; foreign hosts/IDs do not match. FAKE clears all reminder timers for the same offer but acknowledges ONLY the clicked receipt. Undo restores any prior correction, preserves history/acknowledgements and never restarts old alarms. Existing source quarantine still applies after undo. Keep FAKE available after Am văzut and show its manual origin; do not claim automated authentication or ML training. Current labels provide future review examples, not a global classifier. Required dedicated suite tests retention, restart, identity, undo, auth, outbox fairness and no broad suppression; total30required suites. Validate CI/predeploy/actual deployment; no extra paid search or TEST is needed for this button change.
+
 ## October27 — approved persistent goal, protected discovery and deferred details
 
 - Final owner steering (28 October, Bucharest): freeze new extensions; finish the already-authorized repairs and verification, then close the goal only when its acceptance conditions are actually met and stop agent work. Do not stop the Railway scheduler or alerts. External blocked requirements must remain explicit, never renamed complete.
