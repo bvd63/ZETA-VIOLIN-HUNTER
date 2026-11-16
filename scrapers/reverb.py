@@ -63,7 +63,8 @@ class ReverbScraper(BaseScraper):
 
         # Keyword searches plus Reverb's structured brand filter (make=Zeta),
         # which catches odd titles like "Very fine rare 5 strings Zeta Midi".
-        searches = [{"query": kw} for kw in market_queries(broad=True, limit=10)] + [{"make": "Zeta"}]
+        searches = ([{"make": "Zeta"}] if getattr(self, 'incremental', False) else
+                    [{"query": kw} for kw in market_queries(broad=True, limit=10)] + [{"make": "Zeta"}])
 
         async with self.make_client(timeout=15, follow_redirects=False) as client:
             for base_params in searches:
@@ -83,7 +84,7 @@ class ReverbScraper(BaseScraper):
                         if not listings:
                             break
                         self.fetched += len(listings)
-
+                        page_cards = []
                         for item in listings:
                             try:
                                 if not isinstance(item,dict):
@@ -167,9 +168,18 @@ class ReverbScraper(BaseScraper):
                                     results.append(listing)
                                 else:
                                     results[previous] = listing
+                                page_cards.append(listing)
                             except (ValueError, TypeError, AttributeError, KeyError, IndexError):
                                 self.content_failures.append('Reverb invalid listing row; remaining rows retained')
                                 continue
+                        # Keep each completed page BEFORE the next await. A
+                        # cancellation on page2 cannot lose page1's instruments.
+                        # The shared detail worker rechecks identity/availability;
+                        # this is durable discovery, never a delivered/seen mark.
+                        if page_cards:
+                            from discovery_queue import DiscoveryQueue
+                            with DiscoveryQueue('search:Reverb') as queue:
+                                queue.put(page_cards)
                     except Exception as e:
                         self.content_failures.append('Reverb search response unresolved: ' + type(e).__name__)
                         log.warning("Reverb keyword %r page %s error: %s",kw,page,type(e).__name__)

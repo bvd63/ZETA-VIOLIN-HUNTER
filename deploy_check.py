@@ -48,6 +48,7 @@ def main():
         ("tests.test_native_asia_cards", []),
         ("tests.test_apify_compare", []),
         ("tests.test_facebook_unknown", []),
+        ("tests.test_search_milestone", []),
         ("apify_preview", ["--check"]),
     )
     # Railway injects the live DB_PATH into pre-deploy commands. Every child

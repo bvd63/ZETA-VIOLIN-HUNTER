@@ -218,6 +218,14 @@ class StatusTracker:
             status["scrapers"] = scrapers
             from config import Config
             status["schedule"] = {"hours": Config.SEARCH_HOURS, "timezone": Config.SEARCH_TIMEZONE}
+            from provider_state import read
+            status['reverb_incremental'] = {'enabled':Config.REVERB_INCREMENTAL_ENABLED,'minute':15,
+                                          'last_attempt':read('reverb:incremental:health',{}),
+                                          'changes_scheduled_cycle':False}
+            core = self.conn.execute("SELECT id,run_at,total_raw,total_sent FROM cycle_summary WHERE work_kind='core' ORDER BY id DESC LIMIT 1").fetchone()
+            status['last_scheduled_cycle'] = (dict(zip(('id','run_at','raw','sent'),core)) if core else None)
+            from pipeline_health import snapshot as pipeline_snapshot
+            status['delivery_pipeline'] = pipeline_snapshot(self.conn)
             status["budgets"] = {"google_per_day": min(96, Config.GOOGLE_DAILY_QUOTA), "brave_per_month": Config.BRAVE_MONTHLY_QUOTA}
             from resource_monitor import snapshot
             status["resources"] = snapshot()

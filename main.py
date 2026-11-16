@@ -60,6 +60,7 @@ from scrapers.guitar_center import GuitarCenterScraper  # noqa: E402
 from scrapers.reddit_scraper import RedditScraper  # noqa: E402
 from scrapers.facebook_marketplace import FacebookMarketplaceScraper  # noqa: E402
 from scrapers.apify_facebook import ApifyFacebookScraper  # noqa: E402
+from scrapers.facebook_international import FacebookInternationalScraper  # noqa: E402
 
 from price_tracker import PriceTracker, parse_price_usd  # noqa: E402
 from status_tracker import StatusTracker  # noqa: E402
@@ -142,6 +143,7 @@ def build_scrapers() -> list:
         MercariJPScraper(),
         GuitarCenterScraper(),          # runs only with US egress
         ApifyFacebookScraper() if Config.APIFY_TOKEN else FacebookMarketplaceScraper(),
+        FacebookInternationalScraper(),
         RedditScraper(),
         # Disabled legacy adapters (see CLAUDE.md §2): Kleinanzeigen, Wallapop,
         # Maestronet, Violinist.com, Audiofanzine — covered by Google/Brave.
@@ -267,7 +269,7 @@ async def _run_scraper_with_resilience(scraper, db: Database, price_tracker: Pri
     Returns {name, new, drops, status, raw, duration}. NOTE: new listings are
     NOT marked seen here — run_search_cycle does that after Telegram delivery."""
     async with semaphore:
-        retries = max(0, Config.SCRAPER_RETRIES)
+        retries = 0 if getattr(scraper,'incremental',False) else max(0, Config.SCRAPER_RETRIES)
         for attempt in range(1, retries + 2):
             started = datetime.utcnow()
             scraper.fetched = 0
@@ -617,6 +619,55 @@ async def resource_tick() -> None:
         log.warning("Resource monitor failed (%s); search remains active", type(exc).__name__)
 
 
+async def reverb_incremental_tick() -> None:
+    """Extra brand-only discovery, using the SAME validation/delivery pipeline.
+
+    No paid index or Actor is run. Separate status cannot conceal a missed core
+    cycle. Failed sends remain in the usual outbox and use minute retries.
+    """
+    if not Config.REVERB_INCREMENTAL_ENABLED or search_cycle_lock.locked():
+        return
+    from provider_state import claim_window, reserve, write
+    local = _local_now()
+    hours = {int(h) for h in Config.SEARCH_HOURS.split(',') if h.strip().isdigit()}
+    if (local.hour in hours and local.minute < 10) or ((local.hour+1)%24 in hours and local.minute >= 50):
+        return
+    if not claim_window('reverb:incremental:last_attempt', 55*60):
+        return
+    # Two pages, at most one transport/5xx retry each; reserve the upper bound.
+    if not reserve('reverb_incremental', 4, 96*31, 96):
+        write('reverb:incremental:health', {'checked':time.time(), 'error':'separate native-request allowance protected'})
+        return
+    async with search_cycle_lock:
+        with spending_scope('queue'):
+            db, prices = Database(), PriceTracker()
+            started = time.time()
+            try:
+                scraper = ReverbScraper()
+                scraper.incremental = True
+                scraper.auxiliary_work = True
+                # Per-call retry remains in Reverb; no whole-source retry of
+                # this extra job (the untouched full cycle keeps its policy).
+                result = await _run_scraper_with_resilience(scraper, db, prices, asyncio.Semaphore(1))
+                notifier = TelegramNotifier(Config.TELEGRAM_BOT_TOKEN, Config.TELEGRAM_CHAT_ID)
+                sent = await _deliver(notifier, db, prices, result['new'])
+                for listing, info in result['drops']:
+                    db.enqueue_price_drop(listing, info)
+                health = {'checked':time.time(), 'started':started, 'duration_seconds':time.time()-started,
+                          'raw':result['raw'], 'candidates':len(result['new']), 'sent':sent,
+                          'error':result.get('error') or ('source failed' if result['status']=='ERROR' else ''),
+                          'details':result.get('details',{}), 'paid_searches':0, 'actors':0}
+                write('reverb:incremental:health', health)
+                log.info('Reverb incremental: raw=%s candidates=%s sent=%s error=%s; no paid discovery',
+                         health['raw'],health['candidates'],sent,health['error'])
+            except Exception as exc:
+                write('reverb:incremental:health', {'checked':time.time(),'started':started,'error':type(exc).__name__})
+                log.warning('Reverb incremental deferred (%s); ordinary schedule/outbox preserved',type(exc).__name__)
+            finally:
+                prices.close()
+                db.close()
+
+
 async def detail_queue_tick() -> None:
     """Bounded extra primary-page work; no search or paid recovery calls."""
     if not Config.DETAIL_WORKER_ENABLED or search_cycle_lock.locked():
@@ -920,6 +971,20 @@ async def handle_health(request):
     return web.json_response({"status": "healthy"})
 
 
+async def handle_reverb_search(request):
+    """Authenticated bounded brand check; no force flag or paid discovery."""
+    if not _authorized(request):
+        return web.json_response({'status':'unauthorized'},status=401)
+    if search_cycle_lock.locked():
+        return web.json_response({'status':'busy'},status=409)
+    from provider_state import read
+    before = read('reverb:incremental:last_attempt',0)
+    await reverb_incremental_tick()
+    after = read('reverb:incremental:last_attempt',0)
+    return web.json_response({'status':'attempted' if after!=before else 'guarded',
+                              'details':read('reverb:incremental:health',{})})
+
+
 async def handle_ready(request):
     from operations import readiness
     # Public, deliberately contains no listings, chat IDs, quotas or credentials.
@@ -999,6 +1064,7 @@ async def main():
 
     app = web.Application()
     app.router.add_post('/search', handle_search)
+    app.router.add_post('/search/reverb', handle_reverb_search)
     app.router.add_get('/health', handle_health)
     app.router.add_get('/health/ready', handle_ready)
     app.router.add_get('/status', handle_status)
@@ -1027,6 +1093,8 @@ async def main():
     scheduler.add_job(pushover_tick, "interval", minutes=1, id="pushover-notifications",
                       max_instances=1, coalesce=True, misfire_grace_time=60)
     scheduler.add_job(detail_queue_tick, 'interval', minutes=10, id='detail-queue',
+                      max_instances=1, coalesce=True, misfire_grace_time=60)
+    scheduler.add_job(reverb_incremental_tick, 'cron', minute=15, id='reverb-incremental',
                       max_instances=1, coalesce=True, misfire_grace_time=60)
     # misfire_grace_time: if the loop is busy at 12:00:00 the run must still happen
     # (default grace is 1 s, which silently DROPS the only run of the day).

@@ -5,6 +5,7 @@ caps. Never retry an uncertain run creation; keep its full budget reservation.
 """
 
 import calendar
+import asyncio
 import json
 import math
 import logging
@@ -246,7 +247,15 @@ class ApifyFacebookScraper(BaseScraper):
                 self.failures.append("Apify monthly budget reserved; collection skipped")
                 conn.rollback()
                 return ""
-            auxiliary = getattr(self, 'manual_fresh', False) or getattr(self, 'auxiliary_work', False)
+            auxiliary = phase == 'regional' or getattr(self, 'manual_fresh', False) or getattr(self, 'auxiliary_work', False)
+            if phase == 'regional':
+                local = conn.execute("""SELECT coalesce(sum(coalesce(c.cost,j.cap)),0) FROM apify_jobs j
+                    LEFT JOIN apify_costs c ON c.run_id=j.run_id WHERE j.period=? AND j.phase='regional'""",(period,)).fetchone()[0]
+                last = conn.execute("SELECT value FROM apify_state WHERE key='last_regional_discovery'").fetchone()
+                if (local+units>_money(Config.APIFY_REGIONAL_MONTHLY_LIMIT_USD)
+                        or last and time.time()-float(last[0])<Config.APIFY_GUARD_HOURS*3600):
+                    conn.rollback()
+                    return ''
             if auxiliary:
                 now = datetime.now(timezone.utc)
                 days_left = calendar.monthrange(now.year, now.month)[1] - now.day + 1
@@ -291,6 +300,9 @@ class ApifyFacebookScraper(BaseScraper):
                     return ""
                 conn.execute("INSERT OR REPLACE INTO apify_state VALUES (?,?)", (guard_key, str(time.time())))
                 conn.execute("INSERT OR REPLACE INTO apify_state VALUES ('cursor',?)", (str(self._cursor + 1),))
+            if phase == 'regional':
+                conn.execute("INSERT OR REPLACE INTO apify_state VALUES ('last_regional_discovery',?)",(str(time.time()),))
+                conn.execute("INSERT OR REPLACE INTO apify_state VALUES ('regional_cursor',?)",(str(self._regional_cursor+2),))
             reservation = uuid.uuid4().hex
             conn.execute("INSERT INTO apify_jobs (id,phase,period,cap,created) VALUES (?,?,?,?,?)",
                          (reservation, phase, period, units, time.time()))
@@ -351,13 +363,13 @@ class ApifyFacebookScraper(BaseScraper):
                     ON CONFLICT(url) DO UPDATE SET next_attempt=excluded.next_attempt,error=excluded.error''',
                     [(target['url'], time.time()+18*3600, 'detail POST may be billed; awaiting outcome') for target in urls])
                 conn.commit()
-        task = Config.APIFY_DISCOVERY_TASK_ID if phase == "discovery" else Config.APIFY_DETAILS_TASK_ID
-        if phase == "discovery":
+        task = Config.APIFY_DETAILS_TASK_ID if phase == 'details' else Config.APIFY_DISCOVERY_TASK_ID
+        if phase in ('discovery','regional'):
             for target in urls:
                 self.record_discovery_query(target["url"])
         result = await self._request(client, "POST", f"/actor-tasks/{task}/runs",
             params={"maxTotalChargeUsd": cap, "timeout": 180, "memory": 4096, "restartOnError": "false"},
-            json={"startUrls": urls, "resultsLimit": 5 if phase == "discovery" else len(urls),
+            json={"startUrls": urls, "resultsLimit": 5 if phase == "discovery" else 2 if phase=='regional' else len(urls),
                   "includeListingDetails": phase == "details"})
         run_id = result["data"]["id"]
         if not isinstance(run_id, str) or not IDENTIFIER.fullmatch(run_id):
@@ -383,7 +395,7 @@ class ApifyFacebookScraper(BaseScraper):
                 if previous:
                     listing = retain_known_negative_flags(listing,json.loads(previous[0]),
                                 json.loads(previous[1]) if previous[1] else {})
-                if phase == "discovery":
+                if phase in ('discovery','regional'):
                     # Keep new negative evidence for an existing URL even when
                     # it is no longer an eligible discovery result. Otherwise
                     # stale verified details/unknown cards could still alert.
@@ -411,7 +423,7 @@ class ApifyFacebookScraper(BaseScraper):
                     self.failures.append('Apify detail returned an unexpected item ID; requested candidates retained')
                     continue
                 observed.add(url)
-                if phase == 'discovery':
+                if phase in ('discovery','regional'):
                     conn.execute("INSERT INTO apify_items (url,candidate) VALUES (?,?) ON CONFLICT(url) DO UPDATE SET candidate=excluded.candidate",
                                  (url, json.dumps(listing, ensure_ascii=False)))
                 else:
@@ -458,11 +470,17 @@ class ApifyFacebookScraper(BaseScraper):
             log.info("Apify Facebook not configured or disabled; skipping")
             return []
         cutoff = time.time() - Config.APIFY_DETAIL_TTL_HOURS * 3600
+        regional_coverage = {'kind':'additional_actor','planned':0,'attempted':0,'state':'not_attempted'}
+        discovery_finished = False
         try:
             with store() as conn:
                 row = conn.execute("SELECT value FROM apify_state WHERE key='cursor'").fetchone()
                 self._cursor = int(row[0]) if row else 0
-                pending = conn.execute("SELECT id,phase,run_id FROM apify_jobs WHERE done=0 AND run_id IS NOT NULL AND phase IN ('discovery','details')").fetchall()
+                row = conn.execute("SELECT value FROM apify_state WHERE key='regional_cursor'").fetchone()
+                self._regional_cursor = int(row[0]) if row else 0
+                pending = conn.execute("SELECT id,phase,run_id FROM apify_jobs WHERE done=0 AND run_id IS NOT NULL AND phase IN ('discovery','details','regional')").fetchall()
+                regional_pending = [job for job in pending if job[1]=='regional']
+                pending = [job for job in pending if job[1]!='regional']
             async with self.make_client(timeout=30, follow_redirects=False,
                     headers={"Authorization": "Bearer " + Config.APIFY_TOKEN}) as client:
                 from apify_auth import check_access, REASON
@@ -483,6 +501,7 @@ class ApifyFacebookScraper(BaseScraper):
                     reservation, rows = await self._start(client, "discovery", regional_plan(self._cursor), Config.APIFY_DISCOVERY_CAP_USD)
                     if reservation:
                         self._consume(reservation, "discovery", rows)
+                        discovery_finished = True
                     else:
                         self.skipped = True
                         log.info("Apify discovery skipped: guard or monthly reservation limit")
@@ -513,6 +532,47 @@ class ApifyFacebookScraper(BaseScraper):
                     if reservation:
                         self._consume(reservation, "details", rows)
                         self.skipped = False
+                # An interrupted OPTIONAL run can never take the original US
+                # discovery branch or extend the whole source past its deadline.
+                if regional_pending:
+                    reservation,phase,run_id = regional_pending[0]
+                    regional_coverage.update(state='resuming_existing_run',run_id=run_id)
+                    try:
+                        rows = await asyncio.wait_for(self.read_run(client,run_id),timeout=25)
+                        self._consume(reservation,phase,rows)
+                        regional_coverage.update(state='existing_dataset_read',raw_rows=len(rows))
+                    except Exception as exc:
+                        if isinstance(exc,RuntimeError) and str(exc) in ('Apify HTTP 404','Apify HTTP 410'):
+                            self._consume(reservation,phase,[])
+                            regional_coverage.update(state='expired_output_reservation_retained',error=str(exc))
+                        else:
+                            regional_coverage.update(state='existing_run_retained',error=type(exc).__name__)
+                if (not regional_pending and Config.APIFY_REGIONAL_ENABLED and discovery_finished and not self.health_error()
+                        and not getattr(self,'auxiliary_work',False)
+                        and not getattr(self,'manual_fresh',False)):
+                    from facebook_regions import regional_plan as extra_regions
+                    planned = extra_regions(self._regional_cursor)
+                    regional_coverage.update(planned=2,targets=planned)
+                    previous_failures = len(self.failures)
+                    before_queries = self.discovery_queries_attempted
+                    try:
+                        reservation,rows = await asyncio.wait_for(self._start(client,'regional',
+                            [{'url':v['url']} for v in planned],Config.APIFY_REGIONAL_CAP_USD),timeout=25)
+                    except Exception as exc:
+                        reservation,rows = '',[]
+                        regional_coverage['error'] = type(exc).__name__
+                    regional_coverage['attempted'] = self.discovery_queries_attempted-before_queries
+                    if reservation:
+                        self._consume(reservation,'regional',rows)
+                        regional_coverage.update(attempted=2,state='dataset_read',raw_rows=len(rows))
+                    else:
+                        regional_coverage['state'] = ('post_or_read_interrupted_reservation_retained' if regional_coverage['attempted']
+                                                      else 'budget_or_guard_deferred')
+                        # Optional extension did not run. Report its exact
+                        # reason separately; do not mark the completed original
+                        # US collection as an access failure.
+                        regional_coverage['reasons'] = self.failures[previous_failures:]
+                        del self.failures[previous_failures:]
         except Exception as exc:
             # No credential-bearing exception strings or response bodies in logs.
             label = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
@@ -550,7 +610,8 @@ class ApifyFacebookScraper(BaseScraper):
                 conn.commit()
         except Exception as exc:
             self.failures.append("Apify cache unavailable: " + type(exc).__name__)
-        self.coverage_stats = {'cached_verified_details':verified_count,'strong_unverified_candidates':unknown_count}
+        self.coverage_stats = {'cached_verified_details':verified_count,'strong_unverified_candidates':unknown_count,
+                               'additional_regions':regional_coverage}
         log.info("Apify Facebook: %d fetched, %d verified, %d strong unverified candidates; %s",
                  self.fetched,verified_count,unknown_count,self.health_error() or "OK")
         return ready

@@ -37,6 +37,10 @@ from config import Config
 from filters import has_zeta_signal, has_violin_word, is_zeta_violin, is_other_brand, has_noise, classify
 from liveness import looks_dead
 from discovery_queue import stage, complete
+from craigslist_queries import stage_queries, finish_queries, query_key, pending_count
+from provider_state import read, write
+from http_limits import retry_after_seconds
+import time
 
 log = logging.getLogger(__name__)
 
@@ -107,47 +111,92 @@ class CraigslistScraper(BaseScraper):
             # keeping exactly four requests per area rather than multiplying traffic.
             queries = self.plan_queries()
             work = [(area, q, path) for area in areas for q, path in queries]
+            pending = stage_queries(work)
+            planned_keys = {query_key(w) for w in work}
+            extras = [v['work'] for key,v in sorted(pending.items(),key=lambda kv:kv[1].get('last_attempt',0))
+                      if key not in planned_keys and v.get('due',0)<=time.time()][:8]
+            work += extras
+            self.coverage_stats.update(planned_searches=len(areas)*len(queries), resumed_searches=len(extras),
+                                       search_valid=0, search_failed=0, search_recovered=0, search_deferred=0,
+                                       search_regions={}, failed_searches=[], query_definitions=queries)
             log.info(f"Craigslist: {len(areas)} areas × {len(queries)} queries = {len(work)} requests")
 
             async def fetch(area: tuple, query: str, path: str) -> list:
                 area_id, host, country = area
+                observation = {'area':area_id,'host':host,'country':country,'query':query,'path':path,'attempts':0}
+                saved = pending.get(query_key((area,query,path)),{})
+                if saved.get('error')=='HTTP 429' and saved.get('due',0)>time.time():
+                    self.coverage_stats['search_deferred'] += 1
+                    region = self.coverage_stats['search_regions'].setdefault(country,{'attempted':0,'valid':0,'failed':0,'deferred':0})
+                    region['deferred'] += 1
+                    self.content_failures.append(f'Craigslist {host}: Retry-After active; exact query retained')
+                    return [],None  # do not move the existing due timestamp
                 async with sem:
-                    try:
-                        resp = await client.get(SAPI_URL, params={
-                            "batch": f"{area_id}-0-360-0-0",
-                            "cc": country,
-                            "lang": "en",
-                            "query": query,
-                            "searchPath": path,
-                        })
-                    except Exception as e:
-                        log.warning(f"Craigslist {host} '{query}' error: {e}")
-                        return []
-                if resp.status_code != 200:
-                    log.warning(f"Craigslist {host} '{query}' HTTP {resp.status_code}")
-                    return []
+                    resp = None
+                    first_failure = None
+                    for attempt in range(2):
+                        observation['attempts'] += 1
+                        self.record_discovery_query(f'country={country} area={area_id} host={host} path={path} attempt={attempt+1} {query}')
+                        try:
+                            resp = await client.get(SAPI_URL, params={
+                                'batch':f'{area_id}-0-360-0-0','cc':country,'lang':'en','query':query,'searchPath':path})
+                            observation['http'] = resp.status_code
+                            if resp.status_code not in (403,408,500,502,503,504) or attempt:
+                                break
+                            first_failure = f'HTTP {resp.status_code} ({resp.request.url.host})'
+                        except (httpx.TransportError,httpx.TimeoutException) as exc:
+                            observation['error'] = type(exc).__name__
+                            if attempt:
+                                break
+                            first_failure = ''
+                            resp = None
+                        await asyncio.sleep(1)
+                error = ''
+                decoded = []
                 try:
-                    data = resp.json().get("data", {})
-                except Exception as e:
-                    log.warning(f"Craigslist {host} '{query}' bad JSON: {e}")
-                    return []
-                if (not isinstance(data, dict) or "items" not in data
-                        or (data["items"] is not None and not isinstance(data["items"], list))):
-                    self.failures.append("invalid Craigslist search response")
-                    return []
-                decoded = self._decode(data, host)
+                    if resp is None or resp.status_code != 200:
+                        raise ValueError('HTTP '+str(resp.status_code) if resp is not None else observation.get('error','transport'))
+                    payload = resp.json()
+                    data = payload.get('data') if isinstance(payload,dict) else None
+                    if (not isinstance(data,dict) or 'items' not in data
+                            or (data['items'] is not None and not isinstance(data['items'],list))
+                            or (data['items'] and not isinstance(data.get('decode'),dict))):
+                        raise ValueError('invalid Craigslist search response')
+                    decoded = self._decode(data,host)
+                    observation['raw_rows'] = len(data['items'] or [])
+                    if first_failure is not None:
+                        if first_failure and first_failure in self.failures:
+                            self.failures.remove(first_failure)
+                        self.requests_recovered += 1
+                        self.coverage_stats['search_recovered'] += 1
+                    self.coverage_stats['search_valid'] += 1
+                except (ValueError,TypeError,AttributeError) as exc:
+                    error = str(exc)
+                    self.coverage_stats['search_failed'] += 1
+                    self.coverage_stats['failed_searches'].append(observation)
+                    self.content_failures.append(f'Craigslist {host} {path}: {error}; exact query retained')
+                    log.warning('Craigslist %s %r failed (%s); exact query retained',host,query,error)
+                region = self.coverage_stats['search_regions'].setdefault(country,{'attempted':0,'valid':0,'failed':0,'deferred':0})
+                region['attempted'] += 1
+                region['valid' if not error else 'failed'] += 1
+                delay = retry_after_seconds(resp.headers.get('Retry-After')) if resp is not None and resp.status_code==429 else 3600
                 for item in decoded:
                     item["discovery_path"] = path
-                return decoded
+                return decoded, ((area,query,path),error,delay)
 
             batch_size = 200
             for i in range(0, len(work), batch_size):
                 chunk = work[i:i + batch_size]
-                for decoded in await asyncio.gather(*[fetch(a, q, p) for a, q, p in chunk],
+                outcomes = []
+                for response in await asyncio.gather(*[fetch(a, q, p) for a, q, p in chunk],
                                                     return_exceptions=True):
-                    if isinstance(decoded, BaseException):
-                        log.warning(f"Craigslist batch item failed: {decoded}")
+                    if isinstance(response, BaseException):
+                        self.content_failures.append('Craigslist batch interrupted; unfinished queries retained')
+                        log.warning('Craigslist batch item failed: %s',type(response).__name__)
                         continue
+                    decoded,outcome = response
+                    if outcome is not None:
+                        outcomes.append(outcome)
                     self.fetched += len(decoded)
                     for item in decoded:
                         if item["id"] in seen_ids:
@@ -161,6 +210,16 @@ class CraigslistScraper(BaseScraper):
                         if (has_zeta_signal(title) or item["discovery_path"] == "sss"
                                 or has_violin_word(title)):
                             candidates.append(item)
+                # Keep cards and exact unfinished requests across process exits.
+                from discovery_queue import DiscoveryQueue
+                with DiscoveryQueue(self.name) as queue:
+                    queue.put(candidates)
+                finish_queries(outcomes)
+            self.coverage_stats['search_pending'] = pending_count()
+            log.info('Craigslist coverage: planned=%s valid=%s failed=%s recovered=%s pending=%s regions=%s',
+                     len(areas)*len(queries),self.coverage_stats['search_valid'],self.coverage_stats['search_failed'],
+                     self.coverage_stats['search_recovered'],self.coverage_stats['search_pending'],
+                     self.coverage_stats['search_regions'])
 
             # Proven title signals first, then estate inventory and unbranded
             # violins. The cap also applies to strong titles, not just the tail.
@@ -359,16 +418,32 @@ class CraigslistScraper(BaseScraper):
         try:
             resp = await client.get(AREAS_URL)
             if resp.status_code != 200:
-                log.warning(f"Craigslist areas list HTTP {resp.status_code} — using static fallback")
-                return STATIC_AREAS
+                log.warning('Craigslist area reference HTTP %s; checking saved complete list',resp.status_code)
+                raise ValueError('reference HTTP '+str(resp.status_code))
             areas = []
-            for a in resp.json():
+            payload = resp.json()
+            if not isinstance(payload,list):
+                raise ValueError('invalid area reference')
+            for a in payload:
+                if not isinstance(a,dict):
+                    raise ValueError('invalid area row')
                 country = str(a.get("Country", "")).upper()
                 if wanted and country not in wanted:
                     continue
                 if a.get("AreaID") and a.get("Hostname"):
+                    if (type(a['AreaID']) not in (int,str) or not str(a['AreaID']).isdigit()
+                            or int(a['AreaID'])<=0 or not re.fullmatch(r'[a-z0-9-]+',str(a['Hostname']))):
+                        raise ValueError('invalid area identity')
                     areas.append((int(a["AreaID"]), str(a["Hostname"]), country))
-            return areas or STATIC_AREAS
+            if not areas:
+                raise ValueError('no requested areas in reference')
+            write('craigslist:areas:'+','.join(sorted(wanted)),areas)
+            return areas
         except Exception as e:
-            log.warning(f"Craigslist areas list error: {e} — using static fallback")
-            return STATIC_AREAS
+            log.warning('Craigslist area reference unresolved (%s); checking saved complete list',type(e).__name__)
+            cached = read('craigslist:areas:'+','.join(sorted(wanted)),[])
+            if cached:
+                self.content_failures.append('area reference unavailable; last validated complete region list used')
+                return [tuple(a) for a in cached]
+            self.content_failures.append('area reference unavailable; limited static regions only')
+            return [a for a in STATIC_AREAS if not wanted or a[2] in wanted]

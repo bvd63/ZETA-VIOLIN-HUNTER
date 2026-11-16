@@ -48,6 +48,8 @@ class Config:
     SEARCH_HOURS = os.getenv("SEARCH_HOURS", "10,22")
     SEARCH_TIMEZONE = os.getenv("SEARCH_TIMEZONE", "Europe/Bucharest")
     RUNS_PER_DAY = max(1, len([h for h in SEARCH_HOURS.split(",") if h.strip().isdigit()]))
+    # Additive official brand sweep; never invokes paid search providers/Actors.
+    REVERB_INCREMENTAL_ENABLED = _bool('REVERB_INCREMENTAL_ENABLED', 'true')
 
     # --- Google Custom Search (retires 2027-01-01) ---
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
@@ -112,6 +114,11 @@ class Config:
     APIFY_MONTHLY_LIMIT_USD = max(0, float(os.getenv("APIFY_MONTHLY_LIMIT_USD", "5")))
     APIFY_DISCOVERY_CAP_USD = max(0, float(os.getenv("APIFY_DISCOVERY_CAP_USD", "0.065")))
     APIFY_DETAILS_CAP_USD = max(0, float(os.getenv("APIFY_DETAILS_CAP_USD", "0.02")))
+    # Extra regions borrow ONLY verified surplus after protecting the original
+    # two US searches/details. Neither the account nor aggregate $5 cap grows.
+    APIFY_REGIONAL_ENABLED = _bool('APIFY_REGIONAL_ENABLED','true')
+    APIFY_REGIONAL_CAP_USD = 0.027
+    APIFY_REGIONAL_MONTHLY_LIMIT_USD = 1.7
     APIFY_GUARD_HOURS = max(1, float(os.getenv("APIFY_GUARD_HOURS", "10")))
     APIFY_DETAIL_TTL_HOURS = max(1, float(os.getenv("APIFY_DETAIL_TTL_HOURS", "72")))
     # Kept off until a protected live pilot validates the exact Actor/schema.

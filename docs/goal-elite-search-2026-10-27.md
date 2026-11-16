@@ -1,3 +1,7 @@
+# Extindere explicită —16noiembrie2026, cinci puncte
+
+Proprietarul a cerut implementarea tuturor celor4puncte recomandate și a adăugatFacebookMarketplacecuaccentUS/CA, plusUK/FR/DE/ES. Cerințele, limitele și acceptarea curentă sunt în[search-milestone-2026-11-16.md](search-milestone-2026-11-16.md). Această cerere autorizează continuarea lucrului sigur independent de starea vecheblocked a controluluiGoal; nu inventăm o comandă deResume și nu declarămîndeplinitobiectivulgeneral. Păstreazătoatecăutărileoriginale și corecția explicităNativeLeboncoin. Urmeazădateleefectivealeultimuluirelease, nu noteleistoricepending.
+
 # Obiectiv persistent — Zeta Hunter, 27 octombrie 2026
 
 ## Corecția proprietarului — 16 noiembrie, după tura176
