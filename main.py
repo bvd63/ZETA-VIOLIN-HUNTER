@@ -45,6 +45,8 @@ from scrapers.shopgoodwill import ShopGoodwillScraper  # noqa: E402
 from scrapers.hibid import HiBidScraper  # noqa: E402
 from scrapers.govdeals import GovDealsScraper, AllSurplusScraper  # noqa: E402
 from scrapers.kijiji import KijijiScraper  # noqa: E402
+from scrapers.serper import SerperScraper  # noqa: E402
+from scrapers.apify_leboncoin import ApifyLeboncoinScraper  # noqa: E402
 from scrapers.marktplaats import MarktplaatsScraper  # noqa: E402
 from scrapers.willhaben import WillhabenScraper  # noqa: E402
 from scrapers.schibsted import SchibstedScraper  # noqa: E402
@@ -115,6 +117,7 @@ def build_scrapers() -> list:
         ReverbScraper(),
         EbayScraper(Config.EBAY_CLIENT_ID, Config.EBAY_CLIENT_SECRET),
         GoogleScraper(Config.GOOGLE_API_KEY, Config.GOOGLE_CSE_ID),
+        SerperScraper(),
         BraveScraper(),
         TavilyScraper(),
         ExaScraper(),
@@ -126,6 +129,7 @@ def build_scrapers() -> list:
         AllSurplusScraper(),
         GardinerHoulgateScraper(),
         KijijiScraper(),
+        ApifyLeboncoinScraper(),
         MarktplaatsScraper(),
         WillhabenScraper(),
         SchibstedScraper(),

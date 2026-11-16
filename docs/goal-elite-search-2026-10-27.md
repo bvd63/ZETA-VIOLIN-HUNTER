@@ -1,5 +1,13 @@
 # Obiectiv persistent — Zeta Hunter, 27 octombrie 2026
 
+## Reluare explicită — 16 noiembrie 2026
+
+Proprietarul a reluat Goal-ul și cere repararea problemelor auditului Franța/Canada. Prima prioritate este oferta Leboncoin3269447854, acceptată de filtrul exact dar absentă din istoricul/coada/livrările actuale. Leboncoin/Zikinf/Audiofanzine depind de indexuri, iar rotația de limbă/grup nu asigură căutări franceze utile la fiecare ciclu. Google CSE primește403 project-not-eligible; nu este epuizare de credite și nu se rezolvă prin alimentare automată. Kijiji este activ, iar Canada trebuie verificată pe rute reale, separat de simpla configurare.
+
+Reproduce accesul din container, validează colecții/pagini/ID/stare și implementează căutări franceze și canadiene explicite, suplimentare. Cercetează o rezervă gratuită pentru căutările Google indisponibile și păstrează toate planurile/cursorii/limbile/regiunile existente; nu muta automat lucrul în API-uri plătite și nu ascunde refuzul extern. Controlează consumul și notifică proprietarul dacă o remediere reală cere credite suplimentare. Fără cumpărături sau export de sesiuni.
+
+Acceptare suplimentară: regresie cu titlul/descrierea exactă, oferte active/sold/necunoscute și identitate URL; planificare FR/CA fără reducerea contractului anterior; suitele necesare+CI/predeploy, versiune Railway reală, apoi o tură normală autorizată observată până la final. Distinge apeluri proaspete, cache, piste durabile și livrare acceptată. Nu considera injectarea manuală a linkului probă de descoperire. Dacă oferta este recuperată de o căutare reală, urmează fluxul normal de verificare/alertare/dedup. Dovezile și limitele rămân în outputs/verification-20261116.
+
 Proprietarul a cerut explicit continuarea autonomă până la implementare și verificare riguroasă, cu țintă de performanță profesională comparabilă ca atenție și disciplină cu agenții de vârf. Obiectivul este activ în Codex; acest dosar păstrează cerințele și acceptarea tehnică, fără promisiunea imposibilă a accesului la întregul inventar extern.
 
 ## Contractul proprietarului

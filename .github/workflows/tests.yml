@@ -27,10 +27,13 @@ jobs:
       - run: python -m tests.test_coverage_contract
       - run: python -m tests.test_marketplace_parsers
       - run: python -m tests.test_apify
+      - run: python -m tests.test_apify_auth
+      - run: python -m tests.test_leboncoin_api
       - run: python -m tests.test_craigslist
       - run: python -m tests.test_notifications
       - run: python -m tests.test_listing_feedback
       - run: python -m tests.test_search_reserves
+      - run: python -m tests.test_regional_search
       - run: python -m tests.test_pushover
       - run: python -m tests.test_operations
       - run: python -m tests.test_search_quality

@@ -59,7 +59,14 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    result = asyncio.run(preview(args.reference_run or (Config.APIFY_VALIDATION_RUN_ID if args.check else ""), args.search, args.check))
+    try:
+        result = asyncio.run(preview(args.reference_run or (Config.APIFY_VALIDATION_RUN_ID if args.check else ""), args.search, args.check))
+    except RuntimeError as exc:
+        if args.check and str(exc)=='Apify HTTP 401':
+            sys.stdout.write(json.dumps({'configured':True,'mode':'api-check','tasks_verified':0,
+                'external_auth_block':True,'errors':'Apify HTTP 401: replace APIFY_TOKEN in Railway'})+'\n')
+            raise SystemExit(10) from None
+        raise
     sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     if result["errors"]:
         raise SystemExit(1)

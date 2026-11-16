@@ -33,9 +33,12 @@ class KijijiScraper(BaseScraper):
         seen_ids = set()
 
         async with self.make_client(headers=BROWSER_HEADERS) as client:
-            for kw, in_category in [(q, q.lower() in ("zeta", "strados")) for q in market_queries("fr", broad=True)]:
+            # Preserve every French slot; add English wording used outside Quebec.
+            queries = list(dict.fromkeys(market_queries('fr', broad=True) + market_queries('en', broad=True)))
+            for kw, in_category in [(q, q.lower() in ("zeta", "strados")) for q in queries]:
                 slug = re.sub(r"[^a-z0-9]+", "-", kw.lower()).strip("-")
                 try:
+                    self.record_discovery_query(kw + ' country=Canada scope=' + ('instruments' if in_category else 'all'))
                     resp = await client.get((CATEGORY_URL if in_category else SEARCH_URL).format(slug=slug))
                     if resp.status_code != 200:
                         log.warning(f"Kijiji '{kw}' HTTP {resp.status_code}")

@@ -572,6 +572,25 @@ async def _verify_offer(listing: dict, client) -> tuple:
         return "non_sale", "sursă eliminată la cererea proprietarului"
     if not public_url(url):
         return "non_sale", "URL public invalid"
+    from leboncoin_api import cached_offer as leboncoin_offer, closed_reason as leboncoin_closed
+    native_closed=leboncoin_closed(url)
+    if native_closed:
+        return 'dead','Leboncoin: '+native_closed
+    native=leboncoin_offer(url)
+    if native:
+        verified=native['listing']
+        if verified.get('_leboncoin_observed_state')=='dead':
+            return 'dead','Leboncoin: état indisponible vérifié sur le même identifiant'
+        if verified.get('_leboncoin_observed_state')=='held':
+            listing['_availability_conflict']='Leboncoin: rezervat/ascuns la verificarea primară'
+            return 'unknown',listing['_availability_conflict']
+        if verified.get('_leboncoin_observed_state')=='live':
+            origin=listing.get('source')
+            listing.update(verified)
+            if origin:
+                listing['source']=origin
+            listing['_primary_content_checked']=True
+            return 'live','Leboncoin: detalii primare și stare activă verificate prin Actor'
     from facebook_discovery import cached_offer
     facebook = cached_offer(url)
     if facebook:

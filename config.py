@@ -76,6 +76,12 @@ class Config:
     # Hard monthly ceiling within the published $5 free credit, including retries.
     BRAVE_MONTHLY_QUOTA = min(1000, max(0, int(os.getenv("BRAVE_MONTHLY_QUOTA", "1000"))))
 
+    # Optional independent Google SERP access. Signup credit is ONE-OFF, not monthly.
+    # This code cannot buy/top up credits; lifetime reservations survive restarts.
+    SERPER_API_KEY = os.getenv('SERPER_API_KEY', '')
+    SERPER_TOTAL_CREDITS = max(0, int(os.getenv('SERPER_TOTAL_CREDITS', '2500')))
+    SERPER_GUARD_HOURS = max(10, int(os.getenv('SERPER_GUARD_HOURS', '10')))
+
     # Independent search indexes. No subscription/automatic recharge is enabled
     # by this code. Local reservations include failed/uncertain paid requests.
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
@@ -108,6 +114,9 @@ class Config:
     APIFY_DETAILS_CAP_USD = max(0, float(os.getenv("APIFY_DETAILS_CAP_USD", "0.02")))
     APIFY_GUARD_HOURS = max(1, float(os.getenv("APIFY_GUARD_HOURS", "10")))
     APIFY_DETAIL_TTL_HOURS = max(1, float(os.getenv("APIFY_DETAIL_TTL_HOURS", "72")))
+    # Kept off until a protected live pilot validates the exact Actor/schema.
+    APIFY_LEBONCOIN_ENABLED = _bool('APIFY_LEBONCOIN_ENABLED', 'false')
+    APIFY_LEBONCOIN_MONTHLY_LIMIT_USD = max(0,float(os.getenv('APIFY_LEBONCOIN_MONTHLY_LIMIT_USD','2')))
     # Years in titles/bodies are often purchase/auction dates, not manufacture years.
     FILTER_TEXT_YEARS = _bool("FILTER_TEXT_YEARS", "false")
 

@@ -222,6 +222,13 @@ class ApifyFacebookScraper(BaseScraper):
             period = datetime.now(timezone.utc).strftime("%Y-%m")
             used = spent_micro(conn, period)
             units = _money(cap)
+            if phase=='leboncoin':
+                local=conn.execute("""SELECT coalesce(sum(coalesce(c.cost,j.cap)),0) FROM apify_jobs j
+                    LEFT JOIN apify_costs c ON c.run_id=j.run_id WHERE j.period=? AND j.phase='leboncoin'""",(period,)).fetchone()[0]
+                if local+units>_money(Config.APIFY_LEBONCOIN_MONTHLY_LIMIT_USD):
+                    self.failures.append('Leboncoin phase allowance protected; Facebook budget unchanged')
+                    conn.rollback()
+                    return ''
             if units <= 0 or used + units > _money(Config.APIFY_MONTHLY_LIMIT_USD):
                 self.failures.append("Apify monthly budget reserved; collection skipped")
                 conn.rollback()
@@ -282,6 +289,9 @@ class ApifyFacebookScraper(BaseScraper):
 
     async def _request(self, client: httpx.AsyncClient, method: str, path: str, **kwargs) -> object:
         response = await client.request(method, API + path, **kwargs)
+        if response.status_code == 401:
+            from apify_auth import mark_rejected
+            mark_rejected(401)
         if response.status_code >= 400:
             raise RuntimeError(f"Apify HTTP {response.status_code}")
         return response.json()
@@ -442,9 +452,12 @@ class ApifyFacebookScraper(BaseScraper):
             with store() as conn:
                 row = conn.execute("SELECT value FROM apify_state WHERE key='cursor'").fetchone()
                 self._cursor = int(row[0]) if row else 0
-                pending = conn.execute("SELECT id,phase,run_id FROM apify_jobs WHERE done=0 AND run_id IS NOT NULL").fetchall()
+                pending = conn.execute("SELECT id,phase,run_id FROM apify_jobs WHERE done=0 AND run_id IS NOT NULL AND phase IN ('discovery','details')").fetchall()
             async with self.make_client(timeout=30, follow_redirects=False,
                     headers={"Authorization": "Bearer " + Config.APIFY_TOKEN}) as client:
+                from apify_auth import check_access, REASON
+                if not await check_access(client):
+                    raise RuntimeError(REASON)  # preserve the existing cached delivery path below
                 if pending:
                     for reservation, phase, run_id in pending:
                         try:

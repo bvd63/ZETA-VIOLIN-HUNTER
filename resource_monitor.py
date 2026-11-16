@@ -55,10 +55,14 @@ def snapshot() -> dict:
                   "limit": Config.BRAVE_MONTHLY_QUOTA, "unit": "cereri", "period": f"{now:%Y-%m} UTC"},
         "apify": {"configured": bool(Config.APIFY_TOKEN), "reserved": 0,
                   "limit": Config.APIFY_MONTHLY_LIMIT_USD, "unit": "USD", "period": f"{now:%Y-%m} UTC"},
+        'serper': {'configured':bool(Config.SERPER_API_KEY), 'reserved':0,
+                   'limit':Config.SERPER_TOTAL_CREDITS, 'unit':'cereri', 'period':'alocație totală, fără reînnoire automată'},
     }
     conn = connect()
     try:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'provider_reservations' in tables:
+            data['serper']['reserved'] = conn.execute("SELECT coalesce(sum(units),0) FROM provider_reservations WHERE provider='serper'").fetchone()[0]
         if "scraper_runs" in tables:
             row = conn.execute("SELECT last_run FROM scraper_runs WHERE scraper=?",
                                (f"brave_quota:{now:%Y-%m}",)).fetchone()
@@ -75,7 +79,7 @@ def snapshot() -> dict:
                              "limit": Config.APIFY_MONTHLY_LIMIT_USD, "unit": "USD",
                              "period": f"{now:%Y-%m} UTC"}
         if "scraper_stats" in tables:
-            for provider, source in (("brave", "Brave Search"), ("apify", "Facebook Marketplace")):
+            for provider, source in (("brave", "Brave Search"), ("apify", "Facebook Marketplace"), ('serper','France / Canada Search')):
                 row = conn.execute("""SELECT error,run_at FROM scraper_stats
                     WHERE scraper=? AND raw_count>=0 ORDER BY id DESC LIMIT 1""", (source,)).fetchone()
                 if row:
@@ -135,14 +139,21 @@ async def refresh_accounts() -> None:
                     "account_usage_ceiling_usd": (lim.get("limits") or {}).get("maxMonthlyUsageUsd"),
                     "checked": sampled_before, "error": ""}
                 write("apify:account", value)
+                from apify_auth import mark_valid
+                mark_valid()
                 from apify_costs import reconcile
                 # Reuse the authenticated metadata client; GETs spend no Actor
                 # credits and do not replace a single discovery/detail request.
                 await reconcile(client)
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-                cached.update({"error": type(exc).__name__, "failed_at": time.time()})
+                status = exc.response.status_code if isinstance(exc,httpx.HTTPStatusError) else None
+                from apify_auth import mark_rejected
+                mark_rejected(status)
+                detail = ('HTTP 401: APIFY_TOKEN invalid; replace in Railway' if status==401 else
+                          f'HTTP {status}' if status else type(exc).__name__)
+                cached.update({"error": detail, "failed_at": time.time()})
                 write("apify:account", cached)
-                log.warning("Apify metering unavailable (%s)", type(exc).__name__)
+                log.warning("Apify metering unavailable (%s)", detail)
         if Config.TAVILY_API_KEY:
             cached = read('tavily:account', {})
             try:
@@ -171,7 +182,7 @@ def warning_events(data: dict) -> list:
     backup = data.get('backup', {})
     if backup.get('error'):
         result.append(('backup:failed', 'Copia SQLite sau testul de restaurare a eșuat; verificare necesară.'))
-    for name in ("brave", "apify", "tavily", "exa"):
+    for name in ("brave", "apify", "tavily", "exa", "serper"):
         row = data.get(name, {})
         if not row.get("configured"):
             continue
@@ -223,7 +234,7 @@ def warnings(data: dict) -> list:
 def text() -> str:
     data = snapshot()
     lines = ["🔋 <b>Resurse de căutare și alerte</b>", "Rezervările botului includ cererile cu răspuns incert; nu reprezintă soldul contului."]
-    for name in ("brave", "apify", "tavily", "exa"):
+    for name in ("brave", "apify", "tavily", "exa", "serper"):
         row = data.get(name, {})
         if not row.get("configured"):
             lines.append(f"⚪ {name.title()}: neconfigurat")
