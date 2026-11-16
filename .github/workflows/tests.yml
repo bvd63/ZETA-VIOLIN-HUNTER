@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install httpx beautifulsoup4 lxml apscheduler aiohttp python-dotenv
+      - run: pip install httpx beautifulsoup4 lxml apscheduler aiohttp python-dotenv curl_cffi==0.17.0
       - run: python -m py_compile *.py scrapers/*.py tests/*.py
       - run: python -m tests.test_filters
       - run: python -m tests.test_trackers
@@ -29,6 +29,7 @@ jobs:
       - run: python -m tests.test_apify
       - run: python -m tests.test_apify_auth
       - run: python -m tests.test_leboncoin_api
+      - run: python -m tests.test_leboncoin_native
       - run: python -m tests.test_craigslist
       - run: python -m tests.test_notifications
       - run: python -m tests.test_listing_feedback

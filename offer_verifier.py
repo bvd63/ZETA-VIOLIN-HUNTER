@@ -573,10 +573,18 @@ async def _verify_offer(listing: dict, client) -> tuple:
     if not public_url(url):
         return "non_sale", "URL public invalid"
     from leboncoin_api import cached_offer as leboncoin_offer, closed_reason as leboncoin_closed
+    from leboncoin_api import item_id as leboncoin_id
+    native=leboncoin_offer(url)
+    if leboncoin_id(url) and (not native or time.time() - native['checked'] > 6 * 3600):
+        from leboncoin_native import refresh_primary
+        try:
+            await refresh_primary(url)
+        except Exception:
+            pass  # prior negative evidence survives an unreadable refresh
+        native=leboncoin_offer(url)
     native_closed=leboncoin_closed(url)
     if native_closed:
         return 'dead','Leboncoin: '+native_closed
-    native=leboncoin_offer(url)
     if native:
         verified=native['listing']
         if verified.get('_leboncoin_observed_state')=='dead':
@@ -584,13 +592,17 @@ async def _verify_offer(listing: dict, client) -> tuple:
         if verified.get('_leboncoin_observed_state')=='held':
             listing['_availability_conflict']='Leboncoin: rezervat/ascuns la verificarea primară'
             return 'unknown',listing['_availability_conflict']
-        if verified.get('_leboncoin_observed_state')=='live':
+        if (verified.get('_leboncoin_observed_state')=='live'
+                or verified.get('_leboncoin_primary_checked') is True):
             origin=listing.get('source')
             listing.update(verified)
             if origin:
                 listing['source']=origin
             listing['_primary_content_checked']=True
-            return 'live','Leboncoin: detalii primare și stare activă verificate prin Actor'
+            if verified.get('_leboncoin_observed_state')=='live':
+                route = 'API mobil public' if verified.get('_leboncoin_verification_source')=='native mobile API' else 'Actor'
+                return 'live','Leboncoin: detalii primare și stare activă verificate prin '+route
+            return 'unknown','Leboncoin: identitate verificată în API primar; disponibilitate neconfirmată'
     from facebook_discovery import cached_offer
     facebook = cached_offer(url)
     if facebook:

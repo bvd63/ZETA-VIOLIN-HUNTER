@@ -47,6 +47,7 @@ from scrapers.govdeals import GovDealsScraper, AllSurplusScraper  # noqa: E402
 from scrapers.kijiji import KijijiScraper  # noqa: E402
 from scrapers.serper import SerperScraper  # noqa: E402
 from scrapers.apify_leboncoin import ApifyLeboncoinScraper  # noqa: E402
+from scrapers.leboncoin_native import LeboncoinNativeScraper  # noqa: E402
 from scrapers.marktplaats import MarktplaatsScraper  # noqa: E402
 from scrapers.willhaben import WillhabenScraper  # noqa: E402
 from scrapers.schibsted import SchibstedScraper  # noqa: E402
@@ -129,6 +130,7 @@ def build_scrapers() -> list:
         AllSurplusScraper(),
         GardinerHoulgateScraper(),
         KijijiScraper(),
+        LeboncoinNativeScraper(),
         ApifyLeboncoinScraper(),
         MarktplaatsScraper(),
         WillhabenScraper(),
@@ -141,7 +143,7 @@ def build_scrapers() -> list:
         GuitarCenterScraper(),          # runs only with US egress
         ApifyFacebookScraper() if Config.APIFY_TOKEN else FacebookMarketplaceScraper(),
         RedditScraper(),
-        # Disabled (see CLAUDE.md §2): Kleinanzeigen, Wallapop, Leboncoin,
+        # Disabled legacy adapters (see CLAUDE.md §2): Kleinanzeigen, Wallapop,
         # Maestronet, Violinist.com, Audiofanzine — covered by Google/Brave.
     ]
 

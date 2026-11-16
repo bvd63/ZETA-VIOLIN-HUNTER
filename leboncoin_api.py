@@ -1,4 +1,4 @@
-"""ID-bound observations from the pinned, authenticated Leboncoin Actor."""
+"""ID-bound observations from the native public API or pinned Leboncoin Actor."""
 import re
 import math
 import json

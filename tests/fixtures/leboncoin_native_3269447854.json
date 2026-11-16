@@ -1,0 +1,55 @@
+{
+  "list_id": 3269447854,
+  "subject": "Violon Zeta 5 corde",
+  "url": "https://www.leboncoin.fr/ad/instruments_de_musique/3269447854",
+  "body": "Je vends cette violon Zeta électrique noir\n- Type de produit : violon  électrique\n- Couleur : Noir\n- Contrôles : Volume, tonalité et sélecteur de micros\nÉtat satisfaisant\nN'hésitez pas à me contacter pour plus d'informations ou de photos.\nKorg Roland Yamaha violon guitare électrique\nFbt Dynacord ev rcf Hk \nPrix 3500€ négociable\nViolon fabriqué aux États-Unis, original cinq cordes \nQuelqu’un vraiment intéressé, on peut la tester chez moi",
+  "status": "active",
+  "price": [
+    3500
+  ],
+  "category_id": "30",
+  "attributes": [
+    {
+      "key": "condition",
+      "value": "etatsatisfaisant",
+      "values": [
+        "etatsatisfaisant"
+      ],
+      "key_label": "État",
+      "value_label": "État satisfaisant",
+      "generic": true
+    },
+    {
+      "key": "music_type",
+      "value": "other",
+      "values": [
+        "other"
+      ],
+      "key_label": "Univers",
+      "value_label": "Autre",
+      "generic": true
+    },
+    {
+      "key": "music_brand",
+      "value": "other",
+      "values": [
+        "other"
+      ],
+      "key_label": "Marque",
+      "value_label": "Autre",
+      "generic": true
+    },
+    {
+      "key": "music_level",
+      "value": "professional",
+      "values": [
+        "professional"
+      ],
+      "key_label": "Niveau",
+      "value_label": "Professionnel",
+      "generic": true
+    }
+  ],
+  "ad_type": "offer",
+  "first_publication_date": "2026-09-14 09:35:00"
+}

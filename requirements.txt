@@ -4,6 +4,7 @@ lxml==5.2.2
 apscheduler==3.10.4
 python-dotenv==1.0.1
 aiohttp==3.9.1
+curl_cffi==0.17.0
 
 # Added in Prompt 1b — foundation for marketplace rebuilds
 playwright==1.47.0
