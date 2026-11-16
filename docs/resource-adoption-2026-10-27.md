@@ -8,6 +8,8 @@ Un singur termen inventat a întors0rezultate prin API, confirmând aplicarea se
 
 Defect demonstrat separat: contoarele GovDeals/AllSurplus raportau0căutări noi deși existau cereri API. Corecția adaugă numai termeni/pagini/număr de încercări și răspunsuri valide, inclusiv păstrarea paginilor după o eroare. Nu schimbă interogările, limitele, coada sau eligibilitatea. Nu reprezintă remedierea accesului204. Probe locale: outputs/verification-20261116/auction-pair-and-contract-controls.json și imaginile primary; acceptarea de producție se documentează separat.
 
+Citirea în Sources a modulului public953.1793910734179.29c108f554cf9693.js, deja încărcat de pagina oficială410/30583, a confirmat apelantul: al treilea argument este isPreviewAsset, false pentru pagina publică, true numai pentru ruta preview-asset. Nu se activează un experiment cu true. Nu s-a executat/copiat codul site-ului, folosit cont, exportat cookie sau reluat trafic privat. Handlerul oficial refuză afișarea STA+canDisplayAsset=false. Un control sintetic legat de ID a demonstrat că parserul botului accepta această combinație cu termen viitor. Corecția păstrează lotul la reverificare, fără alertă sau SOLD: negativul explicit rezistă unui refresh204/403/DNS refuzat și rediscovery/restart, este separat GD1/AD2 și se ridică la un pozitiv primar mai nou, vizibil și cu termen viitor. Flagul lipsă, stringul false sau un status vechi nu produc automat reținere. Nu se generalizează la204 și nu se pretinde un incident live cu o vioară ascunsă. Fără căutări, cote, pagini sau biblioteci suplimentare. Testele și acceptarea runtime se documentează distinct.
+
 
 ## Recuperare regională Gumtree — 16 noiembrie
 

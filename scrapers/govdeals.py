@@ -3,7 +3,9 @@
 import html
 import json
 import logging
+import math
 import re
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 from urllib.parse import urljoin, urlsplit
@@ -22,6 +24,61 @@ API = "https://maestro.lqdt1.com"
 
 class IncompleteAuctionDetails(ValueError):
     """A successful but empty public API response is not proof of closure."""
+
+
+def display_unavailable(asset):
+    # The official asset component does not display a standard auction when
+    # this explicit boolean is false. Missing/legacy flags are not negatives.
+    return (isinstance(asset, dict)
+            and all(re.fullmatch(r"[1-9]\d*", str(asset.get(k, ""))) for k in ("assetId", "accountId"))
+            and asset.get("assetStatusCd") == "STA"
+            and asset.get("canDisplayAsset") is False)
+
+
+def _display_key(asset_id, account_id, business_id, site_id):
+    if ((business_id, site_id) not in (("GD", 1), ("AD", 2))
+            or not all(re.fullmatch(r"[1-9]\d*", str(v)) for v in (asset_id, account_id))):
+        return None
+    return f"availability:auction_display:{business_id}:{site_id}:{int(account_id)}:{int(asset_id)}"
+
+
+def display_hold(asset_id, account_id, business_id="GD", site_id=1):
+    """Keep a bound hidden observation through unreadable refreshes; never SOLD."""
+    from provider_state import read
+    key = _display_key(asset_id, account_id, business_id, site_id)
+    value = read(key, {}) if key else {}
+    if (isinstance(value, dict) and value.get("state") == "held"
+            and type(value.get("checked")) in (int, float)
+            and math.isfinite(value["checked"]) and 0 <= value["checked"] <= time.time() + 5):
+        return "licitație ascunsă/indisponibilă în detaliile primare; reverificare păstrată"
+    return ""
+
+
+def _remember_display(asset, asset_id, account_id, business_id, site_id, checked):
+    from provider_state import store
+    key = _display_key(asset_id, account_id, business_id, site_id)
+    # A sparse object cannot bind a negative or clear one for another lot.
+    if (not key or type(checked) not in (int, float) or not math.isfinite(checked) or checked < 0
+            or not all(asset.get(k) is not None for k in ("assetId", "accountId"))
+            or not _id_equal(asset["assetId"], asset_id) or not _id_equal(asset["accountId"], account_id)):
+        return
+    held = display_unavailable(asset)
+    visible = (asset.get("assetStatusCd") == "STA" and asset.get("canDisplayAsset") is True
+               and bool(asset.get("assetShortDesc")) and bool(_effective_end(asset, {}))
+               and not asset_closed_reason(asset))
+    if not held and not visible:
+        return
+    with store() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT value FROM provider_state WHERE key=?", (key,)).fetchone()
+        previous = json.loads(row[0]) if row else {}
+        previous_time = previous.get("checked", 0) if isinstance(previous, dict) else 0
+        if type(previous_time) in (int, float) and checked < previous_time:
+            conn.rollback()
+            return
+        conn.execute("INSERT OR REPLACE INTO provider_state VALUES (?,?)", (key, json.dumps({
+            "state": "held" if held else "visible", "checked": checked})))
+        conn.commit()
 
 
 def auction_end(value: str, *, naive_utc: bool = False) -> str:
@@ -126,6 +183,7 @@ class GovDealsClient:
         return data["assetSearchResults"]
 
     async def asset(self, asset_id: str, account_id: str) -> dict:
+        checked = time.time()
         response = await self.client.post(f"{API}/assets/{asset_id}/{account_id}/false",
             headers=self.headers, json={"businessId": self.business_id, "siteId": self.site_id})
         response.raise_for_status()
@@ -135,6 +193,8 @@ class GovDealsClient:
         if not isinstance(data, dict) or not data:
             raise IncompleteAuctionDetails("empty auction detail")
         _validate_identity(data, {"assetId": asset_id, "accountId": account_id})
+        if data.get("canDisplayAsset") is True or display_unavailable(data):
+            _remember_display(data, asset_id, account_id, self.business_id, self.site_id, checked)
         return data
 
 
@@ -161,7 +221,7 @@ def parse_asset(asset: dict, row: dict = None, *, now: datetime = None,
     _validate_identity(asset, row)
     title = html.unescape(asset.get("assetShortDesc") or row.get("assetShortDescription") or "")
     end = _effective_end(asset, row)
-    if not end or asset_closed_reason(asset, row, now=now):
+    if not end or asset_closed_reason(asset, row, now=now) or display_unavailable(asset):
         return {}
     asset_id = asset.get("assetId") or row.get("assetId")
     account_id = asset.get("accountId") or row.get("accountId")
@@ -246,10 +306,18 @@ class GovDealsScraper(BaseScraper):
             selected, deferred = stage(self.name, candidates, 30)
             self.coverage_stats = {"candidates": len(candidates), "detail_deferred": deferred,
                                    "detail_checked": 0, "detail_unverified": 0,
+                                   "detail_visibility_held": 0,
                                    "query_responses": query_responses}
             for row in selected:
                 try:
                     detail = await api.asset(str(row["assetId"]), str(row["accountId"]))
+                    _validate_identity(detail, row)
+                    if (not asset_closed_reason(detail, row) and (display_unavailable(detail)
+                            or display_hold(str(row["assetId"]), str(row["accountId"]), self.business_id, self.site_id))):
+                        self.coverage_stats["detail_checked"] += 1
+                        self.coverage_stats["detail_visibility_held"] += 1
+                        complete(self.name, row, 3600)
+                        continue
                     listing = parse_asset(detail, row, platform=self.name, host=self.host)
                     self.coverage_stats["detail_checked"] += 1
                     incomplete = not listing and not asset_closed_reason(detail, row)

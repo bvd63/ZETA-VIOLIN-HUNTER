@@ -564,6 +564,14 @@ async def verify_offer(listing: dict, client) -> tuple:
     remember_indexed_closed(listing)
     closed = indexed_closed_reason(listing) or saved_indexed_closed_reason(listing)
     state, reason = await _verify_offer(listing, client)
+    gov = GOVDEALS_RX.search(listing.get('url', ''))
+    if gov and state == 'unknown':
+        from scrapers.govdeals import display_hold
+        surplus = (urlsplit(listing['url']).hostname or '').endswith('allsurplus.com')
+        held = display_hold(*gov.groups(), 'AD' if surplus else 'GD', 2 if surplus else 1)
+        if held:
+            listing['_availability_conflict'] = 'GovDeals/AllSurplus: ' + held
+            return state, listing['_availability_conflict'] + '; ' + reason
     from ebay_primary import hold as ebay_hold, target as ebay_target, remember as ebay_remember
     ebay_record = ebay_hold(listing.get('url', ''))
     if ebay_record and ebay_record['state'] == 'held':
@@ -670,12 +678,20 @@ async def _verify_offer(listing: dict, client) -> tuple:
             pass  # auth/transport/schema/quota failures retain the HTML/unknown route
     gov = GOVDEALS_RX.search(url)
     if gov:
-        from scrapers.govdeals import GovDealsClient, parse_asset, asset_closed_reason, IncompleteAuctionDetails
+        from scrapers.govdeals import (GovDealsClient, parse_asset, asset_closed_reason,
+                                      IncompleteAuctionDetails, display_unavailable, display_hold)
         try:
             is_surplus = (urlsplit(url).hostname or "").endswith("allsurplus.com")
             api = GovDealsClient(client, "AD" if is_surplus else "GD", 2 if is_surplus else 1)
             await api.initialize()
             data = await api.asset(*gov.groups())
+            closed = asset_closed_reason(data)
+            if closed:
+                return 'dead', 'GovDeals: ' + closed
+            held = display_hold(*gov.groups(), api.business_id, api.site_id)
+            if display_unavailable(data) or held:
+                listing['_availability_conflict'] = 'GovDeals/AllSurplus: ' + (held or 'lot momentan ascuns; reverificare păstrată')
+                return 'unknown', listing['_availability_conflict']
             verified = parse_asset(data, platform="AllSurplus" if is_surplus else "GovDeals",
                                    host="www.allsurplus.com" if is_surplus else "www.govdeals.com")
             if not verified:
