@@ -11,7 +11,8 @@ Prompt 15:
   * X-EBAY-C-ENDUSERCTX contextualLocation=country=RO → shippingOptions tell us
     whether the seller ships to Romania
   * bare "zeta" query restricted to Musical Instruments & Gear (category 619)
-  * 19 marketplaces; unsupported ones answer 400 once and are skipped
+  * 16 configured marketplaces; unsupported ones answer 400 once and are skipped
+  * Original RO-context searches plus a protected whole-market pass (same terms/pages)
 """
 
 from keywords import market_queries
@@ -22,6 +23,9 @@ import base64
 import time
 from scrapers.base import BaseScraper
 from config import Config
+from provider_state import claim_window, reserve_work
+from work_context import work_kind
+from native_candidates import card_hints
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +90,8 @@ class EbayScraper(BaseScraper):
 
         results = []
         seen_ids = set()
+        self.coverage_stats = {'contexts': {'RO': {'attempts': 0, 'raw': 0},
+                                            'global': {'attempts': 0, 'raw': 0, 'state': 'not_started'}}}
 
         async with self.make_client(timeout=20, follow_redirects=True) as client:
             token = await self._get_token(client)
@@ -111,21 +117,62 @@ class EbayScraper(BaseScraper):
                         if not more:
                             break
 
+            # RO end-user context can hide offers which do not ship directly
+            # to Romania. Keep every original RO request/shipping observation,
+            # then add the same complete plan without a shipping context.
+            auxiliary = work_kind.get() != 'core'
+            guard = 'ebay:global:aux:last_run' if auxiliary else 'ebay:global:last_run'
+            if claim_window(guard, 10 * 3600):
+                self.coverage_stats['contexts']['global']['state'] = 'fresh'
+                self._wide_paused = False
+                for marketplace in MARKETPLACES:
+                    if self._wide_paused:
+                        break
+                    marketplace_ok = True
+                    for kw in market_queries(broad=True, limit=10):
+                        if not marketplace_ok or self._wide_paused:
+                            break
+                        for page in range(MAX_PAGES):
+                            params = {'q': kw, 'limit': 50, 'offset': page * 50, 'fieldgroups': 'EXTENDED',
+                                      'sort': 'newlyListed', 'filter': 'buyingOptions:{FIXED_PRICE|AUCTION}', 'category_ids': '619'}
+                            more = await self._page(client, token, marketplace, kw, params, seen_ids, results,
+                                                    shipping_context=False)
+                            if more is None:
+                                marketplace_ok = False
+                                break
+                            if not more:
+                                break
+                if self._wide_paused:
+                    self.coverage_stats['contexts']['global']['state'] = 'partial; extra allowance/access deferred'
+            else:
+                self.coverage_stats['contexts']['global']['state'] = 'guarded; original RO plan still attempted'
+
         log.info(f"eBay Browse API: {len(results)} listings found across {len(MARKETPLACES)} marketplaces")
         return results
 
-    async def _page(self, client, token, marketplace, kw, params, seen_ids, results):
+    async def _page(self, client, token, marketplace, kw, params, seen_ids, results, *, shipping_context=True):
         """Fetch one result page. Returns True if a full page came back (more may
         follow), False if fewer, None to abandon the marketplace."""
+        if not hasattr(self, 'failures'):
+            self.reset_health()
         for _attempt in range(2):
                     try:
+                        if not shipping_context and not reserve_work('ebay_global', 1, 39680, 640, 19840,
+                                                                 auxiliary=work_kind.get() != 'core'):
+                            self._wide_paused = True
+                            self.content_failures.append('eBay global: extra allowance deferred; original RO searches retained')
+                            return None
+                        context = 'RO' if shipping_context else 'global'
+                        if not hasattr(self, 'coverage_stats'):
+                            self.coverage_stats = {'contexts': {'RO': {'attempts': 0, 'raw': 0}, 'global': {'attempts': 0, 'raw': 0}}}
+                        self.coverage_stats['contexts'][context]['attempts'] += 1
+                        self.record_discovery_query(f'{kw!r} marketplace={marketplace} context={context} category={params.get("category_ids")} offset={params.get("offset")}')
+                        headers = {'Authorization': f'Bearer {self._token or token}', 'X-EBAY-C-MARKETPLACE-ID': marketplace}
+                        if shipping_context:
+                            headers['X-EBAY-C-ENDUSERCTX'] = 'contextualLocation=country=RO'
                         resp = await client.get(
                             BROWSE_URL,
-                            headers={
-                                "Authorization": f"Bearer {self._token or token}",
-                                "X-EBAY-C-MARKETPLACE-ID": marketplace,
-                                "X-EBAY-C-ENDUSERCTX": "contextualLocation=country=RO",
-                            },
+                            headers=headers,
                             params=params,
                         )
 
@@ -137,6 +184,9 @@ class EbayScraper(BaseScraper):
                             continue  # retry once with the fresh token
                         if resp.status_code == 429:
                             log.warning(f"eBay rate limit hit on {marketplace}")
+                            if not shipping_context:
+                                self._wide_paused = True
+                                self.content_failures.append('eBay global: HTTP429; extra pass paused without retry')
                             return None
                         if resp.status_code in (400, 409) and "marketplace" in resp.text.lower():
                             log.info(f"eBay {marketplace}: not supported by Browse API — skipping")
@@ -145,10 +195,20 @@ class EbayScraper(BaseScraper):
                             log.warning(f"eBay {marketplace} '{kw}': HTTP {resp.status_code} — {resp.text[:200]}")
                             return False
 
-                        items = resp.json().get("itemSummaries", []) or []
+                        payload = resp.json()
+                        items = payload.get('itemSummaries') if isinstance(payload, dict) else None
+                        if items is None and isinstance(payload, dict) and type(payload.get('total')) is int and payload['total'] == 0:
+                            items = []  # actual eBay empty-result contract
+                        if not isinstance(items, list) or payload.get('errors') or not items and payload.get('total', 0) != 0:
+                            self.content_failures.append(f'eBay {context}: invalid/incomplete search schema')
+                            return False
                         self.fetched += len(items)
+                        self.coverage_stats['contexts'][context]['raw'] += len(items)
 
                         for item in items:
+                            if not isinstance(item, dict):
+                                self.content_failures.append(f'eBay {context}: invalid row retained as partial coverage')
+                                continue
                             ebay_item_id = item.get("itemId", "")
                             url = item.get("itemWebUrl", "")
                             if not url or not ebay_item_id:
@@ -170,7 +230,7 @@ class EbayScraper(BaseScraper):
                                          or ((item.get("thumbnailImages") or [{}])[0]).get("imageUrl", ""))
                             # With contextualLocation=country=RO, shippingOptions are only
                             # returned when the seller ships to Romania.
-                            ships_to_ro = bool(item.get("shippingOptions"))
+                            ships_to_ro = bool(item.get("shippingOptions")) if shipping_context else None
 
                             if self._is_excluded(title):
                                 continue
@@ -195,6 +255,7 @@ class EbayScraper(BaseScraper):
                                 "date_posted": str(item.get("itemCreationDate") or "")[:10],
                                 "relevance_score": self._relevance_score(title, description),
                                 "image_url": image_url,
+                                **(card_hints(title, description, kw) or {'_native_search_query': kw, '_query_identity_unverified': True}),
                             })
                         return len(items) >= 50
                     except Exception as e:

@@ -31,6 +31,7 @@ jobs:
       - run: python -m tests.test_leboncoin_api
       - run: python -m tests.test_leboncoin_native
       - run: python -m tests.test_ebay_primary
+      - run: python -m tests.test_ebay_global
       - run: python -m tests.test_craigslist
       - run: python -m tests.test_notifications
       - run: python -m tests.test_listing_feedback
