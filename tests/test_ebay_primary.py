@@ -180,6 +180,13 @@ class PrimaryTests(unittest.IsolatedAsyncioTestCase):
         for checked in (True, -1, float('nan'), float('inf')):
             with self.assertRaises(ValueError): api.remember(TARGET, held, checked)
 
+    def test_new_negative_is_shared_with_already_verified_delivery_payload_without_flag(self):
+        api.remember(TARGET, {'state': 'held', 'reason': '11003', 'listing': {}}, 2000)
+        self.assertTrue(availability_conflict({'url': URL}, 'unknown'))
+        self.assertTrue(availability_conflict({'url': URL, '_ebay_primary_checked_at': 1000}, 'live'))
+        self.assertFalse(availability_conflict({'url': URL, '_ebay_primary_checked_at': 3000}, 'live'))
+        self.assertFalse(availability_conflict({'url': URL + '?var=789'}, 'unknown'))
+
     async def test_same_item_parallel_checks_share_one_get_without_reducing_native_search(self):
         calls = []
         with self.fake_clients(self.handler(ROW, calls=calls)):

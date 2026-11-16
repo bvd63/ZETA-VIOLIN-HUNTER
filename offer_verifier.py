@@ -241,8 +241,15 @@ def indexed_closed_reason(listing: dict) -> str:
 
 
 def availability_conflict(listing: dict, state: str) -> bool:
-    return state == 'unknown' and bool(listing.get('_availability_conflict')
-        or indexed_closed_reason(listing) or saved_indexed_closed_reason(listing))
+    if state == 'unknown' and (listing.get('_availability_conflict')
+            or indexed_closed_reason(listing) or saved_indexed_closed_reason(listing)):
+        return True
+    from ebay_primary import hold as ebay_hold
+    negative = ebay_hold(listing.get('url', '')) if state in ('unknown', 'live') else None
+    if negative:
+        checked = listing.get('_ebay_primary_checked_at', 0)
+        return state == 'unknown' or type(checked) not in (int, float) or negative['checked'] >= checked
+    return False
 
 
 def _indexed_state_key(listing: dict) -> str:
@@ -653,6 +660,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
                 if primary.get('listing'):
                     listing.update(primary['listing'])
                     listing['_primary_content_checked'] = True
+                    listing['_ebay_primary_checked_at'] = primary['checked']
                     return primary['state'], primary['reason']
         except Exception:
             pass  # auth/transport/schema/quota failures retain the HTML/unknown route
