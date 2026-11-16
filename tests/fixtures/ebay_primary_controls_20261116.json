@@ -1,0 +1,277 @@
+{
+  "calls": [
+    {
+      "case": "fresh_native_positive",
+      "params": {
+        "legacy_item_id": "840131807941"
+      },
+      "marketplace": "EBAY_US",
+      "http": 200,
+      "data": {
+        "itemId": "v1|840131807941|0",
+        "legacyItemId": "840131807941",
+        "title": "Custom Green Zeta Strados Modern Electric Violin",
+        "itemWebUrl": "https://www.ebay.com/itm/840131807941",
+        "itemEndDate": "2026-11-22T17:15:44.000Z",
+        "itemCreationDate": "2026-11-15T17:15:44.000Z",
+        "price": {
+          "value": "1500.00",
+          "currency": "USD"
+        },
+        "currentBidPrice": {
+          "value": "1500.00",
+          "currency": "USD"
+        },
+        "minimumPriceToBid": {
+          "value": "1500.00",
+          "currency": "USD"
+        },
+        "condition": "Used",
+        "conditionId": "3000",
+        "estimatedAvailabilities": [
+          {
+            "estimatedAvailabilityStatus": "IN_STOCK",
+            "estimatedAvailableQuantity": 1,
+            "estimatedSoldQuantity": 0,
+            "estimatedRemainingQuantity": 1
+          }
+        ],
+        "buyingOptions": [
+          "AUCTION",
+          "BEST_OFFER"
+        ],
+        "description": "Vintage 1990's Zeta SV- 14 Strados CLASSIC 4-STRING Violin Flamed Maple Midi Electric Added custom green varnish later. There are some small signs of the varnish chipping as I did not have the green sealed onto the natural maple varnish. Everything works and sounds great! Shipping to continental 48 states only. Sale is final",
+        "shortDescription": "Vintage 1990's Zeta SV- 14 Strados CLASSIC 4-STRING Violin Flamed Maple Midi Electric Added custom green varnish later. There are some small signs of the varnish chipping as I did not have the green sealed onto the natural maple varnish. Everything works and sounds great! Shipping to continental 48 states only. Sale is final",
+        "brand": "zeta",
+        "categoryPath": "Musical Instruments & Gear|String|Orchestral|Violins",
+        "categoryIdPath": "619|180016|181281|38107",
+        "localizedAspects": [
+          {
+            "type": "STRING",
+            "name": "Brand",
+            "value": "zeta"
+          },
+          {
+            "type": "STRING",
+            "name": "Type",
+            "value": "Electric"
+          },
+          {
+            "type": "STRING",
+            "name": "Body Material",
+            "value": "Wood"
+          },
+          {
+            "type": "STRING",
+            "name": "Number of Strings",
+            "value": "4"
+          },
+          {
+            "type": "STRING",
+            "name": "Size",
+            "value": "4/4"
+          },
+          {
+            "type": "STRING",
+            "name": "Color",
+            "value": "Green"
+          },
+          {
+            "type": "STRING",
+            "name": "Instrument",
+            "value": "Violin"
+          },
+          {
+            "type": "STRING",
+            "name": "Model",
+            "value": "Unbranded Electric Violin"
+          },
+          {
+            "type": "STRING",
+            "name": "Finish",
+            "value": "Varnish"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "case": "same_id_other_market",
+      "params": {
+        "legacy_item_id": "840131807941"
+      },
+      "marketplace": "EBAY_GB",
+      "http": 200,
+      "data": {
+        "itemId": "v1|840131807941|0",
+        "legacyItemId": "840131807941",
+        "title": "Custom Green Zeta Strados Modern Electric Violin",
+        "itemWebUrl": "https://www.ebay.co.uk/itm/840131807941",
+        "itemEndDate": "2026-11-22T17:15:44.000Z",
+        "itemCreationDate": "2026-11-15T17:15:44.000Z",
+        "price": {
+          "value": "1135.16",
+          "currency": "GBP",
+          "convertedFromValue": "1500.00",
+          "convertedFromCurrency": "USD"
+        },
+        "currentBidPrice": {
+          "value": "1135.16",
+          "currency": "GBP",
+          "convertedFromValue": "1500.00",
+          "convertedFromCurrency": "USD"
+        },
+        "minimumPriceToBid": {
+          "value": "1135.16",
+          "currency": "GBP",
+          "convertedFromValue": "1500.00",
+          "convertedFromCurrency": "USD"
+        },
+        "condition": "Used",
+        "conditionId": "3000",
+        "estimatedAvailabilities": [
+          {
+            "estimatedAvailabilityStatus": "IN_STOCK",
+            "estimatedAvailableQuantity": 1,
+            "estimatedSoldQuantity": 0,
+            "estimatedRemainingQuantity": 1
+          }
+        ],
+        "buyingOptions": [
+          "AUCTION",
+          "BEST_OFFER"
+        ],
+        "description": "Vintage 1990's Zeta SV- 14 Strados CLASSIC 4-STRING Violin Flamed Maple Midi Electric Added custom green varnish later. There are some small signs of the varnish chipping as I did not have the green sealed onto the natural maple varnish. Everything works and sounds great! Shipping to continental 48 states only. Sale is final",
+        "shortDescription": "Vintage 1990's Zeta SV- 14 Strados CLASSIC 4-STRING Violin Flamed Maple Midi Electric Added custom green varnish later. There are some small signs of the varnish chipping as I did not have the green sealed onto the natural maple varnish. Everything works and sounds great! Shipping to continental 48 states only. Sale is final",
+        "brand": "zeta",
+        "categoryPath": "Musical Instruments & Gear|String|Orchestral|Violins",
+        "categoryIdPath": "619|180016|181281|38107",
+        "localizedAspects": [
+          {
+            "type": "STRING",
+            "name": "Brand",
+            "value": "zeta"
+          },
+          {
+            "type": "STRING",
+            "name": "Type",
+            "value": "Electric"
+          },
+          {
+            "type": "STRING",
+            "name": "Body Material",
+            "value": "Wood"
+          },
+          {
+            "type": "STRING",
+            "name": "Number of Strings",
+            "value": "4"
+          },
+          {
+            "type": "STRING",
+            "name": "Size",
+            "value": "4/4"
+          },
+          {
+            "type": "STRING",
+            "name": "Color",
+            "value": "Green"
+          },
+          {
+            "type": "STRING",
+            "name": "Instrument",
+            "value": "Violin"
+          },
+          {
+            "type": "STRING",
+            "name": "Model",
+            "value": "Unbranded Electric Violin"
+          },
+          {
+            "type": "STRING",
+            "name": "Finish",
+            "value": "Varnish"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "case": "fresh_native_positive",
+      "params": {
+        "legacy_item_id": "237180927896"
+      },
+      "marketplace": "EBAY_US",
+      "http": 200,
+      "data": {
+        "itemId": "v1|237180927896|0",
+        "legacyItemId": "237180927896",
+        "title": "Zeta Jazz Viola",
+        "itemWebUrl": "https://www.ebay.com/itm/237180927896",
+        "itemEndDate": "2026-11-18T14:50:02.000Z",
+        "itemCreationDate": "2026-11-13T14:50:02.000Z",
+        "price": {
+          "value": "1000.00",
+          "currency": "USD"
+        },
+        "currentBidPrice": {
+          "value": "1000.00",
+          "currency": "USD"
+        },
+        "minimumPriceToBid": {
+          "value": "1000.00",
+          "currency": "USD"
+        },
+        "condition": "Used",
+        "conditionId": "3000",
+        "estimatedAvailabilities": [
+          {
+            "deliveryOptions": [
+              "SHIP_TO_HOME"
+            ],
+            "estimatedAvailabilityStatus": "IN_STOCK",
+            "estimatedAvailableQuantity": 1,
+            "estimatedSoldQuantity": 0,
+            "estimatedRemainingQuantity": 1
+          }
+        ],
+        "buyingOptions": [
+          "AUCTION",
+          "BEST_OFFER"
+        ],
+        "description": "For sale: original Zeta Jazz viola in perfect working condition! The sensors have been replaced; they are manufactured in Romania and function perfectly. The preamplifier is made in the USA.",
+        "shortDescription": "For sale: original Zeta Jazz viola in perfect working condition! The sensors have been replaced; they are manufactured in Romania and function perfectly. The preamplifier is made in the USA.",
+        "brand": "Zeta",
+        "categoryPath": "Musical Instruments & Gear|String|Orchestral|Violins",
+        "categoryIdPath": "619|180016|181281|38107",
+        "localizedAspects": [
+          {
+            "type": "STRING",
+            "name": "Brand",
+            "value": "Zeta"
+          }
+        ]
+      },
+      "errors": []
+    },
+    {
+      "case": "unavailable_index_incident",
+      "params": {
+        "legacy_item_id": "286693351748"
+      },
+      "marketplace": "EBAY_US",
+      "http": 404,
+      "data": {
+        "description": ""
+      },
+      "errors": [
+        {
+          "errorId": 11003,
+          "domain": "API_BROWSE",
+          "category": "REQUEST",
+          "message": "The specified legacy item Id was not found."
+        }
+      ]
+    }
+  ]
+}

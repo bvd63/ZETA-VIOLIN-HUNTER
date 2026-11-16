@@ -553,6 +553,17 @@ async def verify_offer(listing: dict, client) -> tuple:
     remember_indexed_closed(listing)
     closed = indexed_closed_reason(listing) or saved_indexed_closed_reason(listing)
     state, reason = await _verify_offer(listing, client)
+    from ebay_primary import hold as ebay_hold, target as ebay_target, remember as ebay_remember
+    ebay_record = ebay_hold(listing.get('url', ''))
+    if ebay_record and ebay_record['state'] == 'held':
+        if state == 'live' and listing.get('_primary_content_checked'):
+            # A new bound primary HTML offer can recover an old API hold when
+            # the API refresh is unavailable. Redirect-ID guards apply below.
+            ebay_remember(ebay_target(listing['url']), {'state': 'live', 'reason': reason,
+                'listing': {}}, time.time())
+        elif state == 'unknown':
+            listing['_availability_conflict'] = ebay_record['reason']
+            return state, ebay_record['reason'] + '; ' + reason
     if state == 'live' and closed:
         from provider_state import write
         write(_indexed_state_key(listing), {})
@@ -630,6 +641,21 @@ async def _verify_offer(listing: dict, client) -> tuple:
         return "dead", "arhivă cu licitații încheiate"
     if not await public_dns(url):
         return "unknown", "destinația publică nu poate fi verificată"
+    from ebay_primary import target as ebay_target, fetch_primary as ebay_fetch
+    ebay = ebay_target(url)
+    if ebay:
+        try:
+            primary = await ebay_fetch(url)
+            if primary:
+                if primary['state'] == 'held':
+                    listing['_availability_conflict'] = primary['reason']
+                    return 'unknown', primary['reason']
+                if primary.get('listing'):
+                    listing.update(primary['listing'])
+                    listing['_primary_content_checked'] = True
+                    return primary['state'], primary['reason']
+        except Exception:
+            pass  # auth/transport/schema/quota failures retain the HTML/unknown route
     gov = GOVDEALS_RX.search(url)
     if gov:
         from scrapers.govdeals import GovDealsClient, parse_asset, asset_closed_reason, IncompleteAuctionDetails
@@ -700,6 +726,10 @@ async def _verify_offer(listing: dict, client) -> tuple:
     try:
         current = url
         for _ in range(5):
+            if ebay:
+                observed_ebay = ebay_target(current)
+                if not observed_ebay or (observed_ebay['id'], observed_ebay['variation']) != (ebay['id'], ebay['variation']):
+                    return 'unknown', 'eBay: redirecționare către alt anunț sau variație; necesită reverificare'
             original_reverb = _reverb_item_id(listing.get('url', ''))
             if original_reverb and _reverb_item_id(current) != original_reverb:
                 return 'unknown', 'Reverb: redirecționare către alt anunț; necesită reverificare'
