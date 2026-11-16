@@ -64,6 +64,13 @@ async def get_cards(kind, title, query='Zeta', *, description='', event='Music a
 
 
 class NativeCardTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        dbpatch = patch.object(database, 'DB_PATH', str(Path(temp.name) / 'native-cards.db'))
+        dbpatch.start()
+        self.addCleanup(dbpatch.stop)
+
     async def test_query_and_card_hints_are_preserved(self):
         for kind in ('subito','schibsted','hibid','shopgoodwill'):
             for title, identity_unknown in [('Electric violin',True),('Zeta',False),('Zeta pickup',False),('Jean Luc Ponty CD',False)]:

@@ -32,6 +32,7 @@ def main():
         ("tests.test_operations", []),
         ("tests.test_search_quality", []),
         ("tests.test_auction_recovery", []),
+        ("tests.test_shopgoodwill_recovery", []),
         ("tests.test_duckduckgo", []),
         ("tests.test_public_node_fetch", []),
         ("tests.test_source_review", []),

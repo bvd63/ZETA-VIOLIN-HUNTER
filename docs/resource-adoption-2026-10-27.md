@@ -1,5 +1,9 @@
 # Resurse și criterii de integrare
 
+## ShopGoodwill — recuperarea cererilor publice de căutare
+
+Incidentul real178: cererea strados/p1 a eșuat, iar celelalte7au răspuns. Era o cerere pierdută, fără retry pe pagină sau datorie păstrată pentru termenul rotit. Probele publice ulterioare strados și un termen imposibil au primit200cu searchResults.items listă goală și itemCount; nu se presupune că un obiect arbitrar200este rezultat gol sănătos. Corecția folosește protocolul public deja existent, fără dependență sau serviciu nou: un retry pentru transport/408/5xx selectate, cooldown429, termeni neterminați persistenți și carduri salvate înaintea finalizării interogării. Căutările originale8×maximum3pagini×40, descrierea și toate filtrele de livrare rămân. Maximum2interogări restante suplimentare după planul original, echitabil după ultima încercare, în aceleași ture; fără căutări plătite sau cron nou. Acceptarea de producție se consemnează separat; testele simulate nu dovedesc accesul permanent ori inventarul complet.
+
 ## Auditul detaliilor GovDeals/AllSurplus — 16 noiembrie
 
 Controlul din Railway307a374 a separat lotul1726/29652 (API204/corp0) de410/30583 (aceeași conexiune/configurație publică, API200/identitate și descriere valide). HTMLul200 al ambelor este un shell generic Home; nu dovedește disponibilitatea. Pagina primară a lotului1726, citită în browser din România, confirmă indisponibilitatea: vândut sau retras, nu obligatoriu SOLD. Browserul anonim standard dinRailway a primit403/AccessDenied pentru ambele cazuri; ruta nu este introdusă în colector. Nu se încearcă profile/UA/proxy/CAPTCHA în buclă.

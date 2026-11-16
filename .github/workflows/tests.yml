@@ -41,6 +41,7 @@ jobs:
       - run: python -m tests.test_operations
       - run: python -m tests.test_search_quality
       - run: python -m tests.test_auction_recovery
+      - run: python -m tests.test_shopgoodwill_recovery
       - run: python -m tests.test_duckduckgo
       - run: python -m tests.test_public_node_fetch
       - run: python -m tests.test_source_review
