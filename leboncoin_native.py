@@ -8,6 +8,7 @@ import math
 import logging
 import time
 import uuid
+from config import Config
 
 from leboncoin_api import item_id, remember, remember_status
 
@@ -67,6 +68,8 @@ def search_payload(keyword, offset=0):
 class NativeClient:
     def __init__(self, observer=None):
         self.observer = observer
+        self.regional_only = False
+        self.bootstrap_failure = None
 
     async def __aenter__(self):
         from curl_cffi import AsyncSession
@@ -75,6 +78,17 @@ class NativeClient:
                      'Sec-Fetch-Dest': 'empty', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Site': 'same-site'})
         try:
             await self.request('GET', 'https://www.leboncoin.fr/')
+        except RuntimeError as exc:
+            if str(exc) == 'Leboncoin native HTTP 403' and getattr(Config, 'WILLHABEN_READER_URL', ''):
+                # The original public search remains first. One bootstrap
+                # refusal can use the proven search-only US reserve instead
+                # of preventing every keyword from being attempted.
+                self.regional_only = True
+                if self.observer:
+                    self.bootstrap_failure = (len(self.observer.failures)-1, str(exc))
+            else:
+                await self.session.close()
+                raise
         except BaseException:
             await self.session.close()
             raise
@@ -84,15 +98,53 @@ class NativeClient:
         await self.session.close()
 
     async def request(self, method, url, **kwargs):
+        regional = self._regional_payload(method, url, kwargs)
+        if self.regional_only and regional is not None:
+            return await self._regional_request(*regional, failure=self.bootstrap_failure)
         if self.observer:
             self.observer.requests_attempted += 1
         response = await self.session.request(method, url, allow_redirects=False, **kwargs)
         if response.status_code != 200:
+            reason = f'Leboncoin native HTTP {response.status_code}'
+            failure = None
             if self.observer:
-                self.observer.failures.append(f'Leboncoin native HTTP {response.status_code}')
-            raise RuntimeError(f'Leboncoin native HTTP {response.status_code}')
+                failure = (len(self.observer.failures), reason)
+                self.observer.failures.append(reason)
+            if response.status_code == 403 and regional is not None and getattr(Config, 'WILLHABEN_READER_URL', ''):
+                self.regional_only = True
+                return await self._regional_request(*regional, failure=failure)
+            raise RuntimeError(reason)
         if self.observer:
             self.observer.requests_ok += 1
+        return response
+
+    @staticmethod
+    def _regional_payload(method, url, kwargs):
+        if method != 'POST' or url != API+'/finder/search' or set(kwargs) != {'json'}:
+            return None
+        data = kwargs['json']
+        try:
+            keyword, offset = data['filters']['keywords']['text'], data['offset']
+            return (keyword, offset) if data == search_payload(keyword, offset) else None
+        except (KeyError, TypeError):
+            return None
+
+    async def _regional_request(self, keyword, offset, failure=None):
+        from leboncoin_reader import search
+        from willhaben_reader import ReaderUnavailable
+        try:
+            response = await search(keyword, offset, observer=self.observer)
+            if response is None:
+                raise RuntimeError('Leboncoin regional reader unconfigured')
+        except ReaderUnavailable as exc:
+            raise RuntimeError(str(exc)) from None
+        if self.observer and failure is not None:
+            index, reason = failure
+            if 0 <= index < len(self.observer.failures) and self.observer.failures[index] == reason:
+                del self.observer.failures[index]
+                self.observer.requests_recovered += 1
+        self.bootstrap_failure = None
+        log.info('Leboncoin private US fresh search keyword=%r category=30 body=true offset=%s', keyword, offset)
         return response
 
     async def search(self, keyword, offset=0):

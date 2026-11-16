@@ -2,6 +2,8 @@
 
 ## Recuperare regională Gumtree — 16 noiembrie
 
+Acceptare046bed5:37suite+CI43892273879, funcția2e85c6c7 și main2d602cd3 activate, tura176completă119.955s.8căutăriGumvalide,5direct+3recuperateUS,111carduribrute/0alerte; controlul individual LamelloZeta a fost respinsnon_zeta. Prima repornire prin redeploy păstrase codul vechi; actualizarea dedicată funcției și proba endpointului au confirmat activarea reală. Leboncoin a răspuns din nou peSG,8/8termeni;403este intermitent. RezervaUS se extinde separat NUMAI lafinder/search, unde există proba200; GETindividualUS403rămâne accesneconfirmat și nu este implementat ca disponibilitate. Payloadul și filtrele provin din aceeași revizie MITetienne-hd/lbc deja inspectată; nu se adaugăSDK/Actor, sesiune autenticată sau cheie nouă.
+
 Proba Bun din serviciul US EXISTENT a primit200 cu21carduri omonime și linkuri individuale; nu sunt21viori. Implementarea suplimentară folosește același protocol privat limitat ca Willhaben, cu endpoint/versiune/registru Gumtree separat, destinație fixă și fără credențiale. Nu se copiază alt repo și nu apare un serviciu sau abonament nou. Cele8căutări, Node/Chromium/Exa și toate limitele Willhaben sunt păstrate. Acceptarea cere queryecho+parser, identitateID la redirect/detalii, controale live/ended/unknown, rezerva40căutăricore, suite/CI/deploy și tură completă. HTTP200 al wrapperului nu este accesutil. O probă separată LeboncoinUS200/3carduri este numai dovadă de transport pentru etapa următoare, nu activare sau inventar confirmat.
 
 ## Extindere verificată pe 16 noiembrie — rute gratuite Leboncoin

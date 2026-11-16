@@ -17,6 +17,7 @@ def main():
         ("tests.test_apify_auth", []),
         ("tests.test_leboncoin_api", []),
         ("tests.test_leboncoin_native", []),
+        ("tests.test_leboncoin_reader", []),
         ("tests.test_ebay_primary", []),
         ("tests.test_ebay_global", []),
         ("tests.test_craigslist", []),
