@@ -1,5 +1,14 @@
 # Resurse și criterii de integrare
 
+## Auditul detaliilor GovDeals/AllSurplus — 16 noiembrie
+
+Controlul din Railway307a374 a separat lotul1726/29652 (API204/corp0) de410/30583 (aceeași conexiune/configurație publică, API200/identitate și descriere valide). HTMLul200 al ambelor este un shell generic Home; nu dovedește disponibilitatea. Pagina primară a lotului1726, citită în browser din România, confirmă indisponibilitatea: vândut sau retras, nu obligatoriu SOLD. Browserul anonim standard dinRailway a primit403/AccessDenied pentru ambele cazuri; ruta nu este introdusă în colector. Nu se încearcă profile/UA/proxy/CAPTCHA în buclă.
+
+Un singur termen inventat a întors0rezultate prin API, confirmând aplicarea searchText. Bundleul public main.1793910734179.33389381b00213cb.js, citit ca text, confirmă aceleași rute/payloaduri; nu se evaluează JSul și nu se exportă cheia anonimă. Pista veche1726 este DynaCPRBoard, cu32încercări în GovDeals, nu dovada unei viori active omise. Nu se generalizează acest caz la toate204: cele fără dovadă primară rămân unknown/retry.
+
+Defect demonstrat separat: contoarele GovDeals/AllSurplus raportau0căutări noi deși existau cereri API. Corecția adaugă numai termeni/pagini/număr de încercări și răspunsuri valide, inclusiv păstrarea paginilor după o eroare. Nu schimbă interogările, limitele, coada sau eligibilitatea. Nu reprezintă remedierea accesului204. Probe locale: outputs/verification-20261116/auction-pair-and-contract-controls.json și imaginile primary; acceptarea de producție se documentează separat.
+
+
 ## Recuperare regională Gumtree — 16 noiembrie
 
 Proba Bun din serviciul US EXISTENT a primit200 cu21carduri omonime și linkuri individuale; nu sunt21viori. Implementarea suplimentară folosește același protocol privat limitat ca Willhaben, cu endpoint/versiune/registru Gumtree separat, destinație fixă și fără credențiale. Nu se copiază alt repo și nu apare un serviciu sau abonament nou. Cele8căutări, Node/Chromium/Exa și toate limitele Willhaben sunt păstrate. Acceptarea cere queryecho+parser, identitateID la redirect/detalii, controale live/ended/unknown, rezerva40căutăricore, suite/CI/deploy și tură completă. HTTP200 al wrapperului nu este accesutil. O probă separată LeboncoinUS200/3carduri este numai dovadă de transport pentru etapa următoare, nu activare sau inventar confirmat.

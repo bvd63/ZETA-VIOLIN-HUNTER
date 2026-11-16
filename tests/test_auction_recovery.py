@@ -166,5 +166,32 @@ class AsyncRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scraper.coverage_stats['detail_unverified'], 1)
 
 
+class QueryTelemetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fresh_attempts_include_failed_pages_and_keep_the_original_plan(self):
+        # Before this regression, real API searches incorrectly reported zero
+        # fresh queries. HTTP success and raw counts are different evidence.
+        for cls in (GovDealsScraper, AllSurplusScraper):
+            with self.subTest(platform=cls.name):
+                scraper=cls();scraper.reset_health()
+                async def rows(keyword,page):
+                    if (keyword,page)==('Jazz Fusion',1):raise ValueError('simulated API failure')
+                    if (keyword,page)==('zeta',1):return [ROW]*100
+                    return [ROW] if keyword=='zeta' else []
+                with patch('scrapers.govdeals.market_queries',return_value=['zeta','Jazz Fusion']) as terms, \
+                     patch.object(GovDealsClient,'initialize',AsyncMock()), \
+                     patch.object(GovDealsClient,'search',AsyncMock(side_effect=rows)) as search, \
+                     patch('scrapers.govdeals.stage',return_value=([],0)):
+                    self.assertEqual(await scraper.search(),[])
+                terms.assert_called_once_with(broad=True,limit=6,extra=('electric violin',))
+                self.assertEqual([c.args for c in search.await_args_list],
+                                 [('zeta',1),('zeta',2),('Jazz Fusion',1),('Jazz Fusion',2)])
+                self.assertEqual(scraper.discovery_queries_attempted,4)
+                self.assertEqual(scraper.coverage_stats['query_responses'],[
+                    {'keyword':'zeta','page':1,'rows':100},
+                    {'keyword':'zeta','page':2,'rows':1},
+                    {'keyword':'Jazz Fusion','page':2,'rows':0}])
+                self.assertIn('auction search ValueError',scraper.content_failures)
+
+
 if __name__ == '__main__':
     unittest.main()

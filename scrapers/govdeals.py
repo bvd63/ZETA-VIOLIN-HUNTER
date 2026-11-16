@@ -198,13 +198,16 @@ class GovDealsScraper(BaseScraper):
 
     async def search(self) -> list:
         results, candidates_by_id = [], {}
+        query_responses = []
         async with self.make_client(headers=BROWSER_HEADERS) as http:
             api = GovDealsClient(http, self.business_id, self.site_id)
             await api.initialize()
             for query in market_queries(broad=True, limit=6, extra=("electric violin",)):
                 for page in (1, 2):
+                    self.record_discovery_query(f'native business={self.business_id} site={self.site_id} keyword={query!r} page={page}')
                     try:
                         rows = await api.search(query, page)
+                        query_responses.append({'keyword': query, 'page': page, 'rows': len(rows)})
                     except Exception as exc:
                         self.content_failures.append("auction search " + type(exc).__name__)
                         log.warning("%s query failed (%s); continuing other queries", self.name, type(exc).__name__)
@@ -242,7 +245,8 @@ class GovDealsScraper(BaseScraper):
             candidates = list(candidates_by_id.values())
             selected, deferred = stage(self.name, candidates, 30)
             self.coverage_stats = {"candidates": len(candidates), "detail_deferred": deferred,
-                                   "detail_checked": 0, "detail_unverified": 0}
+                                   "detail_checked": 0, "detail_unverified": 0,
+                                   "query_responses": query_responses}
             for row in selected:
                 try:
                     detail = await api.asset(str(row["assetId"]), str(row["accountId"]))
