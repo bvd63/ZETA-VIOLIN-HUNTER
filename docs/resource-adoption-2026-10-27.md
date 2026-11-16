@@ -1,5 +1,9 @@
 # Resurse și criterii de integrare
 
+## Recuperare regională Gumtree — 16 noiembrie
+
+Proba Bun din serviciul US EXISTENT a primit200 cu21carduri omonime și linkuri individuale; nu sunt21viori. Implementarea suplimentară folosește același protocol privat limitat ca Willhaben, cu endpoint/versiune/registru Gumtree separat, destinație fixă și fără credențiale. Nu se copiază alt repo și nu apare un serviciu sau abonament nou. Cele8căutări, Node/Chromium/Exa și toate limitele Willhaben sunt păstrate. Acceptarea cere queryecho+parser, identitateID la redirect/detalii, controale live/ended/unknown, rezerva40căutăricore, suite/CI/deploy și tură completă. HTTP200 al wrapperului nu este accesutil. O probă separată LeboncoinUS200/3carduri este numai dovadă de transport pentru etapa următoare, nu activare sau inventar confirmat.
+
 ## Extindere verificată pe 16 noiembrie — rute gratuite Leboncoin
 
 - [etienne-hd/lbc](https://github.com/etienne-hd/lbc), licență MIT, actualizat în noiembrie: au fost inspectate `src/lbc/mixin/search.py`, `session.py`, `ad.py` și constructorul payloadului din `utils.py`. Contract util: API public `finder/search`, descriere inclusă în căutare, categorie30, fără localitate/transport/an/strict-title obligatoriu; URL individual legat de ID. Nu s-au copiat fingerprinturi aleatorii, login sau cookies. Proba anonimă din Railway SG a primit403. Nicio dependență sau sursă funcțională nouă nu este declarată pe baza codului repo-ului.

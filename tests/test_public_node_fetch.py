@@ -106,11 +106,16 @@ class NodeTests(unittest.IsolatedAsyncioTestCase):
 
 class GumRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        # This suite isolates the original local Node/Chromium routes. The
+        # configured private route has its own recovery/HTTP/allowance suite.
+        self.reader_patch=patch('scrapers.gumtree.Config.WILLHABEN_READER_URL','')
+        self.reader_patch.start()
         self.tmp = tempfile.TemporaryDirectory()
         self.db_patch = patch('database.DB_PATH', str(Path(self.tmp.name)/'node.db'))
         self.db_patch.start()
 
     async def asyncTearDown(self):
+        self.reader_patch.stop()
         self.db_patch.stop()
         self.tmp.cleanup()
 

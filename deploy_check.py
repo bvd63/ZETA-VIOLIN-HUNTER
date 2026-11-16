@@ -37,6 +37,7 @@ def main():
         ("tests.test_source_review", []),
         ("tests.test_willhaben_reader", []),
         ("tests.test_willhaben_reader_contract", []),
+        ("tests.test_gumtree_reader", []),
         ("tests.test_reverb_api", []),
         ("tests.test_reverb_discovery", []),
         ("tests.test_reverb_workflow", []),

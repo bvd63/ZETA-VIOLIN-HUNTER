@@ -395,6 +395,10 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
     original_willhaben = _willhaben_item_id(listing.get('url', ''))
     if original_willhaben and _willhaben_item_id(final_url) != original_willhaben:
         return 'unknown', 'Willhaben: redirecționare către alt anunț; necesită reverificare'
+    from gumtree_reader import item_id as gumtree_id
+    original_gumtree = gumtree_id(listing.get('url', ''))
+    if original_gumtree and gumtree_id(final_url) != original_gumtree:
+        return 'unknown', 'Gumtree: redirecționare către alt anunț; necesită reverificare'
     reason = looks_dead(status, listing["url"], final_url, text)
     if reason:
         return "dead", reason
@@ -744,6 +748,10 @@ async def _verify_offer(listing: dict, client) -> tuple:
             original_willhaben = _willhaben_item_id(listing.get('url', ''))
             if original_willhaben and _willhaben_item_id(current) != original_willhaben:
                 return 'unknown', 'Willhaben: redirecționare către alt anunț; necesită reverificare'
+            from gumtree_reader import item_id as gumtree_id
+            original_gumtree = gumtree_id(listing.get('url', ''))
+            if original_gumtree and gumtree_id(current) != original_gumtree:
+                return 'unknown', 'Gumtree: redirecționare către alt anunț; necesită reverificare'
             if is_disabled_source(current):
                 return "non_sale", "redirecționare către o sursă eliminată"
             if not public_url(current):
@@ -788,6 +796,17 @@ async def _verify_offer(listing: dict, client) -> tuple:
                     reason = 'Public Node: ' + reason
                 except Exception:
                     pass  # Keep the existing independent reserve and unknown route.
+            if state == 'unknown' and original_gumtree:
+                try:
+                    from gumtree_reader import fetch as private_gumtree
+                    from urllib.parse import urlunsplit
+                    parts = urlsplit(current)
+                    private = await private_gumtree(urlunsplit((parts.scheme,parts.netloc,parts.path,'','')), client)
+                    if private is not None and private[0] in (200,404,410):
+                        state, reason = inspect_page(listing, private[1], private[0], private[2])
+                        reason = 'Private US native: ' + reason
+                except Exception:
+                    pass  # Blocked/limited access is unknown, never a fabricated sold result.
             if state == 'unknown' and (urlsplit(current).hostname or '').removeprefix('www.') == 'musicalinstrument-auctions.co.uk':
                 try:
                     from browser_fetch import PublicSearchBrowser

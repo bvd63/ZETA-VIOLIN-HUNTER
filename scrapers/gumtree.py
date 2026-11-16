@@ -18,6 +18,8 @@ from filters import has_zeta_signal
 from browser_fetch import PublicSearchBrowser
 from public_node_fetch import fetch as node_fetch
 from primary_page_reserve import fresh_gumtree_search, remember_market_search
+from gumtree_reader import fetch as private_read, ReaderUnavailable
+from config import Config
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +48,7 @@ class GumtreeScraper(BaseScraper):
     async def search(self) -> list:
         results = []
         seen_ids = set()
+        self.coverage_stats = {'private_us_queries': []}
         headers = {**BROWSER_HEADERS, "Accept-Language": "en-GB,en;q=0.9"}
 
         async with self.make_client(headers=headers) as client, PublicSearchBrowser() as browser:
@@ -54,6 +57,7 @@ class GumtreeScraper(BaseScraper):
                     attempted_before, ok_before = self.requests_attempted, self.requests_ok
                     failures_before = len(self.failures)
                     content_before = len(self.content_failures)
+                    self.record_discovery_query(f'native keyword={kw!r} country=GB')
                     resp = await client.get(SEARCH_URL, params={"search_category": "all", "q": kw})
                     if resp.status_code != 200:
                         import asyncio
@@ -67,6 +71,22 @@ class GumtreeScraper(BaseScraper):
                         except ValueError as exc:
                             parse_error = str(exc)
                             self.content_failures.append(parse_error)
+                    if tiles is None and getattr(Config, 'WILLHABEN_READER_URL', ''):
+                        try:
+                            private = await private_read(str(httpx.URL(SEARCH_URL,
+                                params={'search_category': 'all', 'q': kw})), client)
+                            if private is not None:
+                                code, body, final = private[:3]
+                                if code != 200:
+                                    raise ReaderUnavailable(f'Gumtree private US upstream HTTP {code}')
+                                tiles = self._extract(body, expected_query=kw)
+                                self.requests_recovered += max(0, self.requests_attempted-attempted_before-(self.requests_ok-ok_before))
+                                del self.failures[failures_before:]
+                                del self.content_failures[content_before:]
+                                self.coverage_stats.setdefault('private_us_queries', []).append({'keyword': kw, 'raw': len(tiles)})
+                                log.info('Gumtree private US native keyword=%r: %s raw cards', kw, len(tiles))
+                        except (ReaderUnavailable, ValueError) as exc:
+                            self.content_failures.append(str(exc))
                     if tiles is None and resp.status_code in (200, 247, 403):
                         self.requests_attempted += 1
                         try:
@@ -204,8 +224,22 @@ class GumtreeScraper(BaseScraper):
         return tiles,len(tiles)==total
 
     @staticmethod
-    def _extract(html: str) -> list:
+    def _extract(html: str, expected_query=None) -> list:
         soup = BeautifulSoup(html, "lxml")
+        if expected_query is not None:
+            import unicodedata
+            # A valid response DTO binds the request; the page must also echo
+            # that keyword, rather than silently returning another search.
+            h1 = soup.find('h1')
+            heading = h1.get_text(' ', strip=True) if h1 else ''
+            page_title = soup.title.get_text(' ', strip=True).casefold() if soup.title else ''
+            if (page_title in ('access denied', 'just a moment', 'just a moment...', 'security check')
+                    or soup.select_one('#challenge-running, #cf-challenge-running')):
+                raise ValueError('Gumtree private US access challenge')
+            match = re.fullmatch(r'[\d,]+ ads? for\s+["“]?(.*?)["”]?\s*(?:in\s+(?:UK|United Kingdom|All Classifieds))?', heading, re.I)
+            normalize = lambda s: ' '.join(unicodedata.normalize('NFKC', s).casefold().split())
+            if not match or normalize(match[1]) != normalize(expected_query):
+                raise ValueError('Gumtree private US search query echo missing or mismatched')
         tiles = []
         seen = set()
         for art in soup.select("[data-q='search-result'], [data-testid='rh-standard-card-listing']"):
