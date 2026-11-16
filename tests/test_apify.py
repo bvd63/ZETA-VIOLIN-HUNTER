@@ -7,6 +7,8 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+import sqlite3
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import httpx
@@ -469,6 +471,89 @@ class ApifyTests(unittest.TestCase):
         self.assertEqual(posts, [])
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["url"], FENTON["itemUrl"])
+
+
+class ApifyCapacityReportTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = sqlite3.connect(':memory:')
+        self.addCleanup(self.conn.close)
+        from apify_costs import ensure_table
+        ensure_table(self.conn)
+        self.conn.execute('CREATE TABLE apify_jobs (id TEXT,run_id TEXT,period TEXT,cap INTEGER,created REAL)')
+        self.now = datetime(2026, 11, 16, 16, 11, tzinfo=timezone.utc)
+        self.meter = self.now.timestamp() - 600
+        self.account = {'checked': self.meter, 'usage_usd': 1.0236118016504852,
+                        'included_monthly_usd': 5,
+                        'usage_cycle': {'endAt': '2026-12-04T23:59:59.999Z'}}
+        self.conn.executemany('INSERT INTO apify_jobs VALUES (?,?,?,?,?)', [
+            ('old', None, '2026-10', 1590000, self.meter - 20 * 86400),
+            ('new', None, '2026-11', 520000, self.meter - 86400),
+            ('known', 'knownrun', '2026-11', 1500000, self.meter - 86400)])
+        self.conn.execute('INSERT INTO apify_costs VALUES (?,?,?,?)',
+                          ('knownrun', 1419800, 'SUCCEEDED', self.meter - 100))
+        self.conn.execute('INSERT INTO apify_cost_changes VALUES (?,?)', ('knownrun', self.meter - 100))
+        self.config = patch.multiple(Config, APIFY_MONTHLY_LIMIT_USD=5,
+                                     APIFY_DISCOVERY_CAP_USD=.065, APIFY_DETAILS_CAP_USD=.02,
+                                     RUNS_PER_DAY=2)
+        self.config.start()
+        self.addCleanup(self.config.stop)
+
+    def report(self, account=None):
+        from resource_monitor import apify_auxiliary_capacity
+        return apify_auxiliary_capacity(self.conn, self.account if account is None else account, self.now)
+
+    def test_realistic_cycle_and_old_uncertainty_explain_refusal_without_charging_twice(self):
+        before = '\n'.join(self.conn.iterdump())
+        changes = self.conn.total_changes
+        with patch('httpx.AsyncClient', side_effect=AssertionError('report cannot contact a provider')), \
+             patch.object(ApifyFacebookScraper, '_reserve', side_effect=AssertionError('report cannot reserve')):
+            result = self.report()
+        self.assertEqual(result['state'], 'protected')
+        self.assertEqual(result['calendar_schedule_cap_usd'], 2.55)
+        self.assertEqual(result['account_schedule_cap_usd'], 3.23)
+        self.assertEqual(result['conservative_unmetered_usd'], 2.11)
+        self.assertEqual(result['calendar_headroom_usd'], .5102)
+        self.assertEqual(result['account_headroom_usd'], -1.363612)
+        self.assertEqual(result['additional_headroom_usd'], 0)
+        self.assertEqual(before, '\n'.join(self.conn.iterdump()))
+        self.assertEqual(changes, self.conn.total_changes)
+
+    def test_authenticated_older_cost_can_explain_positive_room_without_erasing_jobs(self):
+        # Isolated fixture settlement only. The reporter never performs it.
+        self.conn.execute("UPDATE apify_jobs SET run_id='oldrun' WHERE id='old'")
+        self.conn.execute('INSERT INTO apify_costs VALUES (?,?,?,?)',
+                          ('oldrun', 1590000, 'SUCCEEDED', self.meter - 200))
+        self.conn.execute('INSERT INTO apify_cost_changes VALUES (?,?)', ('oldrun', self.meter - 200))
+        result = self.report()
+        self.assertEqual(result['state'], 'headroom')
+        self.assertEqual(result['conservative_unmetered_usd'], .52)
+        self.assertEqual(result['additional_headroom_usd'], .226388)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM apify_jobs').fetchone()[0], 3)
+
+    def test_stale_failed_future_and_malformed_account_never_advertise_spare_capacity(self):
+        for account in ({}, {**self.account, 'checked': self.now.timestamp() - 12 * 3600},
+                        {**self.account, 'checked': self.now.timestamp() + 60},
+                        {**self.account, 'error': 'HTTP401'},
+                        {**self.account, 'usage_usd': float('nan')},
+                        {**self.account, 'included_monthly_usd': True},
+                        {**self.account, 'usage_cycle': {'endAt': 42}},
+                        {**self.account, 'usage_cycle': {'endAt': '2026-12-04T23:59:59'}}):
+            with self.subTest(account=account):
+                result = self.report(account)
+                self.assertEqual(result['state'], 'unverified')
+                self.assertNotIn('additional_headroom_usd', result)
+
+    def test_owner_report_distinguishes_constraints_from_actual_spend_without_extra_alerts(self):
+        import resource_monitor
+        data = {'apify_account': self.account, 'apify_auxiliary_capacity': self.report(),
+                'pushover': {'configured': False}}
+        with patch('resource_monitor.snapshot', return_value=data):
+            text = resource_monitor.text()
+        self.assertIn('Nu se adună', text)
+        self.assertIn('$2.11', text)
+        self.assertIn('nu sunt consum confirmat suplimentar', text)
+        self.assertEqual(resource_monitor.warning_events(data),
+                         resource_monitor.warning_events({k:v for k,v in data.items() if k != 'apify_auxiliary_capacity'}))
 
 
 if __name__ == "__main__":

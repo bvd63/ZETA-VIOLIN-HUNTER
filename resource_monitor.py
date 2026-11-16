@@ -7,7 +7,10 @@ import html
 import logging
 import time
 import math
+import calendar
+import sqlite3
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -16,6 +19,53 @@ from database import connect
 from provider_state import read, write, used, claim_window
 
 log = logging.getLogger(__name__)
+
+
+def apify_auxiliary_capacity(conn, account: dict, now=None) -> dict:
+    """Read-only explanation of the existing auxiliary budget protection.
+
+    The calendar-month and account-cycle protections are separate constraints,
+    not charges to add together. This report neither reserves nor authorizes a
+    run; authentication, phase guards and a subsequent atomic reservation apply.
+    """
+    from apify_costs import spent_micro, unmetered_micro
+    now = now or datetime.now(timezone.utc)
+    try:
+        checked = account['checked']
+        included, spent = account['included_monthly_usd'], account['usage_usd']
+        numbers = (checked, included, spent, Config.APIFY_MONTHLY_LIMIT_USD,
+                   Config.APIFY_DISCOVERY_CAP_USD, Config.APIFY_DETAILS_CAP_USD)
+        if any(isinstance(v, bool) or not isinstance(v, (int, float))
+               or not math.isfinite(v) or v < 0 for v in numbers):
+            raise ValueError('invalid account/config numbers')
+        raw_end = account['usage_cycle']['endAt']
+        if not isinstance(raw_end, str):
+            raise ValueError('invalid account cycle')
+        end = datetime.fromisoformat(raw_end.replace('Z', '+00:00'))
+        if end.tzinfo is None or end <= now or end > now + timedelta(days=32):
+            raise ValueError('invalid account cycle')
+        if account.get('error') or not now.timestamp() - 12 * 3600 < checked <= now.timestamp():
+            return {'state': 'unverified', 'reason': 'account snapshot stale or unavailable'}
+        money = lambda value: int(Decimal(str(value)) * 1_000_000)
+        pair = Config.APIFY_DISCOVERY_CAP_USD + Config.APIFY_DETAILS_CAP_USD
+        days_left = calendar.monthrange(now.year, now.month)[1] - now.day + 1
+        local_protected = money(days_left * Config.RUNS_PER_DAY * pair)
+        account_protected = money(math.ceil((end - now).total_seconds() / 86400)
+                                  * Config.RUNS_PER_DAY * pair)
+        local_used = spent_micro(conn, now.strftime('%Y-%m'))
+        unmetered = unmetered_micro(conn, checked)
+        local_room = money(Config.APIFY_MONTHLY_LIMIT_USD) - local_used - local_protected
+        account_room = money(included - spent) - account_protected - unmetered
+        return {'state': 'protected' if min(local_room, account_room) <= 0 else 'headroom',
+                'account_checked': checked,
+                'calendar_schedule_cap_usd': local_protected / 1_000_000,
+                'account_schedule_cap_usd': account_protected / 1_000_000,
+                'conservative_unmetered_usd': unmetered / 1_000_000,
+                'calendar_headroom_usd': local_room / 1_000_000,
+                'account_headroom_usd': account_room / 1_000_000,
+                'additional_headroom_usd': max(0, min(local_room, account_room)) / 1_000_000}
+    except (KeyError, TypeError, ValueError, OverflowError, ArithmeticError, sqlite3.Error):
+        return {'state': 'unverified', 'reason': 'account or ledger inputs unavailable'}
 
 
 def apify_forecast(account: dict, now=None) -> dict:
@@ -50,6 +100,7 @@ def apify_forecast(account: dict, now=None) -> dict:
 
 def snapshot() -> dict:
     now = datetime.now(timezone.utc)
+    apify_account = read('apify:account', {})
     data = {
         "brave": {"configured": bool(Config.BRAVE_API_KEY), "reserved": 0,
                   "limit": Config.BRAVE_MONTHLY_QUOTA, "unit": "cereri", "period": f"{now:%Y-%m} UTC"},
@@ -78,6 +129,8 @@ def snapshot() -> dict:
             data["apify"] = {"configured": bool(Config.APIFY_TOKEN), "reserved": amount / 1000000,
                              "limit": Config.APIFY_MONTHLY_LIMIT_USD, "unit": "USD",
                              "period": f"{now:%Y-%m} UTC"}
+            if {'apify_costs', 'apify_cost_changes'} <= tables:
+                data['apify_auxiliary_capacity'] = apify_auxiliary_capacity(conn, apify_account, now)
         if "scraper_stats" in tables:
             for provider, source in (("brave", "Brave Search"), ("apify", "Facebook Marketplace"), ('serper','France / Canada Search')):
                 row = conn.execute("""SELECT error,run_at FROM scraper_stats
@@ -106,7 +159,7 @@ def snapshot() -> dict:
         data[name] = {"configured": bool(key), "reserved": used(name) / scale,
                       "limit": limit, "unit": "credite" if name == "tavily" else "USD",
                       "period": "ultimele 31 zile", "health": read(name + ":health", {})}
-    data["apify_account"] = read("apify:account", {})
+    data["apify_account"] = apify_account
     data['apify_forecast'] = apify_forecast(data['apify_account'],now)
     data['tavily_account'] = read('tavily:account', {})
     data['backup'] = read('operations:backup', {})
@@ -251,6 +304,16 @@ def text() -> str:
         lines.append("Plafonul contului și creditele incluse sunt diferite de soldul disponibil.")
     if account.get("error"):
         lines.append("⚠️ Actualizarea consumului Apify a eșuat; valorile păstrate pot fi vechi.")
+    capacity = data.get('apify_auxiliary_capacity', {})
+    if capacity.get('state') in ('headroom', 'protected'):
+        lines.append(f"Apify probe suplimentare: ${capacity['additional_headroom_usd']:.2f} marjă conservatoare înaintea unei noi rezervări.")
+        lines.append(f"Protecție ture: ${capacity['calendar_schedule_cap_usd']:.2f} în luna botului; "
+                     f"${capacity['account_schedule_cap_usd']:.2f} în ciclul contului. Nu se adună.")
+        lines.append(f"Costuri neconfirmate/ulterioare citirii contului: ${capacity['conservative_unmetered_usd']:.2f} "
+                     "protejate conservator; nu sunt consum confirmat suplimentar.")
+        lines.append("Aceste sume sunt plafoane de protecție, nu cheltuieli viitoare dovedite sau o alimentare necesară.")
+    elif capacity:
+        lines.append("Apify: marja pentru probe nu este verificată; lipsesc date actuale suficiente.")
     tavily = data.get('tavily_account', {})
     if tavily.get('checked'):
         plan,key = tavily.get('account',{}),tavily.get('key',{})

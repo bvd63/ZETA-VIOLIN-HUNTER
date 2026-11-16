@@ -15,6 +15,16 @@ Current auction audit: actual GD1726/29652 primaryAPI204/0bytes, whereas GD410/3
 
 A narrow diagnostic patch records each actualGovDeals/AllSurplus keyword/page attempt, includingfailures, and successfulresponse rowcounts. Their current nativequeries wrongly report0 in cycle177 despite8/7HTTPrequests. Queryfactory, allterms/pages,30detailslots, clocks,cursors,APIbody,filters andclosurelogic are unchanged.13auctionregressions include originalpagination/failedpagepreservation. This patch is local until its CI/deploy verification; no new globalmanualcycle is needed solely for reporting. Latest fullfunctional acceptance remains177; natural22core verification under the eventualdiagnostic release is still pending.
 
+### Current Apify capacity audit and diagnostic-only patch
+
+The current deployed diagnostic release is aa9d752 (CI43901272225, main09ea579a SUCCESS); the last accepted complete functional cycle remains177 on307. The fresh natural22:00EET core has not run yet. Preserve the native Leboncoin/eBay/Gumtree contracts.
+
+Actual read-only Apify metadata16Nov16:11UTC: Free base0/included5USD, usage1.0236118016504852USD, cycle5Nov–4Dec, account ceiling15USD is NOT included credit. Current calendar ledger1.9398USD;38uncertain jobs retain2.11USD (October30/1.59, November8/.52). Exact37future scheduled caps3.145USD differ from the conservative auxiliary day-ceiling3.23USD. Together with held costs, auxiliary account headroom is negative1.363612USD; no Actor was launched or reservation changed.
+
+DO NOT increase the existing details cap based solely on the public Listing+Add-on prices (.0062each on Free). Real individual-URL detail runs cwveGDP7YlXpkP8NU and MByUhA72NW55m5tSG both asked2targets/includeListingDetails=true and cost.0124, charged listing2/details0 under cap.02. The first had1no_items, the second2normalized records with descriptions and explicit flags. These samples contradict the assumption that every direct detail target necessarily costs two events; they do not guarantee all future costs or access. Keep discovery.065/details.02/monthly5 and all query plans/guards unchanged.
+
+The pending narrow resource_monitor patch adds only a read-only explanation to private status and owner-invoked /resurse: separate calendar/account schedule constraints, conservative unmetered protection and residual auxiliary room. It performs no HTTP/reservation/settlement, never treats protected caps as actual spend or a mandatory top-up, and adds no autonomous warning messages. Missing/stale/invalid account evidence is unverified. Regression fixtures use the actual mismatched account/calendar periods and retained historic uncertainty. CI/deploy/runtime verification is required separately; this is not a paid Actor comparison or an access repair.
+
 ### Historical notes — superseded states and old pending actions
 
 The sections below preserve earlier investigations. Use the current verified checkpoint and owner correction above, rather than reopening historical pending work. In particular, the former USLeboncoin experiment was retracted; it must NOT be resumed from an older paragraph.
