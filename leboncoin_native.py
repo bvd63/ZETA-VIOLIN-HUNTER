@@ -97,6 +97,12 @@ class NativeClient:
 
     async def search(self, keyword, offset=0):
         data = (await self.request('POST', API + '/finder/search', json=search_payload(keyword, offset))).json()
+        # Actual zero-result API contract omits ads entirely. Require the
+        # independent native counters, not just HTTP200 or a guessed empty list.
+        if (isinstance(data, dict) and 'ads' not in data
+                and all(type(data.get(k)) is int and data[k] == 0
+                        for k in ('total', 'total_all', 'total_private', 'total_pro', 'total_active', 'total_inactive'))):
+            return [], 0
         if (not isinstance(data, dict) or not isinstance(data.get('ads'), list)
                 or len(data['ads']) > PAGE_SIZE or type(data.get('total')) is not int
                 or data['total'] < 0 or data['total'] < len(data['ads'])):

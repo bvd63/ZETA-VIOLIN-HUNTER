@@ -81,5 +81,5 @@ class LeboncoinNativeScraper(BaseScraper):
         self.coverage_stats['distinct_cards'] = len(results)
         self.coverage_stats['requested_keywords'] = queries
         if len({q['keyword'] for q in self.coverage_stats['queries']}) < len(self.coverage_stats['requested_keywords']):
-            self.content_failures.append('Leboncoin native unattempted keywords; coverage incomplete')
+            self.content_failures.append('Leboncoin native unverified keyword responses; coverage incomplete')
         return results

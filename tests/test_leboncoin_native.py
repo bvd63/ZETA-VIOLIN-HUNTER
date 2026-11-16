@@ -144,6 +144,11 @@ class NativeTests(unittest.TestCase):
         for data in ({}, {'ads': [], 'total': True}, {'ads': [], 'total': 3}, {'ads': {}, 'total': 0}):
             with self.assertRaises(ValueError): asyncio.run(run(data))
         self.assertEqual(asyncio.run(run({'ads': [], 'total': 0})), ([], 0))
+        actual_zero = {'total': 0, 'total_all': 0, 'total_private': 0, 'total_pro': 0,
+                       'total_active': 0, 'total_inactive': 0, 'max_pages': 0}
+        self.assertEqual(asyncio.run(run(actual_zero)), ([], 0))
+        for changes in ({'total_all': 2}, {'total_pro': False}, {'ads': None}):
+            with self.assertRaises(ValueError): asyncio.run(run({**actual_zero, **changes}))
 
     def _collector(self, *, fail=False, paginated=False):
         calls = []
