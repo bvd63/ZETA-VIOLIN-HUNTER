@@ -7,6 +7,7 @@ import time
 import httpx
 from config import Config
 from gumtree_reader import _reserve
+from provider_state import read, write
 from willhaben_reader import _base_url, _LIMIT, MAX_BODY, MAX_WIRE, REGION, ReaderUnavailable
 from work_context import work_kind
 
@@ -25,6 +26,9 @@ async def search(keyword, offset=0, *, observer=None, client=None, timeout=15):
     try:
         async with asyncio.timeout(timeout):
             async with _LIMIT:
+                guard=await asyncio.to_thread(read,'leboncoin_reader:access',{})
+                if isinstance(guard,dict) and guard.get('blocked_until',0)>time.time():
+                    raise ReaderUnavailable('Leboncoin reader access cooldown; native route remains first')
                 if not await asyncio.to_thread(_reserve,work_kind.get()!='core',provider='leboncoin_reader'):
                     raise ReaderUnavailable('Leboncoin reader allowance unavailable')
                 if client is not None:
@@ -64,6 +68,9 @@ async def _read(client,base,target,observer,timeout):
                 or abs(time.time()-data['checked'])>120):
             raise ValueError('invalid')
         if data['status']!=200:
+            if data['status'] in (403,429):
+                await asyncio.to_thread(write,'leboncoin_reader:access',
+                    {'checked':time.time(),'blocked_until':time.time()+3600,'status':data['status']})
             raise ReaderUnavailable('Leboncoin reader upstream HTTP '+str(data['status']))
         payload=json.loads(data['body'])
     except (ValueError,TypeError,KeyError,UnicodeError,OverflowError):

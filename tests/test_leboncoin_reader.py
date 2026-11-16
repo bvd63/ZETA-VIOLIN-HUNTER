@@ -61,9 +61,20 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
               dto(status=403,body='{"url":"https://challenge.invalid"}'),dto(status=429),dto(body='not json'),
               dto(body='x'*2097153),dto(checked=time.time()-121),dto(region='other'),dto(extra=1)]
         for bad in bads:
+            # Each malformed-response case is independent of the access guard.
+            from provider_state import write
+            write('leboncoin_reader:access',{})
             async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json=bad))) as c:
                 with self.assertRaises(ReaderUnavailable):await search('zeta',client=c)
         self.assertEqual(used('leboncoin_reader'),len(bads))
+
+    async def test_access_refusal_blocks_repeats_without_spending_another_slot(self):
+        calls=[]
+        async def reject(r):calls.append(r);return httpx.Response(200,json=dto(status=403,body='blocked'))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(reject)) as c:
+            with self.assertRaisesRegex(ReaderUnavailable,'403'):await search('zeta',client=c)
+            with self.assertRaisesRegex(ReaderUnavailable,'cooldown'):await search('zeta',client=c)
+        self.assertEqual(len(calls),1);self.assertEqual(used('leboncoin_reader'),1)
 
     async def test_auxiliary_cannot_consume_scheduled_search_reserve(self):
         with store() as c:
