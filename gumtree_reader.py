@@ -69,7 +69,7 @@ def _same_target(expected, observed):
     return actual['path'].rstrip('/').split('/')[-1] == expected['path'].rstrip('/').split('/')[-1]
 
 
-def _reserve(auxiliary, now=None, *, provider='gumtree_reader'):
+def _reserve(auxiliary, now=None):
     now = time.time() if now is None else now
     day = datetime.fromtimestamp(now, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     with store() as conn:
@@ -77,13 +77,13 @@ def _reserve(auxiliary, now=None, *, provider='gumtree_reader'):
         def used(name, since):
             return conn.execute('SELECT coalesce(sum(units),0) FROM provider_reservations WHERE provider=? AND created>=?',
                                 (name, since)).fetchone()[0]
-        if (used(provider, now - 31 * 86400) >= 6200 or used(provider, day) >= 200
-                or auxiliary and (used(provider+':aux', day) >= 160
-                                  or used(provider+':aux', now - 31 * 86400) >= 4960)):
+        if (used('gumtree_reader', now - 31 * 86400) >= 6200 or used('gumtree_reader', day) >= 200
+                or auxiliary and (used('gumtree_reader:aux', day) >= 160
+                                  or used('gumtree_reader:aux', now - 31 * 86400) >= 4960)):
             conn.rollback()
             return False
         conn.executemany('INSERT INTO provider_reservations VALUES (?,?,?)',
-                         [(provider, now, 1), (provider+':aux' if auxiliary else provider+':core', now, 1)])
+                         [('gumtree_reader', now, 1), ('gumtree_reader:aux' if auxiliary else 'gumtree_reader:core', now, 1)])
         conn.commit()
         return True
 

@@ -30,7 +30,6 @@ jobs:
       - run: python -m tests.test_apify_auth
       - run: python -m tests.test_leboncoin_api
       - run: python -m tests.test_leboncoin_native
-      - run: python -m tests.test_leboncoin_reader
       - run: python -m tests.test_ebay_primary
       - run: python -m tests.test_ebay_global
       - run: python -m tests.test_craigslist

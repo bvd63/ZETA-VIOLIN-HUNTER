@@ -1,5 +1,10 @@
 # Obiectiv persistent — Zeta Hunter, 27 octombrie 2026
 
+## Corecția proprietarului — 16 noiembrie, după tura176
+
+Leboncoin nativ funcționa cu8/8căutări valide. Proprietarul cere să nu fie alterată o sursă funcțională prin experimente fără beneficiu demonstrat. Retrage DOAR rezerva regională Leboncoin adăugată înede1c87/20723a5 și păstrează codul nativ verificat046bed5, cele8interogări, descrierile, cursorii și alertele. Păstrează îmbunătățirile eBay și Gumtree, deja verificate. O intervenție viitoare pe Leboncoin cere o problemă nativă reprodusă și o corecție demonstrată înainte de activare; nu relua experimentul SUA dintr-un checkpoint vechi. Nu șterge/reseta istoricul, cotele sau confirmările. Verifică rollbackul în Git, CI, funcția US și instanța main, apoi o tură normală completă. Restul obiectivului și cerințele inițiale rămân.
+
+
 ## Reluare explicită — 16 noiembrie 2026
 
 Proprietarul a reluat Goal-ul și cere repararea problemelor auditului Franța/Canada. Prima prioritate este oferta Leboncoin3269447854, acceptată de filtrul exact dar absentă din istoricul/coada/livrările actuale. Leboncoin/Zikinf/Audiofanzine depind de indexuri, iar rotația de limbă/grup nu asigură căutări franceze utile la fiecare ciclu. Google CSE primește403 project-not-eligible; nu este epuizare de credite și nu se rezolvă prin alimentare automată. Kijiji este activ, iar Canada trebuie verificată pe rute reale, separat de simpla configurare.
