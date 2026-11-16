@@ -63,13 +63,17 @@ class ReverbScraper(BaseScraper):
 
         # Keyword searches plus Reverb's structured brand filter (make=Zeta),
         # which catches odd titles like "Very fine rare 5 strings Zeta Midi".
-        searches = ([{"make": "Zeta"}] if getattr(self, 'incremental', False) else
+        incremental = getattr(self,'incremental',False)
+        searches = ([{"query":"zeta"},{"make": "Zeta"}] if incremental else
                     [{"query": kw} for kw in market_queries(broad=True, limit=10)] + [{"make": "Zeta"}])
 
         async with self.make_client(timeout=15, follow_redirects=False) as client:
             for base_params in searches:
                 kw = base_params.get("query") or f"make={base_params.get('make')}"
-                for page in range(1, MAX_PAGES + 1):
+                # Same two-request fast sweep: one broad page catches legacy
+                # violins with a different/missing make, one uses the brand.
+                # The full original matrix still has both pages unchanged.
+                for page in range(1, (1 if incremental else MAX_PAGES) + 1):
                     try:
                         params = {**base_params, "per_page": 50, "page": page}
                         resp = await self._search_page(client, headers, params, f'{kw} page={page}')

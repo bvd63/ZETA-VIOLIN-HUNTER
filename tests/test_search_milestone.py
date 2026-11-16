@@ -145,7 +145,7 @@ class MilestoneTests(unittest.IsolatedAsyncioTestCase):
         from discovery_queue import DiscoveryQueue
         from tests.test_reverb_workflow import api_item
         async def handler(req):
-            if req.url.params.get('page')=='2':raise asyncio.CancelledError()
+            if req.url.params.get('make')=='Zeta':raise asyncio.CancelledError()
             return httpx.Response(200,json={'listings':[api_item()]})
         scraper=ReverbScraper();scraper.incremental=True;original=scraper.make_client
         with patch.object(scraper,'make_client',side_effect=lambda **kw:original(transport=httpx.MockTransport(handler),**kw)):
@@ -170,7 +170,7 @@ class MilestoneTests(unittest.IsolatedAsyncioTestCase):
              patch('main._local_now',return_value=datetime(2026,11,16,23,15)),patch('main.build_scrapers') as full:
             await main.reverb_incremental_tick();await main.reverb_incremental_tick()
         full.assert_not_called();self.assertEqual(len(calls),2)
-        self.assertTrue(all(r.url.params.get('make')=='Zeta' and 'query' not in r.url.params for r in calls))
+        self.assertEqual([dict(r.url.params) for r in calls],[{'query':'zeta','per_page':'50','page':'1'},{'make':'Zeta','per_page':'50','page':'1'}])
         self.assertEqual(notifier.send_listings.await_count,1)
         self.assertEqual(read('reverb:incremental:health')['sent'],1)
         self.assertEqual(read('reverb:incremental:health')['paid_searches'],0)
@@ -196,7 +196,7 @@ class MilestoneTests(unittest.IsolatedAsyncioTestCase):
         from offer_verifier import availability_conflict
         from discovery_queue import DiscoveryQueue
         def handler(req):
-            return httpx.Response(200,json={'listings':[api_item('live' if req.url.params['page']=='1' else 'sold')]})
+            return httpx.Response(200,json={'listings':[api_item('live' if 'query' in req.url.params else 'sold')]})
         s=ReverbScraper();s.incremental=True;original=s.make_client
         with patch.object(s,'make_client',side_effect=lambda **kw:original(transport=httpx.MockTransport(handler),**kw)):
             found=await s.search()

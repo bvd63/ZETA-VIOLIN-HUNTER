@@ -38,6 +38,33 @@ CASE, STRADOS_2001 = json.loads((Path(__file__).parent / "fixtures/facebook_2200
 
 
 class ApifyTests(unittest.TestCase):
+    def test_older_regional_replay_cannot_erase_newer_sold_but_new_live_can_reactivate(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp,patch.object(database,'DB_PATH',str(Path(temp)/'order.db')):
+            s=ApifyFacebookScraper();s.reset_health();now=time.time()
+            with store() as c:
+                for rid,phase,at in [('live','details',now-100),('sold','discovery',now-10),('regional-old','regional',now-50),('regional-new','regional',now-1)]:
+                    c.execute('INSERT INTO apify_jobs(id,phase,cap,created) VALUES(?,?,?,?)',(rid,phase,27000,at))
+                c.commit()
+            row={**FENTON,'isHidden':False}
+            s._consume('live','details',[row]);s._consume('sold','discovery',[{**row,'isSold':True}])
+            s._consume('regional-old','regional',[row])
+            with store() as c:
+                candidate,details=c.execute('SELECT candidate,details FROM apify_items').fetchone()
+                self.assertTrue(json.loads(candidate)['apify_is_sold']);self.assertTrue(json.loads(details)['apify_is_sold'])
+            s._consume('regional-new','regional',[row])
+            with store() as c:
+                candidate,details=c.execute('SELECT candidate,details FROM apify_items').fetchone()
+                self.assertFalse(json.loads(candidate)['apify_is_sold']);self.assertIsNone(details)
+
+    def test_first_seen_sold_is_cached_and_same_run_live_cannot_overrule_it(self):
+        with tempfile.TemporaryDirectory() as temp,patch.object(database,'DB_PATH',str(Path(temp)/'sold.db')):
+            s=ApifyFacebookScraper();s.reset_health()
+            with store() as c:
+                c.execute("INSERT INTO apify_jobs(id,phase,cap,created) VALUES('same','regional',27000,?)",(time.time(),));c.commit()
+            s._consume('same','regional',[{**FENTON,'isSold':True},{**FENTON,'isHidden':False}])
+            from facebook_discovery import cached_offer
+            self.assertTrue(cached_offer(FENTON['itemUrl'])['listing']['apify_is_sold'])
     def test_official_group_crosspost_retains_bound_marketplace_identity_and_sold(self):
         rows=json.loads((Path(__file__).parent/'fixtures/facebook_group_crosspost_20261116.json').read_text())
         sold,active=map(normalize,rows)

@@ -68,13 +68,22 @@ class AlertReceipts:
                     self.conn.execute('INSERT INTO alert_feedback_history(receipt_id,label,previous_label,updated_at,url,alert_text) VALUES (?,?,?,?,?,?)',
                                       (target,label,'fake',now,target_url,target_text))
             else:
-                if not previous or previous[0] != label:
+                from listing_feedback import ended_reason
+                renewed_ended = label=='ended' and previous and previous[0]=='ended' and not ended_reason(url,self.conn)
+                if not previous or previous[0] != label or renewed_ended:
                     self.conn.execute('INSERT INTO alert_feedback_history(receipt_id,label,previous_label,updated_at,url,alert_text) VALUES (?,?,?,?,?,?)',
                                       (receipt_id,label,previous[0] if previous else None,now,url,text))
                     self.conn.execute('INSERT OR REPLACE INTO alert_feedback VALUES (?,?,?)',(receipt_id,label,now))
-                if label == 'fake' and offer_key(url):
+                if label in ('fake','ended') and offer_key(url):
                     self.conn.execute('''UPDATE alert_receipts SET next_reminder=NULL,push_next_attempt=NULL
                         WHERE chat_id=? AND feedback_offer_key(url)=?''',(str(chat_id),offer_key(url)))
+                    # Sibling price-drop alarms may already be active remotely.
+                    # Close them durably without inventing acknowledgement or
+                    # changing the parent's real owner-feedback record.
+                    self.conn.execute('''INSERT OR IGNORE INTO operator_alert_closures
+                        SELECT id,?,? FROM alert_receipts WHERE chat_id=? AND id!=?
+                        AND feedback_offer_key(url)=?''',
+                        ('owner marked same offer '+label+'; reading not claimed',now,str(chat_id),receipt_id,offer_key(url)))
             self.conn.execute('''UPDATE alert_receipts SET acknowledged_at=coalesce(acknowledged_at,?),
                 next_reminder=NULL,push_next_attempt=NULL WHERE id=? AND chat_id=?''',(now,receipt_id,str(chat_id)))
             self.conn.commit()
@@ -106,7 +115,7 @@ class AlertReceipts:
 
     def delivered(self, receipt_id: str, message_id: int = None, now: float = None) -> None:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         now = time.time() if now is None else now
         self.conn.execute(f"""UPDATE alert_receipts SET
             delivered_at=coalesce(delivered_at,?), message_id=?,
@@ -149,15 +158,16 @@ class AlertReceipts:
 
     def is_pending(self, receipt_id: str) -> bool:
         from source_review import hold_reason
+        from listing_feedback import ended_reason
         row = self.conn.execute(f"SELECT url FROM alert_receipts WHERE id=? AND acknowledged_at IS NULL AND {OPEN_ALERT}",
                                 (receipt_id,)).fetchone()
-        return row is not None and not hold_reason(row[0])
+        return row is not None and not hold_reason(row[0]) and not ended_reason(row[0],self.conn)
 
     def claim_due(self, chat_id: str, now: float = None, limit: int = 5) -> list:
         """Short persisted lease prevents concurrent/restarted workers duplicating a batch."""
         now = time.time() if now is None else now
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         self.conn.execute("BEGIN IMMEDIATE")
         try:
             rows = self.conn.execute(f"""SELECT id,url,text,reminder_count,message_id FROM alert_receipts
@@ -173,7 +183,7 @@ class AlertReceipts:
 
     def reminder_result(self, receipt_id: str, success: bool, now: float = None) -> None:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         now = time.time() if now is None else now
         # First reminder at 10min; subsequent ones every 30min, until confirmed.
         delay = Config.ALERT_REPEAT_MINUTES * 60 if success else 120
@@ -184,20 +194,20 @@ class AlertReceipts:
 
     def pending_count(self, chat_id: str) -> int:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         return self.conn.execute(f"""SELECT count(*) FROM alert_receipts WHERE chat_id=?
             AND delivered_at IS NOT NULL AND acknowledged_at IS NULL AND {OPEN_ALERT} AND NOT source_review_held(url)""", (str(chat_id),)).fetchone()[0]
 
     def push_immediately(self, receipt_id: str) -> None:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         self.conn.execute(f"""UPDATE alert_receipts SET push_next_attempt=?
             WHERE id=? AND acknowledged_at IS NULL AND push_receipt IS NULL AND push_attempts=0 AND {OPEN_ALERT} AND NOT source_review_held(url)""", (time.time(), receipt_id))
         self.conn.commit()
 
     def push_active(self, chat_id: str) -> list:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         rows = self.conn.execute(f"""SELECT id,push_receipt,acknowledged_at,push_expires,NOT ({OPEN_ALERT}),source_review_held(url) FROM alert_receipts
             WHERE chat_id=? AND push_attempts>0 AND push_closed IS NULL LIMIT 100""", (str(chat_id),)).fetchall()
         return [dict(zip(("id", "receipt", "acknowledged_at", "expires", "technically_closed", "review_held"), row)) for row in rows]
@@ -205,7 +215,7 @@ class AlertReceipts:
     def claim_push_due(self, chat_id: str, now: float = None) -> list:
         now = time.time() if now is None else now
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         self.conn.execute("BEGIN IMMEDIATE")
         try:
             rows = self.conn.execute(f"""SELECT id,url,text,push_attempts FROM alert_receipts WHERE chat_id=?
@@ -230,7 +240,7 @@ class AlertReceipts:
 
     def push_sent(self, receipt_id: str, receipt: str, now: float = None) -> None:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         now = time.time() if now is None else now
         expires = now + Config.PUSHOVER_EXPIRE_SECONDS
         # Save even if acknowledgement raced the network request: the next tick
@@ -246,7 +256,7 @@ class AlertReceipts:
 
     def push_failed(self, receipt_id: str) -> None:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         self.conn.execute(f"""UPDATE alert_receipts SET
             push_next_attempt=CASE WHEN acknowledged_at IS NULL AND {OPEN_ALERT} AND NOT source_review_held(url) THEN ? ELSE NULL END,
             push_closed=CASE WHEN push_attempts>0 AND (acknowledged_at IS NOT NULL OR NOT ({OPEN_ALERT}) OR source_review_held(url))

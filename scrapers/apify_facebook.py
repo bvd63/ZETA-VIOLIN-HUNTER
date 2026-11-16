@@ -384,24 +384,66 @@ class ApifyFacebookScraper(BaseScraper):
         observed = set()
         with store() as conn:
             expected = {row[0] for row in conn.execute('SELECT url FROM apify_batch_targets WHERE reservation=?', (reservation,))}
+            job=conn.execute('SELECT created FROM apify_jobs WHERE id=? AND phase=?',(reservation,phase)).fetchone()
             for row in rows:
                 listing = normalize(row)
                 if not listing:
                     continue
                 self.fetched += 1
                 observed_negative = unavailable(listing)
+                url=listing['url']
+                if phase=='details' and expected and url not in expected:
+                    self.failures.append('Apify detail returned an unexpected item ID; requested candidates retained')
+                    continue
+                observed_since=(job[0] if job and type(job[0]) in (int,float)
+                                and math.isfinite(job[0]) and 0<=job[0]<=time.time() else None)
+                if observed_since is not None:
+                    listing['apify_observed_since']=observed_since
                 previous = conn.execute('SELECT candidate,details,checked FROM apify_items WHERE url=?',
                                         (listing['url'],)).fetchone()
                 if previous:
-                    listing = retain_known_negative_flags(listing,json.loads(previous[0]),
-                                json.loads(previous[1]) if previous[1] else {})
+                    old_candidate=json.loads(previous[0])
+                    old_detail=json.loads(previous[1]) if previous[1] else {}
+                    changed=False
+                    bound_previous=[old for old in (old_candidate,old_detail) if old.get('url')==url]
+                    for old in bound_previous:
+                        stamp=old.get('apify_observed_since')
+                        if unavailable(old) and not (type(stamp) in (int,float) and math.isfinite(stamp) and 0<=stamp<=time.time()):
+                            # One-time conservative migration, NOT a new crawl.
+                            # Persist this boundary so future fresh runs can
+                            # recover; never relabel it on each old reimport.
+                            old['apify_observed_since']=(previous[2] if type(previous[2]) in (int,float)
+                                and math.isfinite(previous[2]) and 0<previous[2]<=time.time() else time.time())
+                            changed=True
+                    if changed:
+                        conn.execute('UPDATE apify_items SET candidate=?,details=? WHERE url=?',
+                                     (json.dumps(old_candidate),json.dumps(old_detail) if old_detail else None,url))
+                    stamps=[old.get('apify_observed_since') for old in bound_previous]
+                    newest=max((stamp for stamp in stamps if type(stamp) in (int,float)
+                                and math.isfinite(stamp) and 0<=stamp<=time.time()),default=-1)
+                    previous_negative=any(unavailable(old) for old in bound_previous)
+                    if ((observed_since is not None and observed_since<newest)
+                            or previous_negative and not observed_negative and (observed_since is None or observed_since<=newest)
+                            or observed_since is not None and listing.get('apify_is_sold') is not True
+                            and any(old.get('apify_is_sold') is True and old.get('apify_observed_since')==observed_since for old in bound_previous)):
+                        observed.add(url)
+                        log.info('Apify %s older/conflicting observation ignored for %s; newer evidence retained',phase,url)
+                        continue
+                    listing = retain_known_negative_flags(listing,old_candidate,old_detail)
                 if phase in ('discovery','regional'):
+                    if not previous and unavailable(listing):
+                        # A first-seen SOLD/hidden card is still evidence. Keep
+                        # its bound negative so a later index hit cannot seed
+                        # this same ID as a new UNKNOWN violin.
+                        conn.execute('INSERT INTO apify_items(url,candidate,details,checked) VALUES (?,?,?,?)',
+                                     (url,json.dumps(listing),json.dumps(listing),time.time()))
                     # Keep new negative evidence for an existing URL even when
                     # it is no longer an eligible discovery result. Otherwise
                     # stale verified details/unknown cards could still alert.
                     if previous and unavailable(listing):
                         flags = {k:listing[k] for k in ('apify_is_live','apify_is_sold','apify_is_pending','apify_is_hidden')
                                  if listing.get(k) is not None}
+                        if observed_since is not None:flags['apify_observed_since']=observed_since
                         candidate = {**json.loads(previous[0]), **flags}
                         old_detail = json.loads(previous[1]) if previous[1] else {}
                         if old_detail.get('url') != listing['url']:
@@ -419,9 +461,6 @@ class ApifyFacebookScraper(BaseScraper):
                         log.info("Apify discovery %s rejected: %s", listing["url"], reason or "sold/pending")
                         continue
                 url = listing["url"]
-                if phase == 'details' and expected and url not in expected:
-                    self.failures.append('Apify detail returned an unexpected item ID; requested candidates retained')
-                    continue
                 observed.add(url)
                 if phase in ('discovery','regional'):
                     conn.execute("INSERT INTO apify_items (url,candidate) VALUES (?,?) ON CONFLICT(url) DO UPDATE SET candidate=excluded.candidate",

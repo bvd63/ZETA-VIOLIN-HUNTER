@@ -58,11 +58,14 @@ def hold_reason(url: str, holds=None) -> str:
         return source or listing_hold(url,listing_holds(conn))
 
 
-def bind(conn) -> dict:
+def bind(conn, *, include_ended=False) -> dict:
     """Snapshot for one SQL claim; last-mile checks read current state again."""
     holds = active_holds(conn)
     from listing_feedback import active_holds as listing_holds, hold_reason as listing_hold
     offers = listing_holds(conn)
+    if include_ended:
+        from listing_feedback import active_ended
+        offers.update({key:'owner marked ended' for key in active_ended(conn)})
     conn.create_function('source_review_held',1,
         lambda url:int(bool(holds.get(host(url),'') or listing_hold(url,offers))),deterministic=True)
     return holds

@@ -241,6 +241,9 @@ def indexed_closed_reason(listing: dict) -> str:
 
 
 def availability_conflict(listing: dict, state: str) -> bool:
+    from listing_feedback import ended_reason
+    if state in ('unknown','live') and ended_reason(listing.get('url','')):
+        return True
     if state == 'unknown' and (listing.get('_availability_conflict')
             or indexed_closed_reason(listing) or saved_indexed_closed_reason(listing)):
         return True
@@ -384,7 +387,7 @@ def primary_closed_reason(soup, host: str, url: str = '') -> str:
     return ''
 
 
-def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple:
+def inspect_page(listing: dict, text: str, status: int, final_url: str, *, checked_at=None) -> tuple:
     """(state, reason). live/dead/non_sale/unknown; enrich only listing content."""
     original_offerup = _offerup_item_id(listing.get('url', ''))
     if original_offerup and _offerup_item_id(final_url) != original_offerup:
@@ -519,6 +522,8 @@ def inspect_page(listing: dict, text: str, status: int, final_url: str) -> tuple
                     return "non_sale", "articol cu linkuri către produse"
                 if condition_ambiguous:
                     return 'unknown', 'condiție nou/folosit neconfirmată; date incomplete sau contradictorii'
+                if availability in ('instock','limitedavailability','preorder') and type(checked_at) in (int,float):
+                    listing['_primary_available_at']=checked_at
                 return "live", "instrument cu ofertă structurată"
     if editorial:
         return "non_sale", "articol / recenzie, fără ofertă proprie"
@@ -564,6 +569,14 @@ async def verify_offer(listing: dict, client) -> tuple:
     remember_indexed_closed(listing)
     closed = indexed_closed_reason(listing) or saved_indexed_closed_reason(listing)
     state, reason = await _verify_offer(listing, client)
+    if state=='live':
+        from listing_feedback import clear_ended_with_primary
+        clear_ended_with_primary(listing.get('url',''),listing.get('_primary_available_at'))
+    from listing_feedback import ended_reason
+    owner_closed=ended_reason(listing.get('url','')) if state in ('unknown','live') else ''
+    if owner_closed:
+        listing['_availability_conflict']=owner_closed
+        return 'unknown',owner_closed+'; '+reason
     gov = GOVDEALS_RX.search(listing.get('url', ''))
     if gov and state == 'unknown':
         from scrapers.govdeals import display_hold
@@ -594,6 +607,8 @@ async def verify_offer(listing: dict, client) -> tuple:
 
 async def _verify_offer(listing: dict, client) -> tuple:
     listing.pop("_primary_content_checked", None)
+    listing.pop('_primary_available_at',None)
+    checked_started=time.time()
     url = listing.get("url", "")
     if (urlsplit(url).hostname or '').lower() == 'auctions.gardinerhoulgate.co.uk':
         from database import canonical_url
@@ -605,10 +620,17 @@ async def _verify_offer(listing: dict, client) -> tuple:
     from leboncoin_api import cached_offer as leboncoin_offer, closed_reason as leboncoin_closed
     from leboncoin_api import item_id as leboncoin_id
     native=leboncoin_offer(url)
-    if leboncoin_id(url) and (not native or time.time() - native['checked'] > 6 * 3600):
+    from listing_feedback import ended_reason
+    lbc_observed=0
+    if leboncoin_id(url) and (not native or time.time() - native['checked'] > 6 * 3600 or ended_reason(url)):
         from leboncoin_native import refresh_primary
         try:
-            await refresh_primary(url)
+            started=time.time()
+            refreshed=await refresh_primary(url)
+            if (isinstance(refreshed,dict) and refreshed.get('_leboncoin_observed_state')=='live'
+                    and refreshed.get('_leboncoin_primary_checked') is True
+                    and leboncoin_id(refreshed.get('url',''))==leboncoin_id(url)):
+                lbc_observed=started
         except Exception:
             pass  # prior negative evidence survives an unreadable refresh
         native=leboncoin_offer(url)
@@ -630,6 +652,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
                 listing['source']=origin
             listing['_primary_content_checked']=True
             if verified.get('_leboncoin_observed_state')=='live':
+                listing['_primary_available_at']=lbc_observed
                 route = 'API mobil public' if verified.get('_leboncoin_verification_source')=='native mobile API' else 'Actor'
                 return 'live','Leboncoin: detalii primare și stare activă verificate prin '+route
             return 'unknown','Leboncoin: identitate verificată în API primar; disponibilitate neconfirmată'
@@ -653,6 +676,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
             if origin:
                 listing['source'] = origin
             listing['_primary_content_checked'] = True
+            listing['_primary_available_at']=verified.get('apify_observed_since',0)
             return 'live', 'Facebook: detalii verificate prin Apify'
     if is_editorial_url(url):
         return "non_sale", "pagină editorială"
@@ -673,6 +697,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
                     listing.update(primary['listing'])
                     listing['_primary_content_checked'] = True
                     listing['_ebay_primary_checked_at'] = primary['checked']
+                    if primary['state']=='live':listing['_primary_available_at']=primary['checked']
                     return primary['state'], primary['reason']
         except Exception:
             pass  # auth/transport/schema/quota failures retain the HTML/unknown route
@@ -700,6 +725,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
                     "unknown", "GovDeals: date primare incomplete; necesită reverificare")
             listing.update({k: v for k, v in verified.items() if k not in ("id", "source")})
             listing["_primary_content_checked"] = True
+            listing['_primary_available_at']=checked_started
             return "live", "GovDeals: licitație activă verificată prin API"
         except IncompleteAuctionDetails:
             return 'unknown', 'GovDeals: API răspunde fără detaliile lotului; necesită reverificare'
@@ -744,6 +770,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
                     listing["description"] = api_description
                     listing.update(identity)
                     listing["_primary_content_checked"] = True
+                    listing['_primary_available_at']=checked_started
                     listing["condition"] = (data.get("condition") or {}).get("display_name", "")
                     price = data.get("price") or {}
                     if price.get("amount") is not None:
@@ -774,6 +801,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
                 return "non_sale", "redirect către URL nepublic"
             if current != url and not await public_dns(current):
                 return "non_sale", "redirect către destinație nepublică sau neverificată"
+            response_started=time.time()
             response = await client.get(current, follow_redirects=False, headers={"User-Agent": UA})
             if response.is_redirect and response.headers.get("location"):
                 from urllib.parse import urljoin
@@ -784,7 +812,7 @@ async def _verify_offer(listing: dict, client) -> tuple:
                         return 'dead', 'Willhaben: redirecționarea primară confirmă ID-ul anunțului expirat'
                 current = destination
                 continue
-            state, reason = inspect_page(listing, response.text, response.status_code, current)
+            state, reason = inspect_page(listing, response.text, response.status_code, current,checked_at=response_started)
             if (state == 'unknown' and (urlsplit(current).hostname or '').lower()
                     in ('willhaben.at','www.willhaben.at')):
                 try:

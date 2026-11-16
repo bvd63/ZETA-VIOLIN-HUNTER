@@ -51,6 +51,15 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
                          (candidate['url'],json.dumps(candidate),json.dumps(details) if details is not None else None,checked))
             conn.commit()
 
+    def consume_fresh(self,reservation,phase,rows):
+        # Managed runtime observations are always bound to a persisted job.
+        # Give the freshness fixtures that same contract, not an import time.
+        with store() as conn:
+            conn.execute('INSERT OR IGNORE INTO apify_jobs(id,phase,cap,created) VALUES (?,?,?,?)',
+                         (reservation,phase,20000,time.time()))
+            conn.commit()
+        return self.scraper._consume(reservation,phase,rows)
+
     async def cache_search(self):
         # The start path is invoked only as a guard refusal, with no reservation,
         # request, Actor or paid work. Persisted cache remains available.
@@ -152,7 +161,7 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
                 live=card(index,isLive=True,isSold=False,isPending=False,isHidden=False)
                 self.put(c,live,checked=time.time())
                 raw={'listingTitle':'Zeta violin', 'itemUrl':c['url'], **flags}
-                self.scraper._consume('fixture-discovery','discovery',[raw])
+                self.consume_fresh('fixture-discovery','discovery',[raw])
                 with store() as conn:
                     candidate,details,checked=conn.execute('SELECT candidate,details,checked FROM apify_items WHERE url=?',(c['url'],)).fetchone()
                 candidate,details=json.loads(candidate),json.loads(details)
@@ -180,7 +189,7 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
         c=card(119)
         other=card(9999,isLive=True,isSold=False,isPending=False,isHidden=False)
         self.put(c,other,checked=time.time())
-        self.scraper._consume('negative-after-wrong-cache','discovery',[
+        self.consume_fresh('negative-after-wrong-cache','discovery',[
             {'itemUrl':c['url'],'listingTitle':c['title'],'isSold':True}])
         from facebook_discovery import cached_offer
         self.assertEqual(cached_offer(c['url'])['listing']['url'],c['url'])
@@ -194,7 +203,7 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
         self.put(c,old,checked=time.time())
         raw={'listingTitle':'Zeta violin acoustic electric capable – Keyes','itemUrl':c['url'],
              'isLive':True,'isSold':False,'isPending':False,'isHidden':False}
-        self.scraper._consume('fixture-discovery','discovery',[raw])
+        self.consume_fresh('fixture-discovery','discovery',[raw])
         with store() as conn:
             candidate,details,checked=conn.execute('SELECT candidate,details,checked FROM apify_items WHERE url=?',(c['url'],)).fetchone()
         self.assertIsNone(details)
@@ -220,14 +229,14 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
         self.put(c,c,checked=1)
         raw={'listingTitle':c['title'],'itemUrl':c['url'],
              'isLive':True,'isSold':False,'isPending':False}
-        self.scraper._consume('discovery-incomplete-hidden','discovery',[raw])
+        self.consume_fresh('discovery-incomplete-hidden','discovery',[raw])
         with store() as conn:
             candidate,details,checked=conn.execute('SELECT candidate,details,checked FROM apify_items WHERE url=?',(c['url'],)).fetchone()
         self.assertTrue(json.loads(candidate)['apify_is_hidden'])
         self.assertTrue(json.loads(details)['apify_is_hidden'])
         self.assertEqual(checked,1)  # inherited evidence is not a new observation
         self.assertEqual(await self.cache_search(),[])
-        self.scraper._consume('discovery-explicit-hidden-false','discovery',[{**raw,'isHidden':False}])
+        self.consume_fresh('discovery-explicit-hidden-false','discovery',[{**raw,'isHidden':False}])
         with store() as conn:
             candidate,details,checked=conn.execute('SELECT candidate,details,checked FROM apify_items WHERE url=?',(c['url'],)).fetchone()
         self.assertFalse(json.loads(candidate)['apify_is_hidden'])
@@ -244,13 +253,13 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
             conn.execute('INSERT INTO apify_batch_targets VALUES (?,?)',('detail-hidden-unknown',c['url']))
             conn.execute('INSERT INTO apify_batch_targets VALUES (?,?)',('detail-hidden-clear',c['url']))
             conn.commit()
-        self.scraper._consume('detail-hidden-unknown','details',[raw])
+        self.consume_fresh('detail-hidden-unknown','details',[raw])
         with store() as conn:
             candidate,details=conn.execute('SELECT candidate,details FROM apify_items WHERE url=?',(c['url'],)).fetchone()
         self.assertTrue(json.loads(candidate)['apify_is_hidden'])
         self.assertTrue(json.loads(details)['apify_is_hidden'])
         self.assertEqual(await self.cache_search(),[])
-        self.scraper._consume('detail-hidden-clear','details',[{**raw,'isHidden':False}])
+        self.consume_fresh('detail-hidden-clear','details',[{**raw,'isHidden':False}])
         with store() as conn:
             candidate,details=conn.execute('SELECT candidate,details FROM apify_items WHERE url=?',(c['url'],)).fetchone()
         self.assertFalse(json.loads(candidate)['apify_is_hidden'])
@@ -273,6 +282,7 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
             # A requested-ID response with explicit positive flags and complete identity.
             with store() as conn:
                 conn.execute('INSERT INTO apify_batch_targets VALUES (?,?)',('fixture-retry',stale['url']))
+                conn.execute('INSERT INTO apify_jobs(id,phase,cap,created) VALUES (?,?,?,?)',('fixture-retry','details',20000,time.time()))
                 conn.commit()
             return 'fixture-retry',[{'listingTitle':'Zeta violin acoustic electric capable – Keyes',
                                      'itemUrl':stale['url'],'isLive':True,'isSold':False,
@@ -312,7 +322,7 @@ class FacebookUnknownTests(unittest.IsolatedAsyncioTestCase):
             conn.execute('INSERT INTO apify_batch_targets VALUES (?,?)',('fixture-details',c['url']))
             conn.commit()
         wrong={'listingTitle':'Zeta violin','itemUrl':card(141)['url'],'isSold':True}
-        self.scraper._consume('fixture-details','details',[wrong])
+        self.consume_fresh('fixture-details','details',[wrong])
         with store() as conn:
             saved,details,checked=conn.execute('SELECT candidate,details,checked FROM apify_items WHERE url=?',(c['url'],)).fetchone()
             self.assertIsNone(conn.execute('SELECT url FROM apify_items WHERE url=?',(card(141)['url'],)).fetchone())

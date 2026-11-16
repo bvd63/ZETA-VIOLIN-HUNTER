@@ -186,7 +186,9 @@ class Database:
             stored = self.conn.execute("SELECT data FROM seen_listings WHERE id = ?", (listing['id'],)).fetchone()
             if stored and stored[0]:
                 listing['description'] = json.loads(stored[0]).get('description', '')
-        return [listing for listing in result if not classify(listing)]
+        from listing_feedback import active_ended,active_holds,offer_key
+        closed=set(active_ended(self.conn))|set(active_holds(self.conn))
+        return [listing for listing in result if offer_key(listing.get('url','')) not in closed and not classify(listing)]
 
     def gone_since(self, days_active: int = 3, days_gone: int = 14) -> list:
         """Listings that were active recently but have not been seen for `days_active`
@@ -203,7 +205,9 @@ class Database:
             return []
         from filters import classify
         result = [dict(zip(("platform", "title", "price", "url", "last_seen"), r)) for r in rows]
-        return [listing for listing in result if not classify(listing)]
+        from listing_feedback import active_ended,active_holds,offer_key
+        closed=set(active_ended(self.conn))|set(active_holds(self.conn))
+        return [listing for listing in result if offer_key(listing.get('url','')) not in closed and not classify(listing)]
 
     # --- alerts ------------------------------------------------------------------
     def record_alert(self, listing: dict, price_usd) -> None:
@@ -245,7 +249,7 @@ class Database:
 
     def pending(self, limit: int = 30) -> list:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         rows = self.conn.execute("SELECT payload FROM pending_alerts WHERE url NOT LIKE 'drop:%' AND NOT source_review_held(url) ORDER BY queued_at LIMIT ?", (limit,)).fetchall()
         return [json.loads(row[0]) for row in rows]
 
@@ -257,7 +261,7 @@ class Database:
 
     def pending_price_drops(self, limit: int = 30) -> list:
         from source_review import bind
-        bind(self.conn)
+        bind(self.conn,include_ended=True)
         rows = self.conn.execute("SELECT payload FROM pending_alerts WHERE url LIKE 'drop:%' AND NOT source_review_held(substr(url,6)) ORDER BY queued_at LIMIT ?", (limit,)).fetchall()
         data = [json.loads(row[0]) for row in rows]
         return [(entry["listing"], entry["info"]) for entry in data]

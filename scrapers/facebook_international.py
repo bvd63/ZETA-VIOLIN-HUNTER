@@ -72,7 +72,7 @@ class FacebookInternationalScraper(BaseScraper):
                     self.content_failures.append('additional regional credits protected for original Google/FR/CA queries')
                     self.skipped = not self.coverage_stats['attempts']
                     break
-                observation = {k:slot[k] for k in ('country','city','language','query')}
+                observation = {k:slot[k] for k in ('country','city','language','query','index_scope')}
                 self.coverage_stats['attempts'].append(observation)
                 write('facebook:international:index:cursor',cursor+len(self.coverage_stats['attempts']))
                 self.record_discovery_query(slot['query'])
@@ -94,7 +94,8 @@ class FacebookInternationalScraper(BaseScraper):
                         remember_indexed_closed(row)
                         results.append({**row,'id':self._make_id('facebook_region',row['url']),
                             'platform':'Facebook Marketplace','source':'search','price':'See listing',
-                            'location':'Unknown','_requested_country':slot['country'],'_requested_city':slot['city']})
+                            'location':'Unknown','_requested_country':slot['country'],
+                            '_requested_city':slot['city'] if slot['index_scope']=='city' else ''})
                 except Exception as exc:
                     observation['error'] = type(exc).__name__
                     self.content_failures.append('regional index '+type(exc).__name__+'; billed reservation retained')

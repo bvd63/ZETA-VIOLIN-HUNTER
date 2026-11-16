@@ -33,10 +33,15 @@ def regional_entry(cursor):
     if country=='CA' and city in ('montreal','quebec'):
         language = 'fr'
     signals = '(Zeta OR Zetta OR Strados OR "Jazz Fusion" OR "Jean Luc Ponty" OR ' + ' OR '.join(MODEL_CODES) + ')'
+    index_scope='country' if visit%2==0 else 'city'
     return {'country':country,'language':language,'city':city,'term':term,
             # Identity/model query has NO mandatory word for violin. A violin
             # with a sparse/foreign title must remain discoverable.
-            'query':f'site:facebook.com/marketplace/item/ {signals} {city} {country}',
+            # Country is a provider context, not a mandatory word in an ad.
+            # Interleave broad national queries and city discovery so a missing
+            # location string cannot permanently hide an indexed instrument.
+            'index_scope':index_scope,
+            'query':f'site:facebook.com/marketplace/item/ {signals}'+(' '+city if index_scope=='city' else ''),
             'url':'https://www.facebook.com/marketplace/'+city+'/search/?'+urlencode(
                 {'query':term,'exact':'false','radius':500})}
 
