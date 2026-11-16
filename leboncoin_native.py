@@ -5,6 +5,7 @@ Search cards cannot prove availability. Only a matching individual record can.
 """
 import asyncio
 import math
+import logging
 import time
 import uuid
 
@@ -12,6 +13,7 @@ from leboncoin_api import item_id, remember, remember_status
 
 API = 'https://api.leboncoin.fr'
 PAGE_SIZE = 35
+log = logging.getLogger(__name__)
 
 
 def normalize_native(row, *, primary=False, expected_id=None):
@@ -119,6 +121,7 @@ class NativeClient:
         if not item:
             raise ValueError('Leboncoin primary identity/schema invalid')
         remember(item)
+        log.info('Leboncoin fresh primary id=%s state=%s via public mobile API', identity, item['_leboncoin_observed_state'])
         return item
 
 

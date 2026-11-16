@@ -4,7 +4,8 @@ import logging
 
 from keywords import market_queries
 from leboncoin_native import NativeClient, PAGE_SIZE, normalize_native
-from native_candidates import card_hints
+from native_candidates import card_hints, detail_priority
+from discovery_queue import DiscoveryQueue
 from provider_state import read, write
 from scrapers.base import BaseScraper
 
@@ -39,6 +40,7 @@ class LeboncoinNativeScraper(BaseScraper):
                             self.fetched += len(rows)
                             self.coverage_stats['raw_rows'] += len(rows)
                             self.coverage_stats['queries'].append({'keyword': keyword, 'offset': offset, 'total': total, 'rows': len(rows)})
+                            page_items = []
                             for row in rows:
                                 item = normalize_native(row)
                                 if not item:
@@ -53,7 +55,14 @@ class LeboncoinNativeScraper(BaseScraper):
                                              'source': 'search', '_direct_item_candidate': True,
                                              '_query_identity_unverified': True,
                                              'relevance_score': self._relevance_score(item['title'], item['description'])})
+                                item['_discovery_priority'] = detail_priority(item)
                                 results.append(item)
+                                page_items.append(item)
+                            # Save candidates BEFORE advancing the older-page
+                            # cursor or requesting the next term. Cancellation
+                            # must not lose a page already received successfully.
+                            with DiscoveryQueue('search:' + self.name) as queue:
+                                queue.put(page_items)
                             if offset == 0 and total > PAGE_SIZE:
                                 offsets.append(cursor if cursor < total else PAGE_SIZE)
                             if offset > 0:

@@ -170,6 +170,27 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(items[0]['_query_identity_unverified'])
         self.assertIsNone(cached_offer(URL))
         self.assertEqual(scraper.discovery_queries_attempted, len(calls))
+        from discovery_queue import DiscoveryQueue
+        with DiscoveryQueue('search:' + scraper.name) as queue:
+            self.assertEqual([x['url'] for x in queue.claim(20)], [URL])
+
+    def test_cancellation_keeps_received_page_in_durable_queue(self):
+        calls = []
+        class FakeClient:
+            def __init__(self, observer): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def search(self, keyword, offset=0):
+                calls.append(keyword)
+                if len(calls) > 1: raise asyncio.CancelledError()
+                return [copy.deepcopy(ROW)], 1
+        async def run():
+            with patch('scrapers.leboncoin_native.NativeClient', FakeClient), patch('scrapers.leboncoin_native.asyncio.sleep'):
+                await LeboncoinNativeScraper().search()
+        with self.assertRaises(asyncio.CancelledError): asyncio.run(run())
+        from discovery_queue import DiscoveryQueue
+        with DiscoveryQueue('search:' + LeboncoinNativeScraper.name) as queue:
+            self.assertEqual([x['url'] for x in queue.claim(20)], [URL])
 
     def test_older_pages_rotate_durably_while_newest_is_always_refreshed(self):
         first, _, calls = self._collector(paginated=True)
