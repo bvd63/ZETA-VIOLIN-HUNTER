@@ -49,7 +49,7 @@ def google_unavailable():
     return bool(row and 'API_PROJECT_NOT_ELIGIBLE' in (row[0] or ''))
 
 
-def reserve_credit(*, auxiliary=False, now=None, planned_per_cycle=52):
+def reserve_credit(*, auxiliary=False, now=None, planned_per_cycle=52, report=None):
     """Protect remaining scheduled slots this month and a separate auxiliary lane.
 
     The hard lifetime cap is an operator allowance, not an account balance. Unlike
@@ -65,8 +65,14 @@ def reserve_credit(*, auxiliary=False, now=None, planned_per_cycle=52):
         core = conn.execute("SELECT coalesce(sum(units),0) FROM provider_reservations WHERE provider='serper:core' AND created>=?",(day,)).fetchone()[0]
         aux = conn.execute("SELECT coalesce(sum(units),0) FROM provider_reservations WHERE provider='serper:aux' AND created>=?",(day,)).fetchone()[0]
         protected = (calendar.monthrange(stamp.year,stamp.month)[1]-stamp.day)*daily + max(0,daily-core)
-        if (total+1>Config.SERPER_TOTAL_CREDITS or (auxiliary and (aux>=8 or total+1+protected>Config.SERPER_TOTAL_CREDITS))
-                or (not auxiliary and core>=daily)):
+        reason = ('lifetime' if total+1>Config.SERPER_TOTAL_CREDITS else
+                  'auxiliary_daily' if auxiliary and aux>=8 else
+                  'scheduled_capacity' if auxiliary and total+1+protected>Config.SERPER_TOTAL_CREDITS else
+                  'core_daily' if not auxiliary and core>=daily else '')
+        if reason:
+            if report is not None:
+                report.update(reason=reason,lifetime_reserved=total,lifetime_allowance=Config.SERPER_TOTAL_CREDITS,
+                              auxiliary_used_today=aux,core_used_today=core,scheduled_protected=protected)
             conn.rollback()
             return False
         conn.executemany('INSERT INTO provider_reservations VALUES (?,?,?)',
@@ -140,7 +146,8 @@ class SerperScraper(BaseScraper):
                                'google_backup_planned':len(queries)-4,'google_backup_attempted':0,
                                'regional_definitions':[{'query':q,**extra} for q,extra in regional_queries()],
                                'google_backup_cursor_start':cursor,
-                               'valid_responses':0,'scope_mismatches':0,'raw_rows':0,'lifetime_allowance':Config.SERPER_TOTAL_CREDITS}
+                               'valid_responses':0,'scope_mismatches':0,'raw_rows':0,'lifetime_allowance':Config.SERPER_TOTAL_CREDITS,
+                               'query_results':[]}
         results, seen = [], {}
         deadline=time.monotonic()+180
         transport_failures=0
@@ -149,8 +156,16 @@ class SerperScraper(BaseScraper):
                 if time.monotonic()>=deadline:
                     self.content_failures.append('Serper deadline reached; completed results and unattempted cursor retained')
                     break
-                if not reserve_credit(auxiliary=auxiliary,planned_per_cycle=4+Config.GOOGLE_QUERIES_PER_RUN):
-                    self.content_failures.append('Serper lifetime/daily limit; scheduled capacity protected')
+                refusal={}
+                if not reserve_credit(auxiliary=auxiliary,planned_per_cycle=4+Config.GOOGLE_QUERIES_PER_RUN,report=refusal):
+                    self.coverage_stats['reservation_refusal']=refusal
+                    reason=refusal.get('reason')
+                    self.content_failures.append({
+                        'auxiliary_daily':'Serper: limita turelor manuale 8/zi atinsă; creditul gratuit nu este declarat epuizat, turele programate sunt protejate',
+                        'scheduled_capacity':'Serper: credit rezervat pentru turele programate; căutarea auxiliară este amânată',
+                        'lifetime':'Serper: alocația TOTALĂ de credite este rezervată; necesită verificarea soldului',
+                        'core_daily':'Serper: limita zilnică a turelor programate este rezervată',
+                    }.get(reason,'Serper lifetime/daily limit; scheduled capacity protected'))
                     break
                 # A timeout may have been billed. Advance only the attempted backup
                 # slice; every unattempted matrix slot stays on the durable cursor.
@@ -162,8 +177,11 @@ class SerperScraper(BaseScraper):
                     consumed = max(0,spent-min(len(GLOBAL_QUERIES),len(queries)-4))
                     write('serper:google_cursor',cursor+consumed)
                 try:
+                    observation={'kind':kind,'query':query,**{k:extra[k] for k in ('gl','hl') if k in extra}}
+                    self.coverage_stats['query_results'].append(observation)
                     self.record_discovery_query(f'{kind} gl={extra.get("gl","default")} hl={extra.get("hl","default")}: {query}')
                     response = await client.post(API,headers={'X-API-KEY':Config.SERPER_API_KEY},json=payload(query,extra),timeout=min(30,max(.1,deadline-time.monotonic())))
+                    observation['http']=response.status_code
                     if response.status_code!=200:
                         self.content_failures.append(f'Serper HTTP {response.status_code}; reservation retained')
                         if response.status_code in (401,402,403,429):
@@ -172,6 +190,7 @@ class SerperScraper(BaseScraper):
                             break
                         continue
                     rows,raw = parse_response(response.json(),query)
+                    observation.update(organic_rows=raw,retained_url_rows=len(rows),schema_valid=True)
                     transport_failures=0
                     self.fetched += raw
                     self.coverage_stats['raw_rows'] += raw
@@ -194,6 +213,7 @@ class SerperScraper(BaseScraper):
                         seen[identity] = item
                         results.append(item)
                 except (httpx.HTTPError,ValueError,TypeError) as exc:
+                    observation['error_type']=type(exc).__name__
                     self.content_failures.append('Serper '+type(exc).__name__+'; reservation retained')
                     log.warning('Serper request failed (%s); no automatic POST retry',type(exc).__name__)
                     transport_failures+=1

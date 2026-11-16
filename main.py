@@ -802,6 +802,7 @@ async def _run_search_cycle(*, force_discovery: bool = False, scheduled: bool = 
                             listing['verification'], listing['liveness'] = state, why
                             checked_drops.append((listing, info))
                     delivered_drops = await notifier.send_price_drops(checked_drops) if checked_drops else []
+                    total_sent += len(delivered_drops)
                     for listing, info in delivered_drops:
                         db.finish_price_drop(listing.get("url", ""))
                 except Exception as e:
@@ -904,7 +905,7 @@ async def handle_search(request):
         count = await run_search_cycle(force_discovery=True) if fresh else await run_search_cycle()
         return web.json_response({
             "status": "success",
-            "message": f"Search completed. Found {count} new listings.",
+            "message": f"Search completed. Delivered {count} listing/price-drop alerts.",
             "discovery_mode": "manual_fresh" if fresh else "guarded",
             "timestamp": datetime.now().isoformat()
         })

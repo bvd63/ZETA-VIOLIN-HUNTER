@@ -1,5 +1,6 @@
 """Offline regressions for auction deadline and identity recovery."""
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -52,6 +53,61 @@ class DeadlineTests(unittest.TestCase):
 
 
 class AsyncRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_inline_public_config_restores_both_search_businesses(self):
+        for business, site in (('GD', 1), ('AD', 2)):
+            calls=[]
+            config={'maestroUrl':'https://maestro.lqdt1.com','maestroApiKey':'public-fixture-key'}
+            def handler(request):
+                calls.append(request)
+                if request.url.host=='www.govdeals.com':
+                    return httpx.Response(200,text='<script>window.__APP_CONFIG__='+json.dumps(config)+';</script><script src="/main.new.js"></script>')
+                self.assertEqual(request.url.host,'maestro.lqdt1.com')
+                self.assertEqual(request.headers['x-api-key'],'public-fixture-key')
+                payload=json.loads(request.content)
+                self.assertEqual((payload['businessId'],payload['siteId']),(business,site))
+                self.assertEqual(payload['searchText'],'zeta')
+                return httpx.Response(200,json={'assetSearchResults':[ROW]})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+                api=GovDealsClient(http,business,site)
+                await api.initialize()
+                self.assertEqual(await api.search('zeta'),[ROW])
+            self.assertEqual(len(calls),2)  # No obsolete JS download or extra search.
+
+    async def test_inline_config_cannot_change_api_destination_or_inject_headers(self):
+        for changed in ({'maestroUrl':'https://example.org'}, {'maestroUrl':'http://maestro.lqdt1.com'},
+                        {'maestroUrl':'https://maestro.lqdt1.com.evil.example'},
+                        {'maestroUrl':'https://maestro.lqdt1.com/path'},
+                        {'maestroUrl':'https://user@maestro.lqdt1.com'},
+                        {'maestroApiKey':'key\r\nInjected: true'}, {'maestroApiKey':None}):
+            with self.subTest(changed=changed):
+                config={'maestroUrl':'https://maestro.lqdt1.com','maestroApiKey':'public-fixture',**changed}
+                def handler(request):
+                    self.assertEqual(request.url.host,'www.govdeals.com')
+                    return httpx.Response(200,text='<script>globalThis.__APP_CONFIG__='+json.dumps(config)+';</script>')
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+                    with self.assertRaisesRegex(ValueError,'configuration invalid'):
+                        await GovDealsClient(http).initialize()
+
+    async def test_invalid_inline_is_never_evaluated_or_silently_accepted(self):
+        for content in ('fetch("https://example.org")', '{broken}', 'null', '[]'):
+            def handler(request):
+                return httpx.Response(200,text='<script>window.__APP_CONFIG__='+content+';</script>')
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+                with self.assertRaisesRegex(ValueError,'configuration invalid'):
+                    await GovDealsClient(http).initialize()
+
+    async def test_original_public_script_configuration_still_works(self):
+        calls=[]
+        def handler(request):
+            calls.append(request.url.path)
+            text='<script src="/main.old.js"></script>' if request.url.path=='/' else 'maestroApiKey:"old-public-fixture"'
+            return httpx.Response(200,text=text)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            api=GovDealsClient(http)
+            await api.initialize()
+            self.assertEqual(api.headers['x-api-key'],'old-public-fixture')
+        self.assertEqual(calls,['/','/main.old.js'])
+
     async def test_api_mismatch_and_empty_responses_are_incomplete(self):
         for status, payload in ((204, None), (200, {}), (200, {'assetId': 43, 'accountId': 32464, 'assetStatusCd': 'SOLD'}),
                                 (200, {'assetId': 42, 'accountId': 9, 'assetStatusCd': 'SOLD'})):

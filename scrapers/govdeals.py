@@ -1,11 +1,12 @@
 """GovDeals public auction search, using the anonymous website API (no paid API)."""
 
 import html
+import json
 import logging
 import re
 from datetime import datetime, timezone
 from uuid import uuid4
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
@@ -73,6 +74,31 @@ class GovDealsClient:
         response = await self.client.get(HOME, headers=BROWSER_HEADERS)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "lxml")
+        key = None
+        # The November frontend moved its public configuration out of main.js.
+        # Read strict JSON only; never evaluate website JavaScript or follow a
+        # configuration-provided destination with the public API credential.
+        for inline in soup.find_all('script', src=False):
+            assignment = re.search(r'\b__APP_CONFIG__\s*=\s*', inline.get_text())
+            if not assignment:
+                continue
+            try:
+                config, _ = json.JSONDecoder().raw_decode(inline.get_text()[assignment.end():])
+                endpoint = urlsplit(config.get('maestroUrl', ''))
+                candidate = config.get('maestroApiKey')
+                if (endpoint.scheme != 'https' or endpoint.hostname != 'maestro.lqdt1.com'
+                        or endpoint.username or endpoint.password or endpoint.port not in (None, 443)
+                        or endpoint.path not in ('', '/') or endpoint.query or endpoint.fragment
+                        or not isinstance(candidate, str) or not re.fullmatch(r'[^\s]{1,512}', candidate)):
+                    raise ValueError('invalid public API configuration')
+                key = candidate
+                break
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError('GovDeals public page configuration invalid') from exc
+        if key:
+            self.headers = {**BROWSER_HEADERS, 'x-api-key':key, 'x-user-id':'-1',
+                            'x-api-correlation-id':str(uuid4())}
+            return
         script = soup.find("script", src=re.compile(r"(?:^|/)main\.[^/]+\.js$"))
         if not script:
             raise ValueError("GovDeals public frontend script not found")

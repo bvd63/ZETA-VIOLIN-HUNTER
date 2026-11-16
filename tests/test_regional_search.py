@@ -108,6 +108,8 @@ class RegionalTests(unittest.TestCase):
         self.assertEqual(len(calls),4); self.assertEqual(len(rows),1)
         self.assertEqual(rows[0]['description'],BODY)
         self.assertEqual(scraper.coverage_stats['valid_responses'],4)
+        self.assertEqual([x['organic_rows'] for x in scraper.coverage_stats['query_results']],[1]*4)
+        self.assertEqual([x['gl'] for x in scraper.coverage_stats['query_results']],['fr','fr','ca','ca'])
         self.assertTrue(all(r.headers['X-API-KEY']=='test-not-a-real-key' for r in calls))
         self.assertTrue(all('key=' not in str(r.url) for r in calls))
 
@@ -120,6 +122,22 @@ class RegionalTests(unittest.TestCase):
         original,_=GoogleScraper('','').plan_queries(42)
         self.assertEqual([json.loads(r.content)['q'] for r in calls[4:]],[q for q,_ in original])
         self.assertEqual(scraper.coverage_stats['google_backup_attempted'],len(original))
+
+    def test_manual_eight_query_cap_is_distinct_from_exhausted_credit(self):
+        def reply(request):
+            return httpx.Response(200,json={'searchParameters':{'q':json.loads(request.content)['q']},'organic':[]})
+        with patch('config.Config.SERPER_TOTAL_CREDITS',10000):
+            scraper=SerperScraper();scraper.auxiliary_work=True
+            async def go():
+                with patch('scrapers.serper.google_unavailable',return_value=True),patch.object(scraper,'make_client',side_effect=lambda **kw:httpx.AsyncClient(transport=httpx.MockTransport(reply),**kw)):
+                    return await scraper.search()
+            self.assertEqual(asyncio.run(go()),[])
+        self.assertEqual(scraper.coverage_stats['regional_attempted'],4)
+        self.assertEqual(scraper.coverage_stats['google_backup_attempted'],4)
+        refusal=scraper.coverage_stats['reservation_refusal']
+        self.assertEqual(refusal['reason'],'auxiliary_daily')
+        self.assertEqual(refusal['lifetime_reserved'],8)
+        self.assertIn('creditul gratuit nu este declarat epuizat',scraper.health_error())
 
     def test_unfunded_search_does_not_send_any_http_or_advance_matrix(self):
         _,rows,calls=self.run_scraper(lambda _:self.fail('No HTTP expected'),unavailable=True,reserve=False)

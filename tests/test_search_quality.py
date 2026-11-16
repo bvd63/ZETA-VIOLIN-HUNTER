@@ -1022,6 +1022,40 @@ class QueueFlowTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 db.close()
 
+    async def test_cycle_counts_only_accepted_price_drop_alerts(self):
+        from notifier import TelegramNotifier
+        item={'id':'price-count-regression','title':'Zeta Jazz Fusion JV5','price':'1600 USD',
+              'url':'https://reverb.com/item/987654321-fixture','description':'Used Zeta violin',
+              'source':'Reverb','platform':'Reverb'}
+        info={'old_price':'2000 USD','new_price':'1600 USD','drop_pct':20}
+        for recovered,accepted in ((False,True),(True,True),(False,False),(True,False)):
+            with self.subTest(recovered=recovered,accepted=accepted):
+                db=database.Database()
+                db.conn.execute("DELETE FROM pending_alerts WHERE url LIKE 'drop:%'");db.conn.commit()
+                if recovered:
+                    db.enqueue_price_drop(item,info)
+                db.close()
+                result={'name':'Fixture','new':[],'drops':[] if recovered else [(item,info)],
+                        'status':0,'raw':0,'duration':0,'details':{}}
+                send=AsyncMock(side_effect=lambda pairs:pairs if accepted else [])
+                with patch.object(TelegramNotifier,'send_price_drops',send), \
+                     patch.object(TelegramNotifier,'send_listings',AsyncMock()), \
+                     patch.object(TelegramNotifier,'send_no_changes',AsyncMock()), \
+                     patch('main.verify_offer',AsyncMock(return_value=('live','bound primary fixture'))), \
+                     patch('main.build_scrapers',return_value=[] if recovered else [SimpleNamespace()]), \
+                     patch('main._run_scraper_with_resilience',AsyncMock(return_value=result)), \
+                     patch('main.refresh_rates',AsyncMock()),patch('main.detect_egress',AsyncMock()), \
+                     patch('main._watchdog',AsyncMock()),patch('main.resource_tick',AsyncMock()), \
+                     patch('main._maybe_weekly_digest',AsyncMock()):
+                    count=await self.main.run_search_cycle()
+                self.assertEqual(count,int(accepted))
+                self.assertEqual(self.main.status_tracker.get_status()['last_cycle']['sent_to_telegram'],int(accepted))
+                db=database.Database()
+                try:
+                    self.assertEqual(bool(db.pending_price_drops()),not accepted)
+                finally:
+                    db.close()
+
     async def test_unknown_without_closed_evidence_keeps_existing_alert_route(self):
         item = {**sold_reverb(),'description':'Used Zeta electric violin; case included'}
         db = database.Database()

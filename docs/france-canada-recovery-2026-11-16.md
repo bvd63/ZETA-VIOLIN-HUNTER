@@ -1,5 +1,21 @@
 # Recuperare Franța/Canada și accesul la căutare
 
+## Probe de producție și regresii găsite la verificare
+
+Release 297c541 a trecut toate cele 33 de suite, CI 43866267789 și activarea Railway. Proprietarul a salvat Serper și a înlocuit tokenul Apify; deploymentul cu aceste variabile a trecut inclusiv verificarea autentificată a ambelor taskuri Apify. Cele trei endpointuri de cont au răspuns 200. Consumul observat este 1,023549 USD din cele 5 USD incluse pentru ciclul 5 noiembrie–4 decembrie; plafonul contului de 15 USD nu reprezintă credit gratuit.
+
+Tura auxiliară de la 12:35 UTC a executat 8 cereri Serper valide: toate cele 4 căutări regionale și primele 4 căutări ale planului Google. A primit 15 rânduri brute, 14 URL-uri distincte; 7 piste au rămas durabile pentru verificarea primară. Nu sunt 14 viori confirmate. Kijiji a executat 13 interogări native FR/EN. Google/Brave/Tavily/Exa au păstrat protecțiile turelor; zero apeluri noi la acestea nu înseamnă o nouă cercetare completă a tuturor motoarelor.
+
+Pilotul nativ Leboncoin a fost refuzat de rezerva financiară înainte de crearea vreunui job/Actor. Nu s-a cheltuit credit pentru pilot și sursa rămâne oprită până la validarea reală. Au fost identificate costuri istorice nereconciliate și rezervări incerte; acestea se investighează prin GET-uri autentificate, fără resetarea sau eliberarea presupusă a costurilor.
+
+Cele 30 de run-ID-uri reale din octombrie fără decontare răspund acum toate 404, deci păstrează rezervarea cumulată de 1,59 USD. Există și 8 POST-uri incerte din noiembrie fără run-ID, cu rezervă de 0,52 USD; nu sunt declarate gratuite sau șterse. Aceste rețineri conservatoare explică de ce soldul observat singur nu permite un pilot auxiliar. Nu a fost ocolită protecția și nu s-a repetat lansarea.
+
+Auditul a găsit o eroare separată în totalul turei 169: Telegram a acceptat alerta Reverb de scădere a prețului, dar `total_sent` nu includea această rută. Contorul adună acum numai scăderile returnate ca livrate de notifier; regresiile acoperă ruta nouă, reluarea din outbox și livrarea refuzată. Mesajul API vorbește despre alerte livrate, fără a prezenta scăderile de preț drept anunțuri nou descoperite. Serper distinge explicit limita auxiliară de 8/zi de limita totală a creditelor și înregistrează rezultatele fiecărei interogări; nicio cotă nu a fost mărită sau resetată.
+
+Aceeași tură a reprodus o schimbare nouă GovDeals/AllSurplus: configurația anonimă este acum în obiectul JSON `__APP_CONFIG__` al paginii, iar main.js are doar valori implicite goale. Parserul suplimentar citește JSON strict, verifică destinația fixă `https://maestro.lqdt1.com` și păstrează ruta JavaScript anterioară. Nu execută scripturi și nu exportă cheia publică. Proba reală a recuperat căutarea și detaliile cu identitate validă pentru ambele business-uri; cele 31 de rânduri ale controlului includ obiecte fără legătură cu viorile. Testele verifică noua schemă, fallbackul vechi, destinații/valori invalide și absența execuției JS. Activarea acestei ultime corecții și rularea completă ulterioară sunt probe separate.
+
+Prețul neobișnuit de 1,73 USD pentru Reverb 104223395 este chiar `price.amount` din API-ul primar, cu `amount_cents=173` și state=live; nu este o eroare de separator monetar. Acest lucru nu dovedește că prețul este intenționat de vânzător sau că oferta este sigură.
+
 Exemplu real: Leboncoin3269447854, „Violon Zeta 5 corde”,3500EUR, publicat14septembrie2026, citibil în Chrome pe16noiembrie. Filtrul exact acceptă titlul/descrierea; ID-ul nu exista în coada/istoricul/livrările actuale. Auditul și dovezile private sunt în outputs/verification-20261116. Nu se injectează linkul drept probă de descoperire.
 
 ## Modificări
