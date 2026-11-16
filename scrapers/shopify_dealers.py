@@ -42,8 +42,11 @@ class ShopifyDealersScraper(BaseScraper):
     name = "Violin dealers (Shopify)"
 
     async def search(self) -> list:
+        if not hasattr(self,'failures'):
+            self.reset_health()
         results = []
         seen_ids = set()
+        self.coverage_stats = {'collections':[], 'private_us_attempts':0}
 
         async with self.make_client(headers=HEADERS) as client:
             for label, base, country, collections, default_condition in STORES:
@@ -58,19 +61,45 @@ class ShopifyDealersScraper(BaseScraper):
                         if wait > 0:
                             await asyncio.sleep(wait)
                     last_request = loop.time()
+                    self.record_discovery_query(f'{label} {url} {params!r}')
                     return await client.get(url, params=params)
 
                 for handle in collections:
+                    previous_failures = len(self.failures)
+                    failed_http = False
+                    recovered = False
                     try:
                         resp = await fetch(f"{base}/collections/{handle}/products.json", {"limit": 250})
-                        if resp.status_code == 200:
-                            for p in resp.json().get("products", []) or []:
-                                p["_collection"] = handle
-                                products.append(p)
-                        else:
-                            log.warning(f"{label} collection '{handle}' HTTP {resp.status_code}")
+                        failed_http = resp.status_code != 200
+                        payload = resp.json() if resp.status_code==200 else None
+                        if not isinstance(payload,dict) or not isinstance(payload.get('products'),list):
+                            raise ValueError(f'collection HTTP {resp.status_code} or invalid products schema')
+                        rows = payload['products']
                     except Exception as e:
-                        log.warning(f"{label} collection '{handle}' error: {e}")
+                        # A transport exception has no response to count as OK.
+                        failed_http = failed_http or isinstance(e,Exception) and not isinstance(e,ValueError)
+                        from shopify_reader import fetch_collection
+                        try:
+                            def attempted():
+                                self.coverage_stats['private_us_attempts'] += 1
+                                self.record_discovery_query(f'{label} collection={handle} private US recovery')
+                            rows = await fetch_collection(base,handle,client=client,on_attempt=attempted)
+                            if rows is None:raise ValueError('private reader not configured')
+                            recovered = True
+                            if failed_http:
+                                del self.failures[previous_failures:]
+                                self.requests_recovered += 1
+                        except Exception as recovery:
+                            self.content_failures.append(f'{label} collection unverified: {type(recovery).__name__}')
+                            log.warning('%s collection %r unverified (%s / %s)',label,handle,type(e).__name__,type(recovery).__name__)
+                            continue
+                    self.coverage_stats['collections'].append({'store':label,'handle':handle,
+                        'route':'private US' if recovered else 'native','products':len(rows)})
+                    for p in rows:
+                        if not isinstance(p,dict):
+                            self.content_failures.append(f'{label} invalid product record')
+                            continue
+                        products.append({**p,'_collection':handle})
                 for term in market_queries(broad=True, limit=6):
                     try:
                         resp = await fetch(f"{base}/search/suggest.json", {
