@@ -1,0 +1,47 @@
+[
+  {
+    "id": "1582071036091525",
+    "itemUrl": "https://www.facebook.com/groups/StringedInstrumentsBuySellTrade/posts/3965231173726233/",
+    "facebookUrl": "https://www.facebook.com/marketplace/item/1582071036091525/",
+    "listingTitle": "Zeta Electric Violin",
+    "description": {
+      "text": "Custom Boyd Tinsley four string whith “guitar tuners” and wood grain finish."
+    },
+    "isHidden": false,
+    "isLive": true,
+    "isPending": false,
+    "isSold": true,
+    "condition": "Used - like new",
+    "listingPrice": {
+      "formatted_amount_zeros_stripped": "$1,200",
+      "amount_with_offset_in_currency": "120000",
+      "amount": "1200.00",
+      "currency": "USD"
+    },
+    "locationText": {
+      "text": "Berkeley, CA"
+    }
+  },
+  {
+    "id": "440821049942771",
+    "itemUrl": "https://www.facebook.com/groups/851278768270157/posts/2673943482670334/",
+    "facebookUrl": "https://www.facebook.com/marketplace/item/440821049942771/",
+    "listingTitle": "Vioara zeta jazz fusion originală jv 45",
+    "description": {
+      "text": "Vand vioara zeta jazz fusion originală jv 45. An fabricatie 1995 este cu placă mare. Pret 3650 euro."
+    },
+    "isHidden": false,
+    "isLive": true,
+    "isPending": false,
+    "isSold": false,
+    "listingPrice": {
+      "formatted_amount_zeros_stripped": "RON1",
+      "amount_with_offset_in_currency": "20",
+      "amount": "1.00",
+      "currency": "RON"
+    },
+    "locationText": {
+      "text": "Tomnatic, Timiș"
+    }
+  }
+]

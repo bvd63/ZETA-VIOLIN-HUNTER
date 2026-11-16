@@ -63,15 +63,29 @@ def normalize(row: dict) -> dict:
     """Accept only actual public Facebook item URLs; support both observed schemas."""
     if not isinstance(row, dict) or row.get("error"):
         return {}
-    raw_url = row.get("itemUrl") or row.get("listingUrl") or row.get('url') or ""
-    if not isinstance(raw_url, str):
+    # Official detail output can put the cross-post's GROUP URL in itemUrl
+    # and the actual Marketplace item in facebookUrl. Inspect all observed
+    # URL fields; a group/search URL is context, never an item identity.
+    # Conflicting individual IDs are withheld rather than picking a winner.
+    item_ids = set()
+    for field in ('itemUrl', 'listingUrl', 'facebookUrl', 'url'):
+        raw_url = row.get(field)
+        if not isinstance(raw_url, str):
+            continue
+        try:
+            parsed = urlsplit(raw_url)
+            match = ITEM.fullmatch(parsed.path)
+            if (parsed.scheme == 'https' and parsed.hostname in ('facebook.com','www.facebook.com','m.facebook.com')
+                    and not parsed.username and not parsed.password and parsed.port in (None,443) and match):
+                item_ids.add(match.group(1))
+        except ValueError:
+            continue
+    if len(item_ids) != 1:
         return {}
-    try:
-        parsed = urlsplit(raw_url)
-    except ValueError:
-        return {}
-    match = ITEM.fullmatch(parsed.path)
-    if parsed.scheme != "https" or parsed.hostname not in ("facebook.com", "www.facebook.com", "m.facebook.com") or not match:
+    item_id = next(iter(item_ids))
+    declared_id = row.get('id')
+    if declared_id is not None and (type(declared_id) not in (str,int)
+            or not str(declared_id).isdigit() or str(declared_id) != item_id):
         return {}
     title = _text(row.get("listingTitle") or row.get("marketplace_listing_title") or row.get('title'))
     if not title:
@@ -99,7 +113,6 @@ def normalize(row: dict) -> dict:
     image = (photo.get("photo_image_url") or raw_image.get("uri", "") or row.get('primary_listing_photo_url')
              or row.get('imageUrl') or row.get('image_url') or '')
     image = image if isinstance(image, str) else ""
-    item_id = match.group(1)
     return {
         "id": BaseScraper()._make_id("facebook_marketplace", item_id),
         "platform": "Facebook Marketplace", "title": title,

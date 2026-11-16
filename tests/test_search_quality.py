@@ -43,6 +43,40 @@ def sold_reverb(n=82035982):
 
 
 class QualityTests(unittest.TestCase):
+    def test_preamp_compatibility_is_not_an_instrument_sale(self):
+        from filters import classify
+        base={'url':'https://shop.com/products/9837089653041/emg-mxrp-5-internal-preamp-for-zeta-violins',
+              'description':'EMG MXRP-5 preamp designed for Zeta electric violins.', 'source':'search',
+              'brand':'EMG', 'model':'MXRP-5'}
+        accessories=(
+            'EMG MXRP-5 Internal Preamp for ZETA Violins',
+            'EMG MXRP=5 preamplifier for Zeta violin',
+            'Préamplificateur pour violon Zeta',
+            'Vorverstärker für Zeta Geige',
+            'Preamplificatore per violino Zeta',
+            'Preamplificador para violín Zeta',
+            'Voorversterker voor Zeta viool',
+        )
+        for title in accessories:
+            with self.subTest(accessory=title):
+                self.assertEqual(classify({**base,'title':title}),'noise')
+        instruments=(
+            'Zeta Jazz Fusion JV5 violin with EMG MXRP-5 internal preamp',
+            'Zeta JV45 with EMG internal preamp for Zeta violins',
+            'Zeta JLP5 onboard preamp for stage use',
+            'Zeta violon avec préamplificateur pour la scène',
+            'Zeta JV5 violin — onboard preamp for Zeta MIDI electronics',
+            'EMG internal preamp for ZETA violins + Zeta Jazz Fusion JV5 violin',
+            'Zeta Jazz Fusion, EMG internal preamp for Zeta violins',
+        )
+        for title in instruments:
+            with self.subTest(instrument=title):
+                self.assertEqual(classify({**violin(),'title':title,'condition':'Used'}),'')
+        # A badly named advert can still explicitly offer the whole instrument
+        # in its own full description; compatibility marketing alone cannot.
+        self.assertEqual(classify({**base,'title':accessories[0],
+            'description':'I am selling my complete Zeta JV5 violin with its original EMG preamp.'}), '')
+
     def setUp(self):
         with store() as conn:
             conn.execute('DELETE FROM provider_reservations')

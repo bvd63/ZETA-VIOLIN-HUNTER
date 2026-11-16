@@ -38,6 +38,40 @@ CASE, STRADOS_2001 = json.loads((Path(__file__).parent / "fixtures/facebook_2200
 
 
 class ApifyTests(unittest.TestCase):
+    def test_official_group_crosspost_retains_bound_marketplace_identity_and_sold(self):
+        rows=json.loads((Path(__file__).parent/'fixtures/facebook_group_crosspost_20261116.json').read_text())
+        sold,active=map(normalize,rows)
+        self.assertEqual(sold['url'],rows[0]['facebookUrl'])
+        self.assertTrue(sold['apify_is_sold'])
+        self.assertFalse(available(sold))
+        self.assertEqual(active['url'],rows[1]['facebookUrl'])
+        self.assertTrue(available(active))
+        self.assertIn('placă mare',active['description'])
+        self.assertEqual(classify(active),'')
+        for change in ({'id':'999'}, {'id':True}, {'id':'invalid'},
+                       {'itemUrl':'https://www.facebook.com/marketplace/item/999/'},
+                       {'listingUrl':'https://www.facebook.com/marketplace/item/999/'},
+                       {'facebookUrl':'https://user@www.facebook.com/marketplace/item/440821049942771/'},
+                       {'facebookUrl':'https://www.facebook.com:444/marketplace/item/440821049942771/'}):
+            with self.subTest(change=change):self.assertEqual(normalize({**rows[1],**change}),{})
+        # Group post ID and search URL must never become a Marketplace ID.
+        self.assertEqual(normalize({**rows[1],'facebookUrl':'https://www.facebook.com/marketplace/chicago/search/?query=zeta'}),{})
+
+    def test_crosspost_details_replay_in_same_reserved_batch_without_another_actor(self):
+        rows=json.loads((Path(__file__).parent/'fixtures/facebook_group_crosspost_20261116.json').read_text())
+        scraper=ApifyFacebookScraper();scraper.reset_health()
+        targets={r['facebookUrl'] for r in rows}
+        with store() as conn:
+            conn.execute("INSERT INTO apify_jobs(id,phase,run_id,period,cap,created,done) VALUES ('crosspost','details','existingRun','2026-11',20000,0,1)")
+            conn.executemany('INSERT INTO apify_batch_targets VALUES (?,?)',[('crosspost',u) for u in targets])
+            conn.commit()
+        self.assertEqual(scraper._consume('crosspost','details',rows),targets)
+        with store() as conn:
+            details=[json.loads(r[0]) for r in conn.execute('SELECT details FROM apify_items WHERE url IN (?,?)',tuple(targets))]
+            self.assertEqual(conn.execute("SELECT count(*) FROM apify_jobs WHERE id='crosspost'").fetchone()[0],1)
+        self.assertEqual(sum(available(d) for d in details),1)
+        self.assertEqual(sum(d['apify_is_sold'] is True for d in details),1)
+
     def test_operator_preview_cannot_reserve_scheduled_actor_work(self):
         import apify_preview
         from work_context import work_kind, spending_scope

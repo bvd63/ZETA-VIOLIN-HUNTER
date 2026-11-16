@@ -109,9 +109,14 @@ OTHER_PRODUCT_RX = _rx([
     "stroller", "pushchair", "pram", "bicycle", "mountain bike", "motorcycle", "motorbike",
 ])
 DESIGN_BRAND_RX = _rx(["studio zeta", "zeta studio"])
+PREAMP_TERMS = ["preamp", "preamplifier", "préampli", "preampli", "préamplificateur",
+                "preamplificateur", "vorverstärker", "preamplificatore",
+                "preamplificador", "voorversterker"]
+PREAMP_FOR_TITLE_RX = re.compile(_rx(PREAMP_TERMS).pattern +
+    r"[\s\-]+(?:for|pour|für|fur|per|para|voor)\b", re.I)
 ACCESSORY_CLAUSE_RX = _rx([
     "pickup", "bridge", "amplifier", "amp", "controller", "interface", "pedal",
-    "synthony", "bow", "case", "cover", "string set",
+    "synthony", "bow", "case", "cover", "string set", *PREAMP_TERMS,
 ])
 # Unambiguous pickup-object titles. Do not blacklist the word itself: complete
 # violins routinely advertise an original or replacement pickup in the title.
@@ -388,6 +393,22 @@ def has_noise(title: str, description: str = "", title_conclusive: bool = None,
     body is checked only for homonym noise, not for object-of-sale words."""
     if title_conclusive is None:
         title_conclusive = is_zeta_violin(title)
+    preamp = PREAMP_FOR_TITLE_RX.search(title)
+    if preamp and not is_zeta_violin(title[:preamp.start()]):
+        # "EMG internal preamp for ZETA violins" names its compatible
+        # instruments, not the object for sale. A complete instrument already
+        # identified before the preamp, or in an explicit sale clause in the
+        # primary description, remains eligible. Never blacklist 'preamp'.
+        instrument_sale = False
+        for entry in re.split(r"[,;\n]|(?<=[.!?])\s+", description):
+            clause = CASE_BUNDLE_RX.split(entry, maxsplit=1)[0]
+            if (re.search(r"\b(?:selling|for sale|verkaufe|vends|vendo|vând|vand|te koop)\b", clause, re.I)
+                    and is_zeta_violin(clause) and not ACCESSORY_CLAUSE_RX.search(clause)
+                    and not NOISE_RX.search(clause) and not INTENT_RX.search(clause)):
+                instrument_sale = True
+                break
+        if not instrument_sale:
+            return True
     if NOISE_RX.search(title) or NOISE_OBJECT_RX.search(title) or NOISE_TITLE_MEDIA_RX.search(title):
         return True
     if NOISE_TITLE_FORMAT_RX.search(unicodedata.normalize("NFKC", title)) or any(j in title for j in NOISE_TITLE_MEDIA_JP):

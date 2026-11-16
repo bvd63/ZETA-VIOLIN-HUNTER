@@ -1,5 +1,11 @@
 # Resurse și criterii de integrare
 
+## Actual official-Actor schema and compatibility-object correction —16November
+
+The natural22EET run supplied positive primary evidence: official Apify detail output can use itemUrl for a Facebook group cross-post and facebookUrl for the actual Marketplace item. Adopt the observed alias with strict URL/declaredID/expectedbatch binding and conflict rejection, preserving all negativeflags. Read/consume the existing completed run after rollout; no paid replacement or Actorchange is needed. The actual two rows include oneSOLD, which must remain withheld. The repository fixture omits the public contact number. This is a demonstrated parsing defect, not an Actor-access failure or evidence that both requested items lack details.
+
+The same natural audit caught a wrong preamp alert. Use the grammatical role of preamp-for compatibility and explicit full-instrument evidence, not a global preamp keyword blacklist. Included/onboard electronics, fullviolin bundles and primary-description instrument sales remain eligible. Exact delivered falsealert corrected and technicallyclosed without changing ownerack.95quality/32Apify regressions plus all39suites pass locally; CI/deploy and actual post-fix recovery/full-cycle acceptance must be documented separately.
+
 ## Colecțiile second-hand — transport privat verificat
 
 Probele limitate cu feedurile Atom ale celor2colecții au întors429, fără activare sau librărie nouă. Cererile JSON originale, executate anonim cu Bun în serviciulUS existent, au primit200cu produse valide: ElectricViolinShop1, StringWorks31. Se adoptă numai această diferență de transport demonstrată, ca rezervă după eșecul rutei native. Nu se adaugă magazine/termeni sau filtre de vechime; produse brute și marcă/eligibilitate sunt distincte. Protocolul privat acceptă doar2colecții enum, fără URL arbitrar, și păstrează controalele versiune/identitate/region/deadline/concurență/body și toate rutele anterioare. Registrul suplimentar de cereri este separat de Willhaben/Gumtree și de furnizorii plătiți;40zi/1240rolling,32aux/992rolling,8core protejate. Costul este calculul din serviciulRailway existent, fără abonament nou; limita nu reprezintă o factură măsurată. Teste de contract și integrare pentru matricea existentă, stocknegativ și eșecuri; acceptarea reală se documentează separat.
