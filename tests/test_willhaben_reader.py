@@ -87,11 +87,20 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
     async def test_redirect_and_uncertain_timeout_remain_charged(self):
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(302,headers={'Location':'https://evil.test'}))) as c:
             with self.assertRaises(ReaderUnavailable): await fetch(URL,c)
+        started=asyncio.Event()
         async def slow(request):
-            await asyncio.sleep(1)
-            return httpx.Response(200,json=dto())
-        async with httpx.AsyncClient(transport=httpx.MockTransport(slow)) as c:
-            with self.assertRaises(ReaderUnavailable): await fetch(URL,c,timeout=.02)
+            started.set()
+            await asyncio.Event().wait()
+        async def inline(function,*args):
+            return function(*args)
+        # Exercise a timed-out HTTP request AFTER its real durable reservation.
+        # Thread scheduling can exceed a 20ms deadline on a busy CI runner;
+        # that correctly starts no request and must not be charged by this test.
+        # Run the same reservation inline here, keeping the genuine timeout.
+        with patch('willhaben_reader.asyncio.to_thread',side_effect=inline):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(slow)) as c:
+                with self.assertRaises(ReaderUnavailable): await fetch(URL,c,timeout=.02)
+        self.assertTrue(started.is_set())
         self.assertEqual(used('willhaben_reader'),2)
 
     async def test_oversized_wire_and_cancellation_keep_reservation(self):
