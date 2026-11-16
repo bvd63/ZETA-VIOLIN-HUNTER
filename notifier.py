@@ -46,6 +46,13 @@ class TelegramNotifier:
                     log.warning("Telegram rate limited — delivery retained for retry in %ss", retry_after)
                     return {}
                 data = resp.json()
+                if (method == 'editMessageReplyMarkup' and resp.status_code == 400
+                        and data.get('error_code') == 400
+                        and str(data.get('description','')).lower().startswith('bad request: message is not modified:')):
+                    # Telegram explicitly confirms the requested button state
+                    # is already applied. This is not a failed alert delivery.
+                    log.info('Telegram button markup already current')
+                    return {'ok':True, 'result':True, 'unchanged':True}
                 if resp.status_code != 200 or data.get("ok") is not True:
                     log.error("Telegram %s rejected notification (HTTP %s, code %s)",
                               method, resp.status_code, data.get("error_code"))

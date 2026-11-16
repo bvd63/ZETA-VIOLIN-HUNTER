@@ -44,6 +44,25 @@ class NotificationsTests(unittest.IsolatedAsyncioTestCase):
         self.receipts.delivered(rid, 44, now=1000)
         return rid
 
+    async def test_only_exact_already_applied_button_edit_is_idempotent_success(self):
+        description='Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message'
+        for method,status,code,text,accepted in (
+                ('editMessageReplyMarkup',400,400,description,True),
+                ('sendMessage',400,400,description,False),
+                ('sendPhoto',400,400,description,False),
+                ('editMessageText',400,400,description,False),
+                ('editMessageReplyMarkup',500,400,description,False),
+                ('editMessageReplyMarkup',400,400,"Bad Request: message can't be edited",False),
+                ('editMessageReplyMarkup',400,400,'Bad Request: message to edit not found',False)):
+            with self.subTest(method=method,status=status,text=text), \
+                 patch('provider_state.read',return_value=0), \
+                 patch('httpx.AsyncClient.post',AsyncMock(return_value=httpx.Response(status,
+                     json={'ok':False,'error_code':code,'description':text}))) as post, \
+                 self.assertLogs('notifier',level='INFO' if accepted else 'ERROR') as logs:
+                self.assertEqual(await self.bot._post(method,{'message_id':45,'reply_markup':{'inline_keyboard':[]}}),accepted)
+                self.assertEqual(post.await_count,1)
+                if accepted:self.assertTrue(all('ERROR' not in line for line in logs.output))
+
     async def test_violin_is_audible_with_button_and_durable_receipt(self):
         self.bot._request = AsyncMock(return_value={"ok": True, "result": {"message_id": 45}})
         delivered = await self.bot.send_listings([self.listing])
