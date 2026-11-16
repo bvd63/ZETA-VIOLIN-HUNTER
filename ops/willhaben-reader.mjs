@@ -94,6 +94,10 @@ export function createHandler({upstreamFetch = globalThis.fetch, region = 'unkno
       if (request.method !== 'GET') return json({error:'method'},405);
       return json({version:VERSION, region},200);
     }
+    if (path === '/health-gumtree') {
+      if (request.method !== 'GET') return json({error:'method'},405);
+      return json({version:'gumtree-reader-v1', region},200);
+    }
     const gumtree = path === '/read-gumtree';
     if (path !== '/read' && !gumtree) return json({error:'not found'},404);
     if (request.method !== 'POST') return json({error:'method'},405);

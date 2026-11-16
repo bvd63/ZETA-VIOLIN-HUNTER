@@ -205,6 +205,7 @@ assert.equal(calls[0][1].redirect,'manual');assert.equal(calls[0][1].method,'GET
 assert.equal(Object.keys(calls[0][1].headers).some(x=>/authorization|cookie/i.test(x)),false);
 const h2=createHandler({region:'us-test',log:()=>{},upstreamFetch:async url=>{let r=new Response('ok');Object.defineProperty(r,'url',{value:url});return r;}});
 const data=await (await h2(gum())).json();assert.equal(data.version,'gumtree-reader-v1');assert.equal(data.location,null);
+assert.deepEqual(await (await h2(new Request('http://internal/health-gumtree'))).json(),{version:'gumtree-reader-v1',region:'us-test'});
 assert.equal((await h2(new Request('http://internal/read-gumtree',{method:'POST',body:JSON.stringify({kind:'search',keyword:'zeta'})}))).status,400);
 ''')
 
