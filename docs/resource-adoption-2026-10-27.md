@@ -1,5 +1,14 @@
 # Resurse și criterii de integrare
 
+## Extindere verificată pe 16 noiembrie — rute gratuite Leboncoin
+
+- [etienne-hd/lbc](https://github.com/etienne-hd/lbc), licență MIT, actualizat în noiembrie: au fost inspectate `src/lbc/mixin/search.py`, `session.py`, `ad.py` și constructorul payloadului din `utils.py`. Contract util: API public `finder/search`, descriere inclusă în căutare, categorie30, fără localitate/transport/an/strict-title obligatoriu; URL individual legat de ID. Nu s-au copiat fingerprinturi aleatorii, login sau cookies. Proba anonimă din Railway SG a primit403. Nicio dependență sau sursă funcțională nouă nu este declarată pe baza codului repo-ului.
+- [RSS-Bridge](https://github.com/RSS-Bridge/rss-bridge/blob/master/bridges/LeBonCoinBridge.php), Unlicense: au fost inspectate ruta publică API, corpul anunțului și constructorul filtrelor. Instanța publică oficială indicată de README, `rss-bridge.org/bridge01`, a primit o singură cerere zeta/categoria30/JSON și a răspuns500/HTML. Nu oferă acum o rezervă funcțională verificată și nu este introdusă în colectoare. Probele nu folosesc Actori sau credite de căutare și nu ocolesc protecția Apify.
+
+[Documentația Apify despre retenție](https://help.apify.com/en/articles/8857541-how-to-prevent-a-dataset-from-expiring) explică ștergerea rulărilor/stocărilor după retenție. Un404 nu este dovadă de cost zero. [Planul Free](https://docs.apify.com/account/subscriptions) nu permite cumpărarea separată a altor credite; este necesar un plan plătit. [Prețul public curent](https://apify.com/pricing) indică Starter19USD/lună, în timp ce unele articole mai vechi menționează29USD. Nu s-a făcut checkout/upgrade și nu se presupune un total cu taxe sau compatibilitatea cu bugetul total25USD.
+
+Corecție financiară independentă: o recitire a metadatelor unui cost deja cunoscut nu este o cheltuială nouă după citirea soldului. Timpul verificării și timpul observării unei sume noi/crescute sunt păstrate separat, atomic. Rezervele fără cost cunoscut rămân întregi. Acceptarea cere regresia care reproduce refuzul fals, migrare conservatoare, creșteri de cost, concurență și refuzul metadatelor cu alt run-ID; această schimbare nu dovedește acces nativ Leboncoin și nu autorizează un pilot refuzat.
+
 ## Recuperare Reverb prin contractul API oficial
 
 Proba actuală din serverul Railway Singapore a comparat aceeași cheie existentă pe același endpoint public: X-Auth-Token403, X-Auth-Token cu Content-Type HAL403, Bearer cu Content-Type HAL200/listă validă, anonim403. Prin urmare, schimbarea de autentificare are dovadă de acces util pentru acest cont și egress, fără a presupune că orice403 se rezolvă prin token sau IPamerican. Nu s-a schimbat sau exportat secretul și nu s-a cumpărat acces nou.

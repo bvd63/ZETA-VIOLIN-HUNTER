@@ -90,7 +90,7 @@ class ApifyTests(unittest.TestCase):
         self.config.start()
         self.addCleanup(self.config.stop)
         with store() as conn:
-            for table in ("apify_jobs", "apify_items", "apify_state", "apify_costs", 'apify_item_attempts', 'apify_batch_targets'):
+            for table in ("apify_jobs", "apify_items", "apify_state", "apify_costs", 'apify_cost_changes', 'apify_item_attempts', 'apify_batch_targets'):
                 conn.execute(f"DELETE FROM {table}")
             conn.commit()
 
@@ -186,6 +186,87 @@ class ApifyTests(unittest.TestCase):
         self.assertEqual(calls,['GET'])
         with store() as conn:
             self.assertEqual(spent_micro(conn, month),62000)
+
+    def test_rereading_unchanged_cost_does_not_consume_account_headroom_twice(self):
+        from datetime import datetime, timezone
+        from apify_costs import settle
+        from provider_state import write
+        now=datetime(2026,10,31,12,tzinfo=timezone.utc)
+        stamp=now.timestamp()
+        with store() as conn:
+            conn.execute('INSERT INTO apify_jobs VALUES (?,?,?,?,?,?,?)',
+                         ('done','discovery','unchangedRun','2026-10',65000,stamp-86400,1))
+            conn.commit()
+        with patch('apify_costs.time.time',return_value=stamp-120):
+            settle('unchangedRun',{'status':'SUCCEEDED','usageTotalUsd':.062})
+        # The account meter includes that completed, known cost already.
+        write('apify:account',{'usage_cycle':{'endAt':'2026-10-31T23:59:59Z'},
+              'included_monthly_usd':5,'usage_usd':4.8,'checked':stamp-60,'error':''})
+        with patch('apify_costs.time.time',return_value=stamp):
+            settle('unchangedRun',{'status':'SUCCEEDED','usageTotalUsd':.062})
+        scraper=ApifyFacebookScraper();scraper.reset_health();scraper.auxiliary_work=True
+        with patch('scrapers.apify_facebook.datetime') as clock,patch('scrapers.apify_facebook.time.time',return_value=stamp):
+            clock.now.return_value=now
+            clock.fromisoformat.side_effect=datetime.fromisoformat
+            # .20 remains: .17 scheduled reserve plus .02 requested fits.
+            self.assertTrue(scraper._reserve('details',.02),scraper.health_error())
+
+    def test_cost_change_clock_and_unknown_caps_survive_repeated_reads(self):
+        from apify_costs import settle,unmetered_micro,spent_micro
+        with store() as conn:
+            conn.executemany('INSERT INTO apify_jobs VALUES (?,?,?,?,?,?,?)',[
+                ('known','details','stableCost','2026-10',65000,50,1),
+                ('unknown','discovery',None,'2026-10',65000,50,0)])
+            conn.commit()
+        for clock,value in ((100,.062),(200,.062),(250,.01)):
+            with patch('apify_costs.time.time',return_value=clock):
+                settle('stableCost',{'status':'SUCCEEDED','usageTotalUsd':value})
+        with store() as conn:
+            self.assertEqual(conn.execute('SELECT cost,checked FROM apify_costs').fetchone(),(62000,250))
+            self.assertEqual(conn.execute('SELECT changed FROM apify_cost_changes').fetchone()[0],100)
+            self.assertEqual(unmetered_micro(conn,150),65000)  # Entire unknown cap remains.
+            self.assertEqual(spent_micro(conn,'2026-10'),127000)
+        with patch('apify_costs.time.time',return_value=300):
+            settle('stableCost',{'status':'SUCCEEDED','usageTotalUsd':.064})
+        with store() as conn:
+            self.assertEqual(unmetered_micro(conn,150),129000)  # Increased cost is protected.
+            self.assertEqual(unmetered_micro(conn,350),65000)
+
+    def test_legacy_cost_timestamp_migrates_without_releasing_unknown_jobs(self):
+        from apify_costs import settle,unmetered_micro
+        with store() as conn:
+            conn.executemany('INSERT INTO apify_jobs VALUES (?,?,?,?,?,?,?)',[
+                ('known','details','legacyCost','2026-10',20000,20,1),
+                ('unknown','discovery','unreadCost','2026-09',65000,20,1)])
+            conn.execute('INSERT INTO apify_costs VALUES (?,?,?,?)',('legacyCost',12400,'SUCCEEDED',100))
+            conn.commit()
+            self.assertEqual(unmetered_micro(conn,150),65000)
+        for stamp in (200,250):
+            with patch('apify_costs.time.time',return_value=stamp):
+                settle('legacyCost',{'status':'SUCCEEDED','usageTotalUsd':.0124})
+        with store() as conn:
+            self.assertEqual(unmetered_micro(conn,150),65000)
+            self.assertEqual(conn.execute('SELECT changed FROM apify_cost_changes').fetchone()[0],100)
+            self.assertEqual(conn.execute('SELECT cap FROM apify_jobs WHERE id=?',('known',)).fetchone()[0],20000)
+
+    def test_concurrent_metadata_reads_keep_one_cost_change_clock(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from apify_costs import settle
+        with patch('apify_costs.time.time',return_value=100):
+            self.assertTrue(settle('concurrentRun',{'status':'SUCCEEDED','usageTotalUsd':.062}))
+        with patch('apify_costs.time.time',return_value=200),ThreadPoolExecutor(max_workers=4) as pool:
+            self.assertTrue(all(pool.map(lambda _:settle('concurrentRun',{'status':'SUCCEEDED','usageTotalUsd':.062}),range(12))))
+        with store() as conn:
+            self.assertEqual(conn.execute('SELECT changed FROM apify_cost_changes').fetchone()[0],100)
+            self.assertEqual(conn.execute('SELECT cost,checked FROM apify_costs').fetchone(),(62000,200))
+
+    def test_foreign_run_metadata_cannot_change_billed_cost(self):
+        from apify_costs import settle
+        for identity in ('differentRun',True,123,None):
+            self.assertFalse(settle('expectedRun',{'id':identity,'status':'SUCCEEDED','usageTotalUsd':0}))
+        with store() as conn:
+            self.assertEqual(conn.execute('SELECT count(*) FROM apify_costs').fetchone()[0],0)
+            self.assertEqual(conn.execute('SELECT count(*) FROM apify_cost_changes').fetchone()[0],0)
 
     def test_both_real_schemas_and_strict_availability(self):
         fenton = normalize(FENTON)

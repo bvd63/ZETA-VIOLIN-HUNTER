@@ -23,7 +23,7 @@ from database import connect
 from filters import classify, has_zeta_signal, has_violin_word, has_primary_identity
 from keywords import STRING_VARIANTS, preference_matches
 from scrapers.base import BaseScraper
-from apify_costs import ensure_table, spent_micro, settle
+from apify_costs import ensure_table, spent_micro, settle, unmetered_micro
 
 log = logging.getLogger(__name__)
 API = "https://api.apify.com/v2"
@@ -253,10 +253,7 @@ class ApifyFacebookScraper(BaseScraper):
                     account_protected = math.ceil(account_days) * Config.RUNS_PER_DAY * pair_cap
                     # The cached account meter cannot include later/uncertain jobs.
                     # Preserve their full cap until authenticated settlement exists.
-                    since_meter = conn.execute('''SELECT coalesce(sum(coalesce(c.cost,j.cap)),0)
-                        FROM apify_jobs j LEFT JOIN apify_costs c ON c.run_id=j.run_id
-                        WHERE j.created>=? OR c.run_id IS NULL OR c.checked>=?''',
-                        (account.get('checked', 0), account.get('checked', 0))).fetchone()[0]
+                    since_meter = unmetered_micro(conn,account.get('checked',0))
                     account_safe = (not account.get('error') and account.get('checked', 0) > time.time() - 12 * 3600
                                     and _money(account['included_monthly_usd'] - account['usage_usd'])
                                     >= units + _money(account_protected) + since_meter)
